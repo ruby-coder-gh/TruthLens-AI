@@ -1,0 +1,5 @@
+This is a sample text document for testing the RAG pipeline.
+It contains multiple sentences to verify chunking works correctly.
+The quick brown fox jumps over the lazy dog.
+Python is a powerful programming language for AI and machine learning.
+RAG stands for Retrieval Augmented Generation.
