@@ -5,7 +5,9 @@ VeritasRAG — offline-first, enterprise-grade RAG platform. Users ask natural-l
 
 ## Decisions
 - **Stack:** Python 3.11 + FastAPI backend, React + Vite frontend, ChromaDB vector store, Ollama local LLM
-- **Frontend choice:** React + Vite over Streamlit (richer UX for source highlighting, explainability panel)
+- **Frontend choice:** React + Vite over Streamlit (richer UX for source highlighting, explainability panel) ✅
+- **Default LLM:** Llama 3.1 8B (primary), Phi-3 3B fallback for 8GB RAM ✅
+- **Vector store:** ChromaDB (simpler, free) ✅
 - **Orchestration:** LangChain + LangGraph for pipeline and CRAG loop
 - **No paid APIs:** Entirely free, open-source, offline-capable
 - **Auth:** JWT-based, basic user/admin roles (no SSO)
@@ -13,14 +15,13 @@ VeritasRAG — offline-first, enterprise-grade RAG platform. Users ask natural-l
 
 ## Task Board
 
-### Phase 0: Codebase Setup (CURRENT)
+### Phase 0: Codebase Setup
 - [x] Create CODEBASE.md
 - [x] Create PROJECT.md
-- [ ] Set up project scaffolding (dirs, configs, pyproject.toml)
-- [ ] Initialize gitignore, README skeleton
+- [x] User confirmed decisions (React + Vite, Llama 3.1, ChromaDB)
 
 ### Phase 1: Requirements — DONE (PRD approved)
-### Phase 2: Architecture — NEXT
+### Phase 2: Architecture (CURRENT)
 - [ ] Architecture review & user sign-off
 - [ ] API contract definition
 - [ ] Data model design
@@ -74,9 +75,7 @@ VeritasRAG — offline-first, enterprise-grade RAG platform. Users ask natural-l
 - [ ] README, setup guide, API docs
 
 ## Open Questions
-- React + Vite confirmed? (vs Streamlit) — PRD says "or" — decide
-- Which local LLM to default? Llama 3.1 8B vs Phi-3 3B for low-RAM fallback
-- ChromaDB or Qdrant? PRD says ChromaDB — confirm
+- _None — all resolved 2026-06-20_
 
 ## Artifacts
 - PRD: `prd (1).html`
