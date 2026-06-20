@@ -88,7 +88,8 @@ function getAuthHeaders(): Record<string, string> {
 async function parseErrorResponse(res: Response): Promise<ApiError> {
   try {
     const body = await res.json() as Record<string, unknown>;
-    const message = (body.detail as string) || (body.message as string) || `Request failed (${res.status})`;
+    const errorBody = body.error as Record<string, unknown> | undefined;
+    const message = (errorBody?.message as string) || (body.detail as string) || (body.message as string) || `Request failed (${res.status})`;
     return new ApiError(message, res.status, body.detail as string | undefined);
   } catch {
     return new ApiError(`Request failed (${res.status})`, res.status);

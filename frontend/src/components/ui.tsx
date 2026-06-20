@@ -22,48 +22,48 @@ import {
   ChevronDown,
 } from 'lucide-react';
 
-// ─── Motion Variants ───
+// ─── Motion Variants (WAAPI-safe, no opacity:0 in initial) ───
 export const fadeIn = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } },
-  exit: { opacity: 0, y: -10, transition: { duration: 0.2 } },
+  initial: { opacity: 0.99, y: 6 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
 };
 
 export const fadeInUp = {
-  initial: { opacity: 0, y: 24 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
+  initial: { opacity: 0.99, y: 12 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const } },
 };
 
 export const fadeInScale = {
-  initial: { opacity: 0, scale: 0.95 },
-  animate: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] } },
+  initial: { opacity: 0.99, scale: 0.98 },
+  animate: { opacity: 1, scale: 1, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] as const } },
 };
 
 export const slideInLeft = {
-  initial: { opacity: 0, x: -20 },
-  animate: { opacity: 1, x: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+  initial: { opacity: 0.99, x: -12 },
+  animate: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
 };
 
 export const slideInRight = {
-  initial: { opacity: 0, x: 20 },
-  animate: { opacity: 1, x: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+  initial: { opacity: 0.99, x: 12 },
+  animate: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
 };
 
 export const staggerContainer = {
   animate: {
-    transition: { staggerChildren: 0.05, delayChildren: 0.1 },
+    transition: { staggerChildren: 0.04, delayChildren: 0.05 },
   },
 };
 
 export const staggerItem = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+  initial: { opacity: 0.99, y: 8 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
 };
 
 export const pageTransition = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
-  exit: { opacity: 0, y: -12, transition: { duration: 0.2 } },
+  initial: { opacity: 0.99, y: 6 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -101,15 +101,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', loading = false, disabled, className, children, ...props }, ref) => {
     const isDisabled = disabled || loading;
     return (
-      <motion.button
+      <button
         ref={ref}
         disabled={isDisabled}
-        whileHover={!isDisabled ? { scale: 1.02 } : undefined}
-        whileTap={!isDisabled ? { scale: 0.98 } : undefined}
         className={clsx(
-          'inline-flex items-center justify-center rounded-xl font-medium transition-all duration-200',
+          'inline-flex items-center justify-center rounded-xl font-medium transition-all duration-150',
+          'hover:scale-[1.02] active:scale-[0.98]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-          'disabled:cursor-not-allowed disabled:opacity-50',
+          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100',
           variantStyles[variant],
           sizeStyles[size],
           className,
@@ -118,7 +117,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading && <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />}
         {children}
-      </motion.button>
+      </button>
     );
   },
 );
@@ -162,9 +161,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <AnimatePresence>
           {error && (
             <motion.p
-              initial={{ opacity: 0, y: -4 }}
+              initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
+              exit={{ opacity: 0.99, y: -4 }}
               className="flex items-center gap-1 text-xs text-red"
             >
               <AlertCircle size={12} /> {error}
@@ -208,9 +207,9 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
         <AnimatePresence>
           {error && (
             <motion.p
-              initial={{ opacity: 0, y: -4 }}
+              initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
+              exit={{ opacity: 0.99, y: -4 }}
               className="flex items-center gap-1 text-xs text-red"
             >
               <AlertCircle size={12} /> {error}
@@ -264,9 +263,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         <AnimatePresence>
           {error && (
             <motion.p
-              initial={{ opacity: 0, y: -4 }}
+              initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
+              exit={{ opacity: 0.99, y: -4 }}
               className="flex items-center gap-1 text-xs text-red"
             >
               <AlertCircle size={12} /> {error}
@@ -291,15 +290,13 @@ interface CardProps {
 }
 
 export function Card({ children, className, hover = false, onClick }: CardProps) {
-  const Component = onClick ? motion.button : motion.div;
+  const Component = onClick ? 'button' : 'div';
   return (
     <Component
       onClick={onClick}
-      whileHover={hover ? { y: -3, scale: 1.01 } : undefined}
-      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       className={clsx(
-        'glass rounded-2xl p-5 lg:p-6',
-        hover && 'glass-hover cursor-pointer',
+        'glass rounded-2xl p-5 lg:p-6 transition-all duration-200',
+        hover && 'hover:-translate-y-1 hover:scale-[1.01] hover:shadow-lg hover:shadow-primary/5 cursor-pointer',
         onClick && 'w-full text-left',
         className,
       )}
@@ -362,9 +359,9 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          exit={{ opacity: 0.99 }}
           transition={{ duration: 0.2 }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
         >
@@ -373,17 +370,17 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             className="absolute inset-0 bg-black/60 backdrop-blur-md"
             onClick={onClose}
             aria-hidden="true"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0.99 }}
           />
 
           {/* Panel */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: 20 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            initial={{ opacity: 0.99 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             className={clsx(
               'relative z-10 w-full max-w-lg glass rounded-2xl p-6 shadow-2xl shadow-black/40',
               'border border-glass-border',
@@ -396,16 +393,14 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             {title && (
               <div className="mb-5 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-text">{title}</h2>
-                <motion.button
+                <button
                   type="button"
                   onClick={onClose}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-card-2 hover:text-text"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-all duration-150 hover:scale-110 hover:bg-card-2 hover:text-text active:scale-90"
                   aria-label="Close modal"
                 >
                   <X size={18} />
-                </motion.button>
+                </button>
               </div>
             )}
             {children}
@@ -477,10 +472,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           {toasts.map((toast) => (
             <motion.div
               key={toast.id}
-              initial={{ opacity: 0, x: 80, scale: 0.9 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: 80, scale: 0.9 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+              initial={{ opacity: 0.99, x: 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 40 }}
+              transition={{ duration: 0.2 }}
               className={clsx(
                 'flex items-start gap-3 glass rounded-xl p-4 shadow-xl border-2 border-transparent',
                 toastBorder[toast.type],
@@ -518,25 +513,16 @@ interface EmptyStateProps {
 
 export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className={clsx('flex flex-col items-center justify-center py-16 text-center', className)}
-    >
+    <div className={clsx('flex flex-col items-center justify-center py-16 text-center', className)}>
       {icon && (
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: 'spring', damping: 15, stiffness: 200 }}
-          className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass text-text-dim"
-        >
+        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass text-text-dim animate-fadeInScale">
           {icon}
-        </motion.div>
+        </div>
       )}
       <h3 className="text-xl font-semibold text-text">{title}</h3>
       {description && <p className="mt-2 max-w-sm text-sm text-text-muted">{description}</p>}
-      {action && <motion.div className="mt-6" whileHover={{ scale: 1.05 }}>{action}</motion.div>}
-    </motion.div>
+      {action && <div className="mt-6 hover:scale-105 transition-transform duration-150">{action}</div>}
+    </div>
   );
 }
 
@@ -552,19 +538,10 @@ interface LoadingSpinnerProps {
 
 export function LoadingSpinner({ size = 24, text, className }: LoadingSpinnerProps) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className={clsx('flex flex-col items-center justify-center gap-4 py-16', className)}
-    >
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}
-      >
-        <Loader2 size={size} className="text-primary" />
-      </motion.div>
+    <div className={clsx('flex flex-col items-center justify-center gap-4 py-16', className)}>
+      <Loader2 size={size} className="text-primary animate-spin" />
       {text && <p className="text-sm text-text-muted animate-pulse">{text}</p>}
-    </motion.div>
+    </div>
   );
 }
 
@@ -585,7 +562,7 @@ export function Skeleton({ className, height = 16, width = '100%', count = 1 }: 
       {Array.from({ length: count }).map((_, i) => (
         <motion.div
           key={i}
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
           transition={{ delay: i * 0.05 }}
           className={clsx('shimmer rounded-xl', className)}
@@ -631,11 +608,9 @@ export function ProgressBar({ value, className, size = 'md', label }: ProgressBa
         aria-valuemin={0}
         aria-valuemax={100}
       >
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${clamped}%` }}
-          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          className="h-full rounded-full bg-gradient-to-r from-primary via-accent to-accent-2 animate-gradient"
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-primary via-accent to-accent-2 animate-gradient transition-all duration-700 ease-out"
+          style={{ width: `${clamped}%` }}
         />
       </div>
     </div>
@@ -671,10 +646,9 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(tab.id)}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
             className={clsx(
-              'relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+              'relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150',
+              'hover:scale-[1.02] active:scale-[0.98]',
               isActive ? 'text-primary-soft' : 'text-text-muted hover:text-text',
             )}
           >

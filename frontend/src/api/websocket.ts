@@ -97,8 +97,8 @@ export class QueryWebSocket {
     }
   }
 
-  private handleMessage(data: WSMessageData): void {
-    switch (data.type) {
+  private handleMessage(msg: WSMessageData): void {
+    switch (msg.type) {
       case 'auth_success':
         // Auth confirmed — now send the query
         this.send({
@@ -109,52 +109,65 @@ export class QueryWebSocket {
         });
         break;
 
-      case 'token':
-        this.callbacks.onToken?.(data.content);
+      case 'token': {
+        const d = msg as { type: 'token'; content: string };
+        this.callbacks.onToken?.(d.content);
         break;
+      }
 
       case 'source': {
+        const d = msg as { type: 'source'; chunk_id: string; document_id: string; excerpt: string; score: number; document_name?: string; relevance_score?: number; rerank_score?: number; page_number?: number };
         const source: Source = {
-          chunk_id: data.chunk_id,
-          document_id: data.document_id,
-          excerpt: data.excerpt,
-          relevance_score: data.relevance_score ?? data.score ?? 0,
-          document_name: data.document_name,
-          rerank_score: data.rerank_score,
-          page_number: data.page_number,
+          chunk_id: d.chunk_id,
+          document_id: d.document_id,
+          excerpt: d.excerpt,
+          relevance_score: d.relevance_score ?? d.score ?? 0,
+          document_name: d.document_name,
+          rerank_score: d.rerank_score,
+          page_number: d.page_number,
         };
         this.callbacks.onSource?.(source);
         break;
       }
 
-      case 'guardrail':
+      case 'guardrail': {
+        const d = msg as { type: 'guardrail'; passed: boolean; score: number; details: string };
         this.callbacks.onGuardrail?.({
-          passed: data.passed,
-          score: data.score,
-          details: data.details,
+          passed: d.passed,
+          score: d.score,
+          details: d.details,
         });
         break;
+      }
 
-      case 'trust_score':
-        this.callbacks.onTrustScore?.(data.score, data.components);
+      case 'trust_score': {
+        const d = msg as { type: 'trust_score'; score: number; components: Record<string, number> };
+        this.callbacks.onTrustScore?.(d.score, d.components);
         break;
+      }
 
-      case 'complete':
+      case 'complete': {
+        const d = msg as { type: 'complete'; query_id: string; latency_ms: number; model_used: string; token_count: number };
         this.callbacks.onComplete?.({
-          query_id: data.query_id,
-          latency_ms: data.latency_ms,
-          model_used: data.model_used,
-          token_count: data.token_count,
+          query_id: d.query_id,
+          latency_ms: d.latency_ms,
+          model_used: d.model_used,
+          token_count: d.token_count,
         });
         break;
+      }
 
-      case 'error':
-        this.callbacks.onError?.(data.code, data.message);
+      case 'error': {
+        const d = msg as { type: 'error'; code: string; message: string };
+        this.callbacks.onError?.(d.code, d.message);
         break;
+      }
 
-      case 'progress':
-        this.callbacks.onProgress?.(data.phase, data.progress);
+      case 'progress': {
+        const d = msg as { type: 'progress'; phase: string; progress: number };
+        this.callbacks.onProgress?.(d.phase, d.progress);
         break;
+      }
 
       default:
         // Unknown message type — silently ignore

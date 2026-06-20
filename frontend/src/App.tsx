@@ -1,6 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './components/ui'
 import Layout from './components/Layout'
@@ -57,41 +56,38 @@ function AdminRoute({ children }: { children: ReactNode }) {
 }
 
 function AppRoutes() {
-  const location = useLocation()
   return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        {/* Public routes */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
 
-        {/* Protected routes with layout */}
+      {/* Protected routes with layout */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
+      >
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
+        <Route path="/workspaces/:id/chat" element={<ChatPage />} />
+        <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
         <Route
+          path="/admin"
           element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
           }
-        >
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-          <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
-          <Route path="/workspaces/:id/chat" element={<ChatPage />} />
-          <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
-          <Route
-            path="/admin"
-            element={
-              <AdminRoute>
-                <AdminDashboard />
-              </AdminRoute>
-            }
-          />
-        </Route>
+        />
+      </Route>
 
-        {/* Default redirect */}
-        <Route path="/" element={<Navigate to="/workspaces" replace />} />
-        <Route path="*" element={<Navigate to="/workspaces" replace />} />
-      </Routes>
-    </AnimatePresence>
+      {/* Default redirect */}
+      <Route path="/" element={<Navigate to="/workspaces" replace />} />
+      <Route path="*" element={<Navigate to="/workspaces" replace />} />
+    </Routes>
   )
 }
 

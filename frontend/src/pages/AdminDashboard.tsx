@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   LineChart,
   Line,
@@ -42,6 +43,11 @@ import {
   Skeleton,
   EmptyState,
   useToast,
+  staggerContainer,
+  staggerItem,
+  fadeIn,
+  pageTransition,
+  fadeInScale,
 } from '../components/ui';
 import { adminApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -156,8 +162,13 @@ function countUp(end: number, duration = 1200): number {
 function AccessDenied() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="flex flex-col items-center text-center max-w-md">
-        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-red/10 border border-red/20">
+      <motion.div
+        className="flex flex-col items-center text-center max-w-md"
+        variants={fadeInScale}
+        initial="initial"
+        animate="animate"
+      >
+        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass border border-red/20">
           <Lock size={36} className="text-red" />
         </div>
         <h2 className="text-2xl font-bold text-text">Access Denied</h2>
@@ -166,7 +177,7 @@ function AccessDenied() {
           administrators can access the dashboard.
         </p>
         <Badge color="red" className="mt-4">Admin only</Badge>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -188,11 +199,14 @@ function StatCard({
   const animated = countUp(value);
 
   return (
-    <div
+    <motion.div
+      variants={staggerItem}
       className={`relative overflow-hidden rounded-xl border border-border/60 p-5 lg:p-6 ${gradient}`}
     >
-      <div className="flex items-start justify-between">
-        <div className="z-10">
+      {/* Ambient glow */}
+      <div className="pointer-events-none absolute -inset-1 bg-white/[0.04] blur-2xl" />
+      <div className="relative z-10 flex items-start justify-between">
+        <div>
           <p className="text-xs font-medium uppercase tracking-wider text-white/70">
             {label}
           </p>
@@ -221,9 +235,10 @@ function StatCard({
           {icon}
         </div>
       </div>
-      {/* Decorative circle */}
-      <div className="absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/5" />
-    </div>
+      {/* Decorative circles */}
+      <div className="pointer-events-none absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/5" />
+      <div className="pointer-events-none absolute -top-8 -left-8 h-16 w-16 rounded-full bg-white/[0.03]" />
+    </motion.div>
   );
 }
 
@@ -240,17 +255,19 @@ function SecondaryStatCard({
   children?: React.ReactNode;
 }) {
   return (
-    <Card className="flex items-center gap-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-card-2 text-primary-soft">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-text-muted truncate">{label}</p>
-        {children ?? (
-          <p className="text-xl font-bold text-text tabular-nums">{value}</p>
-        )}
-      </div>
-    </Card>
+    <motion.div variants={staggerItem}>
+      <Card className="flex items-center gap-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-text-muted truncate">{label}</p>
+          {children ?? (
+            <p className="text-xl font-bold text-text tabular-nums">{value}</p>
+          )}
+        </div>
+      </Card>
+    </motion.div>
   );
 }
 
@@ -290,13 +307,18 @@ function StarRating({ rating, max = 5 }: { rating: number; max?: number }) {
 /** Loading skeleton grid */
 function LoadingSkeleton() {
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <motion.div
+      className="space-y-6"
+      variants={pageTransition}
+      initial="initial"
+      animate="animate"
+    >
       {/* Overview skeleton */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-xl border border-border bg-card p-5 lg:p-6"
+            className="rounded-xl border border-border glass p-5 lg:p-6"
           >
             <Skeleton height={14} width="50%" className="mb-3" />
             <Skeleton height={36} width="60%" className="mb-2" />
@@ -309,7 +331,7 @@ function LoadingSkeleton() {
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-xl border border-border bg-card p-5 lg:p-6"
+            className="rounded-xl border border-border glass p-5 lg:p-6"
           >
             <Skeleton height={14} width="40%" className="mb-2" />
             <Skeleton height={24} width="30%" />
@@ -321,14 +343,14 @@ function LoadingSkeleton() {
         {Array.from({ length: 2 }).map((_, i) => (
           <div
             key={i}
-            className="rounded-xl border border-border bg-card p-5 lg:p-6"
+            className="rounded-xl border border-border glass p-5 lg:p-6"
           >
             <Skeleton height={20} width="40%" className="mb-4" />
             <Skeleton height={200} width="100%" />
           </div>
         ))}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -341,11 +363,14 @@ function ErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div
-      className="flex flex-col items-center justify-center py-20 text-center animate-fadeIn"
+    <motion.div
+      className="flex flex-col items-center justify-center py-20 text-center"
+      variants={fadeIn}
+      initial="initial"
+      animate="animate"
       role="alert"
     >
-      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red/15 text-red">
+      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full glass text-red">
         <AlertTriangle size={28} />
       </div>
       <h3 className="text-lg font-semibold text-text">Failed to load dashboard</h3>
@@ -354,89 +379,100 @@ function ErrorBanner({
         <RefreshCw size={16} />
         Try again
       </Button>
-    </div>
+    </motion.div>
   );
 }
 
 /** Charts section with mock data overlay */
 function ChartsSection() {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <motion.div
+      className="grid gap-4 lg:grid-cols-2"
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+    >
       {/* Line chart */}
-      <Card className="relative">
-        <div className="mb-4 flex items-center gap-2">
-          <Activity size={18} className="text-primary-soft" />
-          <h3 className="text-sm font-semibold text-text">Queries over time</h3>
-        </div>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={queriesOverTimeData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-              <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
-              <YAxis stroke="#6b7888" fontSize={12} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1b2230',
-                  border: '1px solid #2b3548',
-                  borderRadius: '8px',
-                  color: '#e6edf3',
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="queries"
-                stroke="#7c5cff"
-                strokeWidth={2}
-                dot={{ fill: '#7c5cff', r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
-          <Badge color="gray" className="px-3 py-1 text-xs">
-            Coming soon with real data
-          </Badge>
-        </div>
-      </Card>
+      <motion.div variants={staggerItem}>
+        <Card className="relative">
+          <div className="mb-4 flex items-center gap-2">
+            <Activity size={18} className="text-primary-soft" />
+            <h3 className="text-sm font-semibold text-text">Queries over time</h3>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={queriesOverTimeData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
+                <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
+                <YAxis stroke="#6b7888" fontSize={12} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(100, 120, 170, 0.15)',
+                    borderRadius: '8px',
+                    color: '#e6edf3',
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="queries"
+                  stroke="#7c5cff"
+                  strokeWidth={2}
+                  dot={{ fill: '#7c5cff', r: 4 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
+            <Badge color="gray" className="px-3 py-1 text-xs">
+              Coming soon with real data
+            </Badge>
+          </div>
+        </Card>
+      </motion.div>
 
       {/* Bar chart */}
-      <Card className="relative">
-        <div className="mb-4 flex items-center gap-2">
-          <BarChart3 size={18} className="text-accent" />
-          <h3 className="text-sm font-semibold text-text">
-            Trust score distribution
-          </h3>
-        </div>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trustScoreDistributionData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-              <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
-              <YAxis stroke="#6b7888" fontSize={12} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1b2230',
-                  border: '1px solid #2b3548',
-                  borderRadius: '8px',
-                  color: '#e6edf3',
-                }}
-              />
-              <Bar
-                dataKey="count"
-                fill="#2dd4bf"
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
-          <Badge color="gray" className="px-3 py-1 text-xs">
-            Coming soon with real data
-          </Badge>
-        </div>
-      </Card>
-    </div>
+      <motion.div variants={staggerItem}>
+        <Card className="relative">
+          <div className="mb-4 flex items-center gap-2">
+            <BarChart3 size={18} className="text-accent" />
+            <h3 className="text-sm font-semibold text-text">
+              Trust score distribution
+            </h3>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trustScoreDistributionData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
+                <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
+                <YAxis stroke="#6b7888" fontSize={12} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(100, 120, 170, 0.15)',
+                    borderRadius: '8px',
+                    color: '#e6edf3',
+                  }}
+                />
+                <Bar
+                  dataKey="count"
+                  fill="#2dd4bf"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
+            <Badge color="gray" className="px-3 py-1 text-xs">
+              Coming soon with real data
+            </Badge>
+          </div>
+        </Card>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -474,43 +510,63 @@ function AuditLogsTab({
 
   if (isLoading) {
     return (
-      <div className="py-8">
+      <motion.div
+        className="py-8"
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
         <LoadingSpinner text="Loading audit logs..." />
-      </div>
+      </motion.div>
     );
   }
 
   if (isError) {
     return (
-      <div className="flex flex-col items-center py-12 text-center">
+      <motion.div
+        className="flex flex-col items-center py-12 text-center"
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
         <AlertTriangle size={24} className="text-red mb-3" />
         <p className="text-sm text-text-muted">{errorMessage}</p>
         <Button variant="secondary" size="sm" className="mt-4" onClick={onRetry}>
           <RefreshCw size={14} />
           Retry
         </Button>
-      </div>
+      </motion.div>
     );
   }
 
   if (logs.length === 0) {
     return (
-      <EmptyState
-        icon={<Search size={24} />}
-        title="No audit logs found"
-        description={
-          actionFilter
-            ? `No logs with action "${actionFilter}". Try a different filter.`
-            : 'No audit logs recorded yet.'
-        }
-      />
+      <motion.div
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
+        <EmptyState
+          icon={<Search size={24} />}
+          title="No audit logs found"
+          description={
+            actionFilter
+              ? `No logs with action "${actionFilter}". Try a different filter.`
+              : 'No audit logs recorded yet.'
+          }
+        />
+      </motion.div>
     );
   }
 
   return (
-    <div>
+    <motion.div
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+    >
       {/* Filter row */}
-      <div className="mb-4 flex items-center gap-3">
+      <motion.div className="mb-4 flex items-center gap-3" variants={staggerItem}>
         <div className="relative">
           <Filter
             size={16}
@@ -522,7 +578,7 @@ function AuditLogsTab({
               onActionFilterChange(e.target.value);
               onPageChange(1);
             }}
-            className="w-44 appearance-none rounded-lg border border-border bg-bg-soft px-3 py-2 pl-9 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="w-44 appearance-none rounded-lg border border-border bg-bg-soft/80 backdrop-blur-sm px-3 py-2 pl-9 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
             aria-label="Filter by action type"
           >
             {ACTION_FILTERS.map((opt) => (
@@ -539,13 +595,16 @@ function AuditLogsTab({
         <p className="text-xs text-text-muted">
           {total} log{total !== 1 ? 's' : ''}
         </p>
-      </div>
+      </motion.div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <motion.div
+        className="overflow-x-auto rounded-lg border border-border glass"
+        variants={staggerItem}
+      >
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-border bg-card-2">
+            <tr className="border-b border-border bg-card-2/80">
               <th className="px-4 py-3 font-medium text-text-muted w-10" />
               <th className="px-4 py-3 font-medium text-text-muted">Timestamp</th>
               <th className="px-4 py-3 font-medium text-text-muted">User ID</th>
@@ -555,12 +614,16 @@ function AuditLogsTab({
             </tr>
           </thead>
           <tbody>
-            {logs.map((entry) => {
+            {logs.map((entry, idx) => {
               const isExpanded = expandedId === entry.id;
               return (
-                <tr
+                <motion.tr
                   key={entry.id}
+                  variants={staggerItem}
                   className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
+                  initial="initial"
+                  animate="animate"
+                  custom={idx}
                 >
                   <td className="px-4 py-3">
                     <button
@@ -615,35 +678,47 @@ function AuditLogsTab({
                       ? JSON.stringify(entry.details).slice(0, 60)
                       : '—'}
                   </td>
-                </tr>
+                </motion.tr>
               );
             })}
           </tbody>
         </table>
-      </div>
+      </motion.div>
 
       {/* Expanded detail row — rendered outside table but follows last entry */}
-      {expandedId && (() => {
-        const entry = logs.find((e) => e.id === expandedId);
-        if (!entry?.details) return null;
-        return (
-          <div className="mt-2 rounded-lg border border-primary/20 bg-card-2 p-4 animate-fadeIn">
-            <div className="mb-2 flex items-center gap-2">
-              <Shield size={14} className="text-primary-soft" />
-              <span className="text-xs font-medium text-text-muted">
-                Full details
-              </span>
-            </div>
-            <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
-              {JSON.stringify(entry.details, null, 2)}
-            </pre>
-          </div>
-        );
-      })()}
+      <AnimatePresence>
+        {expandedId && (() => {
+          const entry = logs.find((e) => e.id === expandedId);
+          if (!entry?.details) return null;
+          return (
+            <motion.div
+              key="expanded-detail"
+              className="mt-2 rounded-lg border border-primary/20 glass p-4"
+              variants={fadeInScale}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <Shield size={14} className="text-primary-soft" />
+                <span className="text-xs font-medium text-text-muted">
+                  Full details
+                </span>
+              </div>
+              <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
+                {JSON.stringify(entry.details, null, 2)}
+              </pre>
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
+        <motion.div
+          className="mt-4 flex items-center justify-between"
+          variants={staggerItem}
+        >
           <p className="text-xs text-text-muted">
             Page {page} of {totalPages}
           </p>
@@ -665,9 +740,9 @@ function AuditLogsTab({
               Next
             </Button>
           </div>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -691,38 +766,54 @@ function EvaluationTab({
 }) {
   if (isLoading) {
     return (
-      <div className="py-8">
+      <motion.div
+        className="py-8"
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
         <LoadingSpinner text="Loading evaluation metrics..." />
-      </div>
+      </motion.div>
     );
   }
 
   if (isError) {
     return (
-      <div className="flex flex-col items-center py-12 text-center">
+      <motion.div
+        className="flex flex-col items-center py-12 text-center"
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
         <AlertTriangle size={24} className="text-red mb-3" />
         <p className="text-sm text-text-muted">{errorMessage}</p>
         <Button variant="secondary" size="sm" className="mt-4" onClick={onRetry}>
           <RefreshCw size={14} />
           Retry
         </Button>
-      </div>
+      </motion.div>
     );
   }
 
   if (!metrics) {
     return (
-      <EmptyState
-        icon={<BarChart3 size={24} />}
-        title="No evaluation data"
-        description="Run an evaluation to see RAGAS metrics for your system."
-        action={
-          <Button onClick={onRunEvaluation} loading={isRunning}>
-            <Play size={16} />
-            Run Evaluation
-          </Button>
-        }
-      />
+      <motion.div
+        variants={fadeIn}
+        initial="initial"
+        animate="animate"
+      >
+        <EmptyState
+          icon={<BarChart3 size={24} />}
+          title="No evaluation data"
+          description="Run an evaluation to see RAGAS metrics for your system."
+          action={
+            <Button onClick={onRunEvaluation} loading={isRunning}>
+              <Play size={16} />
+              Run Evaluation
+            </Button>
+          }
+        />
+      </motion.div>
     );
   }
 
@@ -734,9 +825,14 @@ function EvaluationTab({
   ];
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      className="space-y-6"
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <motion.div className="flex items-center justify-between" variants={staggerItem}>
         <div>
           <h4 className="text-sm font-semibold text-text">RAGAS Evaluation Metrics</h4>
           {metrics.updated_at && (
@@ -755,52 +851,72 @@ function EvaluationTab({
           <Play size={14} />
           Run Evaluation
         </Button>
-      </div>
+      </motion.div>
 
       {/* Score cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         {scoreEntries.map((entry) => {
           const pct = Math.round(entry.value * 100);
           return (
-            <Card key={entry.key}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-text">
-                  {entry.label}
-                </span>
-                <span
-                  className="text-lg font-bold tabular-nums"
-                  style={{ color: evalScoreColor(entry.value) }}
-                >
-                  {pct}%
-                </span>
-              </div>
-              {/* Custom progress bar */}
-              <div
-                className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
-                role="progressbar"
-                aria-valuenow={pct}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={`${entry.label}: ${pct}%`}
-              >
+            <motion.div key={entry.key} variants={staggerItem}>
+              <Card>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-text">
+                    {entry.label}
+                  </span>
+                  <motion.span
+                    className="text-lg font-bold tabular-nums"
+                    style={{ color: evalScoreColor(entry.value) }}
+                    initial={{ opacity: 0.99, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.4, delay: 0.2, ease: [0.16, 1, 0.3, 1] as const }}
+                  >
+                    {pct}%
+                  </motion.span>
+                </div>
+                {/* Custom progress bar */}
                 <div
-                  className="h-full rounded-full transition-all duration-700 ease-out"
-                  style={{
-                    width: `${pct}%`,
-                    background: `linear-gradient(90deg, ${evalScoreColor(entry.value)}, ${
-                      entry.value >= 0.8
-                        ? 'var(--color-accent)'
-                        : entry.value >= 0.6
-                          ? 'var(--color-gold)'
-                          : 'var(--color-red)'
-                    })`,
-                  }}
-                />
-              </div>
-            </Card>
+                  className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
+                  role="progressbar"
+                  aria-valuenow={pct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${entry.label}: ${pct}%`}
+                >
+                  <motion.div
+                    className="h-full rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{ width: `${pct}%` }}
+                    transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
+                    style={{
+                      background: `linear-gradient(90deg, ${evalScoreColor(entry.value)}, ${
+                        entry.value >= 0.8
+                          ? 'var(--color-accent)'
+                          : entry.value >= 0.6
+                            ? 'var(--color-gold)'
+                            : 'var(--color-red)'
+                      })`,
+                    }}
+                  />
+                </div>
+              </Card>
+            </motion.div>
           );
         })}
       </div>
+    </motion.div>
+  );
+}
+
+// ─── Background ambient blobs ─────────────────────────────────────────────────
+
+function AmbientBlobs() {
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
+      <div className="absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-primary/5 blur-[120px]" />
+      <div className="absolute top-1/3 -right-40 h-[400px] w-[400px] rounded-full bg-accent/5 blur-[100px]" />
+      <div className="absolute -bottom-40 left-1/3 h-[450px] w-[450px] rounded-full bg-accent-2/5 blur-[110px]" />
+      <div className="absolute top-2/3 left-1/4 h-[300px] w-[300px] rounded-full bg-gold/5 blur-[90px]" />
     </div>
   );
 }
@@ -891,173 +1007,216 @@ export default function AdminDashboard() {
   const totalLogPages = Math.max(1, Math.ceil(totalLogs / PAGE_SIZE));
 
   return (
-    <div className="animate-fadeIn space-y-6">
-      {/* ── Page header ───────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text">Admin Dashboard</h1>
-          <p className="text-sm text-text-muted">
-            System overview and management
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            statsQuery.refetch();
-            addToast('Dashboard refreshed', 'info');
-          }}
+    <>
+      <AmbientBlobs />
+      <motion.div
+        className="space-y-6 relative z-0"
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+      >
+        {/* ── Page header ───────────────────────────────────────────────────── */}
+        <motion.div
+          className="flex items-center justify-between"
+          variants={fadeIn}
+          initial="initial"
+          animate="animate"
         >
-          <RefreshCw size={16} />
-          Refresh
-        </Button>
-      </div>
-
-      {/* ── Overview stat cards ───────────────────────────────────────────── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={<Users size={22} className="text-white" />}
-          label="Total Users"
-          value={stats.total_users}
-          gradient="bg-gradient-to-br from-primary/80 to-primary-dark/80"
-          trend={{ direction: 'up', percent: 12 }}
-        />
-        <StatCard
-          icon={<FolderOpen size={22} className="text-white" />}
-          label="Total Workspaces"
-          value={stats.total_workspaces}
-          gradient="bg-gradient-to-br from-accent/80 to-accent/60"
-          trend={{ direction: 'up', percent: 8 }}
-        />
-        <StatCard
-          icon={<FileText size={22} className="text-white" />}
-          label="Total Documents"
-          value={stats.total_documents}
-          gradient="bg-gradient-to-br from-accent-2/80 to-accent-2/60"
-          trend={{ direction: 'up', percent: 15 }}
-        />
-        <StatCard
-          icon={<MessageSquare size={22} className="text-white" />}
-          label="Total Queries"
-          value={stats.total_queries}
-          gradient="bg-gradient-to-br from-gold/70 to-gold/50"
-          trend={{ direction: 'up', percent: 23 }}
-        />
-      </div>
-
-      {/* ── Secondary stat cards ──────────────────────────────────────────── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Avg Trust Score */}
-        <SecondaryStatCard
-          icon={<Shield size={20} />}
-          label="Avg Trust Score"
-        >
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xl font-bold tabular-nums"
-              style={{ color: trustScoreColor(stats.avg_trust_score) }}
-            >
-              {stats.avg_trust_score !== undefined
-                ? stats.avg_trust_score.toFixed(2)
-                : 'N/A'}
-            </span>
-            {stats.avg_trust_score !== undefined && (
-              <Badge color={trustScoreBadgeColor(stats.avg_trust_score)}>
-                {stats.avg_trust_score >= 0.75
-                  ? 'Good'
-                  : stats.avg_trust_score >= 0.5
-                    ? 'Fair'
-                    : 'Poor'}
-              </Badge>
-            )}
+          <div>
+            <h1 className="text-2xl font-bold text-text">Admin Dashboard</h1>
+            <p className="text-sm text-text-muted">
+              System overview and management
+            </p>
           </div>
-        </SecondaryStatCard>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              statsQuery.refetch();
+              addToast('Dashboard refreshed', 'info');
+            }}
+          >
+            <RefreshCw size={16} />
+            Refresh
+          </Button>
+        </motion.div>
 
-        {/* Avg Rating */}
-        <SecondaryStatCard
-          icon={<Star size={20} />}
-          label="Avg Rating"
+        {/* ── Overview stat cards ───────────────────────────────────────────── */}
+        <motion.div
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
         >
-          <div className="flex items-center gap-2">
-            {stats.avg_rating !== undefined ? (
-              <>
-                <span className="text-xl font-bold text-text tabular-nums">
-                  {stats.avg_rating.toFixed(1)}
-                </span>
-                <StarRating rating={stats.avg_rating} />
-              </>
-            ) : (
-              <span className="text-sm text-text-dim">No ratings yet</span>
-            )}
-          </div>
-        </SecondaryStatCard>
+          <StatCard
+            icon={<Users size={22} className="text-white" />}
+            label="Total Users"
+            value={stats.total_users}
+            gradient="bg-gradient-to-br from-primary/80 to-primary-dark/80"
+            trend={{ direction: 'up', percent: 12 }}
+          />
+          <StatCard
+            icon={<FolderOpen size={22} className="text-white" />}
+            label="Total Workspaces"
+            value={stats.total_workspaces}
+            gradient="bg-gradient-to-br from-accent/80 to-accent/60"
+            trend={{ direction: 'up', percent: 8 }}
+          />
+          <StatCard
+            icon={<FileText size={22} className="text-white" />}
+            label="Total Documents"
+            value={stats.total_documents}
+            gradient="bg-gradient-to-br from-accent-2/80 to-accent-2/60"
+            trend={{ direction: 'up', percent: 15 }}
+          />
+          <StatCard
+            icon={<MessageSquare size={22} className="text-white" />}
+            label="Total Queries"
+            value={stats.total_queries}
+            gradient="bg-gradient-to-br from-gold/70 to-gold/50"
+            trend={{ direction: 'up', percent: 23 }}
+          />
+        </motion.div>
 
-        {/* Total Feedback */}
-        <SecondaryStatCard
-          icon={<MessageSquare size={20} />}
-          label="Total Feedback"
-          value={stats.total_feedback.toLocaleString()}
-        />
+        {/* ── Secondary stat cards ──────────────────────────────────────────── */}
+        <motion.div
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
+        >
+          {/* Avg Trust Score */}
+          <SecondaryStatCard
+            icon={<Shield size={20} />}
+            label="Avg Trust Score"
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xl font-bold tabular-nums"
+                style={{ color: trustScoreColor(stats.avg_trust_score) }}
+              >
+                {stats.avg_trust_score !== undefined
+                  ? stats.avg_trust_score.toFixed(2)
+                  : 'N/A'}
+              </span>
+              {stats.avg_trust_score !== undefined && (
+                <Badge color={trustScoreBadgeColor(stats.avg_trust_score)}>
+                  {stats.avg_trust_score >= 0.75
+                    ? 'Good'
+                    : stats.avg_trust_score >= 0.5
+                      ? 'Fair'
+                      : 'Poor'}
+                </Badge>
+              )}
+            </div>
+          </SecondaryStatCard>
 
-        {/* Total Chunks */}
-        <SecondaryStatCard
-          icon={<Database size={20} />}
-          label="Total Chunks Indexed"
-          value={stats.total_chunks.toLocaleString()}
-        />
-      </div>
+          {/* Avg Rating */}
+          <SecondaryStatCard
+            icon={<Star size={20} />}
+            label="Avg Rating"
+          >
+            <div className="flex items-center gap-2">
+              {stats.avg_rating !== undefined ? (
+                <>
+                  <span className="text-xl font-bold text-text tabular-nums">
+                    {stats.avg_rating.toFixed(1)}
+                  </span>
+                  <StarRating rating={stats.avg_rating} />
+                </>
+              ) : (
+                <span className="text-sm text-text-dim">No ratings yet</span>
+              )}
+            </div>
+          </SecondaryStatCard>
 
-      {/* ── Charts ─────────────────────────────────────────────────────────── */}
-      <ChartsSection />
+          {/* Total Feedback */}
+          <SecondaryStatCard
+            icon={<MessageSquare size={20} />}
+            label="Total Feedback"
+            value={stats.total_feedback.toLocaleString()}
+          />
 
-      {/* ── Tabs: Audit Logs / Evaluation ──────────────────────────────────── */}
-      <Card className="p-0 overflow-hidden">
-        <Tabs
-          tabs={[
-            { id: 'audit-logs', label: 'Audit Logs', icon: <Activity size={16} /> },
-            { id: 'evaluation', label: 'Evaluation', icon: <BarChart3 size={16} /> },
-          ]}
-          activeTab={activeTab}
-          onChange={setActiveTab}
-          className="px-4 pt-2"
-        />
-        <div className="p-4 lg:p-6">
-          {activeTab === 'audit-logs' && (
-            <AuditLogsTab
-              logs={logs}
-              isLoading={logsQuery.isLoading}
-              isError={logsQuery.isError}
-              errorMessage={
-                logsQuery.error instanceof Error
-                  ? logsQuery.error.message
-                  : 'Failed to load logs'
-              }
-              onRetry={() => logsQuery.refetch()}
-              page={logPage}
-              totalPages={totalLogPages}
-              total={totalLogs}
-              actionFilter={logActionFilter}
-              onActionFilterChange={setLogActionFilter}
-              onPageChange={setLogPage}
+          {/* Total Chunks */}
+          <SecondaryStatCard
+            icon={<Database size={20} />}
+            label="Total Chunks Indexed"
+            value={stats.total_chunks.toLocaleString()}
+          />
+        </motion.div>
+
+        {/* ── Charts ─────────────────────────────────────────────────────────── */}
+        <ChartsSection />
+
+        {/* ── Tabs: Audit Logs / Evaluation ──────────────────────────────────── */}
+        <motion.div variants={fadeIn} initial="initial" animate="animate">
+          <Card className="p-0 overflow-hidden">
+            <Tabs
+              tabs={[
+                { id: 'audit-logs', label: 'Audit Logs', icon: <Activity size={16} /> },
+                { id: 'evaluation', label: 'Evaluation', icon: <BarChart3 size={16} /> },
+              ]}
+              activeTab={activeTab}
+              onChange={setActiveTab}
+              className="px-4 pt-2"
             />
-          )}
-          {activeTab === 'evaluation' && (
-            <EvaluationTab
-              metrics={evalQuery.data}
-              isLoading={evalQuery.isLoading}
-              isError={evalQuery.isError}
-              errorMessage={
-                evalQuery.error instanceof Error
-                  ? evalQuery.error.message
-                  : 'Failed to load evaluation'
-              }
-              onRetry={() => evalQuery.refetch()}
-              isRunning={runEvalMutation.isPending}
-              onRunEvaluation={() => runEvalMutation.mutate()}
-            />
-          )}
-        </div>
-      </Card>
-    </div>
+            <div className="p-4 lg:p-6">
+              <AnimatePresence mode="wait">
+                {activeTab === 'audit-logs' && (
+                  <motion.div
+                    key="audit-logs"
+                    variants={pageTransition}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                  >
+                    <AuditLogsTab
+                      logs={logs}
+                      isLoading={logsQuery.isLoading}
+                      isError={logsQuery.isError}
+                      errorMessage={
+                        logsQuery.error instanceof Error
+                          ? logsQuery.error.message
+                          : 'Failed to load logs'
+                      }
+                      onRetry={() => logsQuery.refetch()}
+                      page={logPage}
+                      totalPages={totalLogPages}
+                      total={totalLogs}
+                      actionFilter={logActionFilter}
+                      onActionFilterChange={setLogActionFilter}
+                      onPageChange={setLogPage}
+                    />
+                  </motion.div>
+                )}
+                {activeTab === 'evaluation' && (
+                  <motion.div
+                    key="evaluation"
+                    variants={pageTransition}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                  >
+                    <EvaluationTab
+                      metrics={evalQuery.data}
+                      isLoading={evalQuery.isLoading}
+                      isError={evalQuery.isError}
+                      errorMessage={
+                        evalQuery.error instanceof Error
+                          ? evalQuery.error.message
+                          : 'Failed to load evaluation'
+                      }
+                      onRetry={() => evalQuery.refetch()}
+                      isRunning={runEvalMutation.isPending}
+                      onRunEvaluation={() => runEvalMutation.mutate()}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </Card>
+        </motion.div>
+      </motion.div>
+    </>
   );
 }

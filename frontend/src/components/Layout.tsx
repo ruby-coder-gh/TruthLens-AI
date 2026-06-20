@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, useLocation, Outlet } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -43,11 +43,6 @@ const navItems: NavItem[] = [
   { label: 'Admin', path: '/admin', icon: Shield, adminOnly: true },
 ];
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-interface LayoutProps {
-  children: ReactNode;
-}
-
 // ─── Sidebar nav item component ───────────────────────────────────────────────
 function NavItemLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
   const Icon = item.icon;
@@ -89,10 +84,9 @@ function NavItemLink({ item, active, onClick }: { item: NavItem; active: boolean
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export default function Layout({ children }: LayoutProps) {
+export default function Layout() {
   const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const closeSidebar = () => setSidebarOpen(false);
@@ -104,7 +98,7 @@ export default function Layout({ children }: LayoutProps) {
     return location.pathname.startsWith(path);
   };
 
-  if (!isAuthenticated) return <>{children}</>;
+  if (!isAuthenticated) return <Outlet />;
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-bg">
@@ -115,9 +109,9 @@ export default function Layout({ children }: LayoutProps) {
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0.99 }}
             className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
             onClick={closeSidebar}
             aria-hidden="true"
@@ -141,12 +135,9 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Brand */}
         <div className="relative z-10 flex h-16 items-center gap-3 border-b border-white/[0.06] px-6">
-          <motion.div
-            whileHover={{ rotate: 10, scale: 1.1 }}
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-lg shadow-primary/30"
-          >
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-lg shadow-primary/30 transition-transform duration-150 hover:scale-110 hover:rotate-[10deg]">
             <Sparkles size={16} />
-          </motion.div>
+          </div>
           <div>
             <span className="text-base font-bold text-text">TruthLens</span>
             <span className="block text-[10px] uppercase tracking-widest text-text-dim">AI Platform</span>
@@ -184,18 +175,11 @@ export default function Layout({ children }: LayoutProps) {
         {/* User info */}
         {user && (
           <div className="relative z-10 border-t border-white/[0.06] p-4">
-            <motion.div
-              initial={false}
-              whileHover={{ scale: 1.02 }}
-              className="rounded-xl bg-white/[0.03] p-3"
-            >
+            <div className="rounded-xl bg-white/[0.03] p-3 transition-transform duration-150 hover:scale-[1.02]">
               <div className="flex items-center gap-3">
-                <motion.div
-                  whileHover={{ scale: 1.1 }}
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-accent/30 border border-white/[0.08] text-text-muted"
-                >
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-accent/30 border border-white/[0.08] text-text-muted transition-transform duration-150 hover:scale-110">
                   <User size={16} />
-                </motion.div>
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-medium text-text">{user.username}</p>
                   <p className="truncate text-xs text-text-dim">{user.email}</p>
@@ -206,17 +190,15 @@ export default function Layout({ children }: LayoutProps) {
                   </span>
                 )}
               </div>
-              <motion.button
+              <button
                 type="button"
                 onClick={logout}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-white/[0.05] hover:text-red"
+                className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-red active:scale-[0.98]"
               >
                 <LogOut size={15} />
                 <span>Sign out</span>
-              </motion.button>
-            </motion.div>
+              </button>
+            </div>
           </div>
         )}
       </motion.aside>
@@ -224,21 +206,15 @@ export default function Layout({ children }: LayoutProps) {
       {/* ─── Main area ────────────────────────────────────────────────── */}
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <motion.header
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="flex h-16 items-center gap-4 border-b border-white/[0.06] bg-[#0a0e17]/60 backdrop-blur-xl px-4 lg:px-6"
-        >
-          <motion.button
+        <header className="flex h-16 items-center gap-4 border-b border-white/[0.06] bg-[#0a0e17]/60 backdrop-blur-xl px-4 lg:px-6">
+          <button
             type="button"
             onClick={() => setSidebarOpen((prev) => !prev)}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-text-muted hover:bg-white/[0.06] hover:text-text lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-text-muted transition-all duration-150 hover:scale-110 hover:bg-white/[0.06] hover:text-text active:scale-90 lg:hidden"
             aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
           >
             {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </motion.button>
+          </button>
 
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm">
@@ -251,19 +227,13 @@ export default function Layout({ children }: LayoutProps) {
               {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
             </span>
           </div>
-        </motion.header>
+        </header>
 
         {/* Content */}
         <main className="relative flex-1 overflow-y-auto">
-          <motion.div
-            key={location.pathname}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="p-4 lg:p-6"
-          >
-            {children}
-          </motion.div>
+          <div className="p-4 lg:p-6">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

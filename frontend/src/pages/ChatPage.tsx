@@ -30,15 +30,11 @@ import {
   Badge,
   Tabs,
   EmptyState,
-  LoadingSpinner,
   Skeleton,
   ProgressBar,
   useToast,
   fadeIn,
   fadeInUp,
-  fadeInScale,
-  slideInLeft,
-  slideInRight,
   staggerContainer,
   staggerItem,
   pageTransition,
@@ -48,7 +44,7 @@ import {
   feedbackApi,
 } from '../api/client';
 import { QueryWebSocket } from '../api/websocket';
-import type { Source, QuerySummary, QueryDetail } from '../api/types';
+import type { Source, QuerySummary } from '../api/types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -148,27 +144,6 @@ function parseGuardrailDetails(details: string): string[] {
   }
 }
 
-function mapSourceFromWS(data: {
-  chunk_id: string;
-  document_id: string;
-  excerpt: string;
-  score: number;
-  document_name?: string;
-  relevance_score?: number;
-  rerank_score?: number;
-  page_number?: number;
-}): Source {
-  return {
-    chunk_id: data.chunk_id,
-    document_id: data.document_id,
-    excerpt: data.excerpt,
-    relevance_score: data.relevance_score ?? data.score ?? 0,
-    document_name: data.document_name,
-    rerank_score: data.rerank_score,
-    page_number: data.page_number,
-  };
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 //  MAIN PAGE COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -183,7 +158,7 @@ export default function ChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [_streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState('sources');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
@@ -252,32 +227,6 @@ export default function ChatPage() {
 
   // ─── Generate unique IDs ───────────────────────────────────────────────────
   const genId = useCallback(() => crypto.randomUUID(), []);
-
-  // ─── Handle error message display ─────────────────────────────────────────
-  const addErrorMessage = useCallback(
-    (code: string, message: string) => {
-      const msg: ChatMessage = {
-        id: genId(),
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        sources: [],
-        guardrail: null,
-        trustScore: null,
-        trustComponents: {},
-        latencyMs: null,
-        modelUsed: null,
-        tokenCount: null,
-        queryId: null,
-        error: { code, message },
-        status: 'error',
-      };
-      setMessages((prev) => [...prev, msg]);
-      setIsStreaming(false);
-      setStreamingMessageId(null);
-    },
-    [genId],
-  );
 
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
@@ -644,7 +593,7 @@ export default function ChatPage() {
                 animate="animate"
               >
                 <AnimatePresence mode="popLayout">
-                  {messages.map((msg, idx) => (
+                  {messages.map((msg) => (
                     <ChatMessageBubble
                       key={msg.id}
                       message={msg}
@@ -659,7 +608,6 @@ export default function ChatPage() {
                         setExpandedSource(source.chunk_id);
                         if (isMobile) setSidebarOpen(true);
                       }}
-                      isLast={idx === messages.length - 1}
                     />
                   ))}
                 </AnimatePresence>
@@ -673,7 +621,7 @@ export default function ChatPage() {
             <motion.form
               onSubmit={handleSubmit}
               className="mx-auto flex max-w-3xl items-end gap-3"
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0.99, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.3 }}
             >
@@ -713,7 +661,7 @@ export default function ChatPage() {
             </motion.form>
             <motion.p
               className="mt-2 text-center text-xs text-text-dim"
-              initial={{ opacity: 0 }}
+              initial={{ opacity: 0.99 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.3 }}
             >
@@ -726,9 +674,9 @@ export default function ChatPage() {
         <AnimatePresence>
           {effectiveSidebarOpen && (
             <motion.aside
-              initial={isMobile ? { x: '100%' } : { opacity: 0, x: 20 }}
+              initial={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
               animate={isMobile ? { x: 0 } : { opacity: 1, x: 0 }}
-              exit={isMobile ? { x: '100%' } : { opacity: 0, x: 20 }}
+              exit={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
               transition={{ type: 'spring', damping: 25, stiffness: 250 }}
               className={clsx(
                 'flex w-full flex-col border-l border-border/60 glass',
@@ -771,7 +719,7 @@ export default function ChatPage() {
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={sidebarTab}
-                    initial={{ opacity: 0, y: 8 }}
+                    initial={{ opacity: 0.99, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.2 }}
@@ -821,7 +769,7 @@ export default function ChatPage() {
         <AnimatePresence>
           {isMobile && sidebarOpen && (
             <motion.div
-              initial={{ opacity: 0 }}
+              initial={{ opacity: 0.99 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
@@ -934,13 +882,11 @@ function ChatMessageBubble({
   onCopy,
   onFeedback,
   onSourceClick,
-  isLast,
 }: {
   message: ChatMessage;
   onCopy: (text: string) => void;
   onFeedback: (rating: number) => void;
   onSourceClick: (source: Source) => void;
-  isLast: boolean;
 }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
@@ -955,10 +901,10 @@ function ChatMessageBubble({
       )}
       variants={staggerItem}
       layout
-      initial={{ opacity: 0, y: 20, scale: 0.98 }}
+      initial={{ opacity: 0.99, y: 20, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -10, scale: 0.97 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
     >
       <div
         className={clsx(
@@ -970,9 +916,9 @@ function ChatMessageBubble({
         {isUser && (
           <motion.div
             className="rounded-2xl rounded-br-md bg-gradient-to-br from-primary to-primary-dark px-4 py-2.5 shadow-lg shadow-primary/20"
-            initial={{ opacity: 0, scale: 0.9, x: 20 }}
+            initial={{ opacity: 0.99, scale: 0.9, x: 20 }}
             animate={{ opacity: 1, scale: 1, x: 0 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
           >
             <p className="text-sm text-white">{message.content}</p>
           </motion.div>
@@ -982,9 +928,9 @@ function ChatMessageBubble({
         {isAssistant && (
           <motion.div
             className="glass rounded-2xl p-4 lg:p-5 space-y-3 border border-glass-border"
-            initial={{ opacity: 0, scale: 0.95, x: -10 }}
+            initial={{ opacity: 0.99, scale: 0.95, x: -10 }}
             animate={{ opacity: 1, scale: 1, x: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
           >
             {/* Status: pending */}
             {message.status === 'pending' && (
@@ -1016,7 +962,7 @@ function ChatMessageBubble({
             {isComplete && message.content && (
               <motion.div
                 className="text-sm leading-relaxed text-text"
-                initial={{ opacity: 0 }}
+                initial={{ opacity: 0.99 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.3 }}
               >
@@ -1029,7 +975,7 @@ function ChatMessageBubble({
               <motion.div
                 className="flex items-start gap-3 rounded-xl border border-red/30 bg-red/10 p-3"
                 role="alert"
-                initial={{ opacity: 0, x: -10 }}
+                initial={{ opacity: 0.99, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
               >
                 <AlertCircle size={18} className="mt-0.5 shrink-0 text-red" />
@@ -1054,7 +1000,7 @@ function ChatMessageBubble({
             {/* Guardrail badge */}
             {message.guardrail && (
               <motion.div
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0.99, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
               >
@@ -1066,7 +1012,7 @@ function ChatMessageBubble({
             {message.trustScore !== null && (
               <motion.div
                 className="flex items-center gap-2"
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0.99, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
               >
@@ -1081,7 +1027,7 @@ function ChatMessageBubble({
             {message.sources.length > 0 && (
               <motion.div
                 className="flex flex-wrap gap-1.5"
-                initial={{ opacity: 0 }}
+                initial={{ opacity: 0.99 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.2 }}
               >
@@ -1094,7 +1040,7 @@ function ChatMessageBubble({
                     title={source.document_name ?? 'Source document'}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    initial={{ opacity: 0, scale: 0.8 }}
+                    initial={{ opacity: 0.99, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: 0.2 + i * 0.05 }}
                   >
@@ -1114,7 +1060,7 @@ function ChatMessageBubble({
             {(isComplete || isError) && (
               <motion.div
                 className="flex items-center justify-between border-t border-border/50 pt-2"
-                initial={{ opacity: 0 }}
+                initial={{ opacity: 0.99 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.25 }}
               >
@@ -1263,7 +1209,7 @@ function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
           ? 'border-green/30 bg-green/10'
           : 'border-orange/30 bg-orange/10',
       )}
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0.99, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
@@ -1292,14 +1238,14 @@ function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
         {!guardrail.passed && claims.length > 0 && (
           <motion.ul
             className="mt-1 list-inside list-disc space-y-0.5 text-xs text-text-muted"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.1 }}
           >
             {claims.slice(0, 3).map((claim, i) => (
               <motion.li
                 key={i}
-                initial={{ opacity: 0, x: -8 }}
+                initial={{ opacity: 0.99, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.15 + i * 0.05 }}
               >
@@ -1339,7 +1285,7 @@ function SourcesTab({
         {Array.from({ length: 3 }).map((_, i) => (
           <motion.div
             key={i}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
           >
@@ -1376,14 +1322,14 @@ function SourcesTab({
         {sources.length} source{sources.length !== 1 ? 's' : ''} retrieved
       </motion.p>
       <div className="space-y-2">
-        {visibleSources.map((source, i) => {
+        {visibleSources.map((source) => {
           const isExpanded = expandedSource === source.chunk_id;
           return (
             <motion.div
               key={source.chunk_id}
               variants={staggerItem}
               layout
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
             >
               <Card className="p-3">
                 <div className="space-y-2">
@@ -1532,7 +1478,7 @@ function WhyThisAnswerTab({
                 strokeDasharray={`${2 * Math.PI * 42}`}
                 initial={{ strokeDashoffset: 2 * Math.PI * 42 }}
                 animate={{ strokeDashoffset: 2 * Math.PI * 42 * (1 - trustScore) }}
-                transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] as const }}
               />
             </svg>
             {/* Score text */}
@@ -1545,7 +1491,7 @@ function WhyThisAnswerTab({
                     ? 'text-orange'
                     : 'text-red',
               )}
-              initial={{ opacity: 0, scale: 0.5 }}
+              initial={{ opacity: 0.99, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.3, type: 'spring', damping: 10 }}
             >
@@ -1554,7 +1500,7 @@ function WhyThisAnswerTab({
           </div>
           <motion.p
             className="mt-2 text-sm font-medium text-text"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
           >
@@ -1562,7 +1508,7 @@ function WhyThisAnswerTab({
           </motion.p>
           <motion.p
             className="text-xs text-text-muted"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.45 }}
           >
@@ -1581,7 +1527,7 @@ function WhyThisAnswerTab({
             <motion.div
               key={key}
               className="space-y-1"
-              initial={{ opacity: 0, x: -8 }}
+              initial={{ opacity: 0.99, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.2 }}
             >
@@ -1614,7 +1560,7 @@ function WhyThisAnswerTab({
                   )}
                   initial={{ width: 0 }}
                   animate={{ width: `${value * 100}%` }}
-                  transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
                 />
               </div>
             </motion.div>
@@ -1666,7 +1612,7 @@ function ConversationHistoryTab({
         {Array.from({ length: 4 }).map((_, i) => (
           <motion.div
             key={i}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06 }}
           >
@@ -1682,7 +1628,7 @@ function ConversationHistoryTab({
       <div className="p-4">
         <motion.div
           className="flex flex-col items-center justify-center py-8 text-center"
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
         >
           <AlertCircle size={20} className="mb-2 text-red" />
@@ -1762,17 +1708,17 @@ function ConversationHistoryTab({
               <AnimatePresence>
                 {isOpen && (
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
+                    initial={{ opacity: 0.99, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] as const }}
                     className="overflow-hidden"
                   >
                     <div className="ml-7 space-y-2 border-l-2 border-border/60 pl-4 pb-2 pt-1">
                       {q.responseText ? (
                         <motion.p
                           className="text-xs leading-relaxed text-text-muted line-clamp-3"
-                          initial={{ opacity: 0 }}
+                          initial={{ opacity: 0.99 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: 0.1 }}
                         >
@@ -1781,7 +1727,7 @@ function ConversationHistoryTab({
                       ) : (
                         <motion.p
                           className="text-xs text-text-dim italic"
-                          initial={{ opacity: 0 }}
+                          initial={{ opacity: 0.99 }}
                           animate={{ opacity: 1 }}
                         >
                           Loading response…

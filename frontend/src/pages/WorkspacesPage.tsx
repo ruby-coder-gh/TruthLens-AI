@@ -11,7 +11,6 @@ import {
   Badge,
   Modal,
   EmptyState,
-  LoadingSpinner,
   Skeleton,
   useToast,
   staggerContainer,
@@ -128,9 +127,9 @@ export default function WorkspacesPage() {
           {Array.from({ length: 6 }).map((_, i) => (
             <motion.div
               key={i}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0.99, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ delay: i * 0.06, duration: 0.4, ease: [0.16, 1, 0.3, 1] as const }}
               className="glass rounded-2xl p-5 lg:p-6 space-y-3"
             >
               <div className="flex items-start justify-between gap-2">
@@ -282,15 +281,15 @@ export default function WorkspacesPage() {
           </motion.div>
           <div>
             <motion.h1
-              initial={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0.99, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.4, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.4, delay: 0.15, ease: [0.16, 1, 0.3, 1] as const }}
               className="text-2xl font-bold gradient-text sm:text-3xl"
             >
               Workspaces
             </motion.h1>
             <motion.p
-              initial={{ opacity: 0 }}
+              initial={{ opacity: 0.99 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, delay: 0.25 }}
               className="mt-1 text-sm text-text-muted"
@@ -302,9 +301,9 @@ export default function WorkspacesPage() {
         </div>
 
         <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
+          initial={{ opacity: 0.99, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.35, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.35, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
         >
@@ -319,7 +318,7 @@ export default function WorkspacesPage() {
       <motion.div
         initial={{ scaleX: 0 }}
         animate={{ scaleX: 1 }}
-        transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
         className="h-px origin-left bg-gradient-to-r from-primary/40 via-accent/20 to-transparent"
       />
 
@@ -341,7 +340,7 @@ export default function WorkspacesPage() {
               custom={idx}
               whileHover={{ y: -6, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
               className="group relative cursor-pointer"
               onClick={() => navigate(`/workspaces/${ws.id}`)}
               role="button"
@@ -366,7 +365,7 @@ export default function WorkspacesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
+                      initial={{ scale: 0.85, opacity: 0.99 }}
                       animate={{ scale: 1, opacity: 1 }}
                       transition={{ delay: 0.1, duration: 0.3 }}
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary-soft"
@@ -389,7 +388,7 @@ export default function WorkspacesPage() {
                 </p>
 
                 <motion.div
-                  initial={{ opacity: 0 }}
+                  initial={{ opacity: 0.99 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.2, duration: 0.3 }}
                   className="mt-5 flex items-center gap-5 border-t border-border/50 pt-4 text-xs text-text-dim"
@@ -432,7 +431,7 @@ export default function WorkspacesPage() {
           <AnimatePresence>
             {createError && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
+                initial={{ opacity: 0.99, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 className="overflow-hidden"

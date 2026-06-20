@@ -63,10 +63,6 @@ export default function LoginPage() {
   return (
     <motion.div
       className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-      exit="exit"
     >
       {/* Ambient blobs */}
       <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
@@ -100,9 +96,9 @@ export default function LoginPage() {
         {/* Brand */}
         <motion.div
           className="mb-8 text-center"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0.99, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
           <motion.div
             className="mx-auto mb-5 flex h-16 w-16 items-center justify-center"
@@ -127,7 +123,7 @@ export default function LoginPage() {
 
           <motion.h1
             className="text-3xl font-bold"
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25, duration: 0.5 }}
           >
@@ -136,7 +132,7 @@ export default function LoginPage() {
 
           <motion.p
             className="mt-2 text-sm text-text-muted"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.35, duration: 0.5 }}
           >
@@ -146,9 +142,9 @@ export default function LoginPage() {
 
         {/* Card */}
         <motion.div
-          initial={{ opacity: 0, y: 30, scale: 0.98 }}
+          initial={{ opacity: 0.99, y: 30, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
           <Card className="relative overflow-hidden p-6 lg:p-8">
             {/* Subtle inner gradient overlay */}
@@ -166,10 +162,10 @@ export default function LoginPage() {
               <AnimatePresence>
                 {apiError && (
                   <motion.div
-                    initial={{ opacity: 0, y: -12, scale: 0.95 }}
+                    initial={{ opacity: 0.99, y: -12, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -12, scale: 0.95 }}
-                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
                     className="rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red backdrop-blur-sm"
                     role="alert"
                   >
@@ -197,8 +193,8 @@ export default function LoginPage() {
                 {/* Email */}
                 <motion.div
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <Input
@@ -217,8 +213,8 @@ export default function LoginPage() {
                 <motion.div
                   className="space-y-1.5"
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <div className="flex items-center justify-between">
@@ -269,7 +265,7 @@ export default function LoginPage() {
                     >
                       <motion.div
                         key={showPassword ? 'eye-off' : 'eye'}
-                        initial={{ rotateY: 90, opacity: 0 }}
+                        initial={{ rotateY: 90, opacity: 0.99 }}
                         animate={{ rotateY: 0, opacity: 1 }}
                         transition={{ duration: 0.2 }}
                       >
@@ -280,7 +276,7 @@ export default function LoginPage() {
                   <AnimatePresence>
                     {errors.password && (
                       <motion.p
-                        initial={{ opacity: 0, y: -4 }}
+                        initial={{ opacity: 0.99, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         className="flex items-center gap-1 text-xs text-red"
@@ -294,7 +290,7 @@ export default function LoginPage() {
 
               {/* Submit */}
               <motion.div
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0.99, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.45, duration: 0.4 }}
               >
@@ -306,9 +302,8 @@ export default function LoginPage() {
                 >
                   {!loading && (
                     <motion.span
-                      className="absolute inset-0 bg-gradient-to-r from-primary via-primary-soft to-accent opacity-0"
+                      className="absolute inset-0 bg-gradient-to-r from-primary via-primary-soft to-accent opacity-0 hover:opacity-[0.15] transition-opacity"
                       style={{ mixBlendMode: 'overlay' }}
-                      whileHover={{ opacity: 0.15 }}
                       transition={{ duration: 0.3 }}
                     />
                   )}
@@ -323,7 +318,7 @@ export default function LoginPage() {
         {/* Footer */}
         <motion.p
           className="mt-6 text-center text-sm text-text-muted"
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5, duration: 0.5 }}
         >
@@ -345,9 +340,9 @@ export default function LoginPage() {
         {/* Bottom decorative gradient line */}
         <motion.div
           className="mx-auto mt-8 h-px max-w-[200px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-          initial={{ scaleX: 0, opacity: 0 }}
+          initial={{ scaleX: 0.01, opacity: 0.99 }}
           animate={{ scaleX: 1, opacity: 1 }}
-          transition={{ delay: 0.7, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.7, duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
           aria-hidden="true"
         />
       </div>

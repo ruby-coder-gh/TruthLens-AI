@@ -128,7 +128,7 @@ function UploadProgressArea({
   return (
     <motion.div
       className="glass rounded-2xl p-4 mb-4"
-      initial={{ opacity: 0, y: -10, height: 0 }}
+      initial={{ opacity: 0.99, y: -10, height: 0 }}
       animate={{ opacity: 1, y: 0, height: 'auto' }}
       exit={{ opacity: 0, y: -10, height: 0 }}
       transition={{ duration: 0.3 }}
@@ -189,22 +189,22 @@ function WorkspaceHeader({
         <div>
           <motion.h1
             className="text-2xl font-bold text-text"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0.99, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] as const }}
           >
             {workspace.name}
             <motion.div
               className="mt-1 h-0.5 w-full rounded-full bg-gradient-to-r from-primary via-accent to-accent-2"
               initial={{ scaleX: 0 }}
               animate={{ scaleX: 1 }}
-              transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
               style={{ transformOrigin: 'left' }}
             />
           </motion.h1>
           <motion.p
             className="mt-2 text-sm text-text-muted"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.25 }}
           >
@@ -212,7 +212,7 @@ function WorkspaceHeader({
           </motion.p>
           <motion.div
             className="mt-3 flex items-center gap-4 text-xs text-text-dim"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
           >
@@ -324,7 +324,7 @@ export default function WorkspaceDetailPage() {
         </motion.div>
         <motion.h3
           className="text-lg font-semibold text-text"
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0.99, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
         >
@@ -332,7 +332,7 @@ export default function WorkspaceDetailPage() {
         </motion.h3>
         <motion.p
           className="mt-1 text-sm text-text-muted"
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0.99, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
@@ -342,7 +342,7 @@ export default function WorkspaceDetailPage() {
         </motion.p>
         <motion.div
           className="mt-6 flex gap-3"
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0.99, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25 }}
         >
@@ -634,7 +634,7 @@ function DocumentsTab({
           {dragOver && (
             <motion.div
               className="pointer-events-none absolute inset-0 rounded-2xl"
-              initial={{ opacity: 0 }}
+              initial={{ opacity: 0.99 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               style={{
@@ -696,7 +696,7 @@ function DocumentsTab({
         {dragOver && (
           <motion.div
             className="pointer-events-none absolute inset-0 rounded-2xl"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             style={{
@@ -772,7 +772,7 @@ function DocumentsTab({
             title="Delete document"
           >
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0.99, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
@@ -1056,7 +1056,7 @@ function MembersTab({
       {isOwner && (
         <motion.div
           className="mb-4 flex justify-end"
-          initial={{ opacity: 0, y: -10 }}
+          initial={{ opacity: 0.99, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
@@ -1152,7 +1152,7 @@ function MembersTab({
         {addOpen && (
           <Modal open={addOpen} onClose={handleAddClose} title="Add member">
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0.99, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
@@ -1160,7 +1160,7 @@ function MembersTab({
                 <AnimatePresence>
                   {addError && (
                     <motion.div
-                      initial={{ opacity: 0, height: 0 }}
+                      initial={{ opacity: 0.99, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
@@ -1343,7 +1343,7 @@ function SettingsTab({
       >
         <motion.h3
           className="text-base font-semibold text-red mb-4 flex items-center gap-2"
-          initial={{ opacity: 0, x: -10 }}
+          initial={{ opacity: 0.99, x: -10 }}
           animate={{ opacity: 1, x: 0 }}
         >
           <AlertTriangle size={16} />
@@ -1376,14 +1376,14 @@ function SettingsTab({
             title="Delete workspace"
           >
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0.99, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
               className="space-y-4"
             >
               <motion.div
                 className="flex items-start gap-3 rounded-lg border border-red/30 bg-red/10 p-4"
-                initial={{ x: -20, opacity: 0 }}
+                initial={{ x: -12, opacity: 0.99 }}
                 animate={{ x: 0, opacity: 1 }}
                 transition={{ delay: 0.15, type: 'spring', damping: 20 }}
               >

@@ -88,8 +88,8 @@ export default function RegisterPage() {
     <motion.div
       className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12"
       variants={{
-        initial: { opacity: 0, y: 12 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+        initial: { opacity: 0.99, y: 6 },
+        animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
         exit: { opacity: 0, y: -12, transition: { duration: 0.2 } },
       }}
       initial="initial"
@@ -128,9 +128,9 @@ export default function RegisterPage() {
         {/* Brand */}
         <motion.div
           className="mb-8 text-center"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0.99, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
           <motion.div
             className="mx-auto mb-5 flex h-16 w-16 items-center justify-center"
@@ -155,7 +155,7 @@ export default function RegisterPage() {
 
           <motion.h1
             className="text-3xl font-bold"
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25, duration: 0.5 }}
           >
@@ -164,7 +164,7 @@ export default function RegisterPage() {
 
           <motion.p
             className="mt-2 text-sm text-text-muted"
-            initial={{ opacity: 0 }}
+            initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.35, duration: 0.5 }}
           >
@@ -174,9 +174,9 @@ export default function RegisterPage() {
 
         {/* Card */}
         <motion.div
-          initial={{ opacity: 0, y: 30, scale: 0.98 }}
+          initial={{ opacity: 0.99, y: 30, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
           <Card className="relative overflow-hidden p-6 lg:p-8">
             {/* Subtle inner gradient overlay */}
@@ -194,10 +194,10 @@ export default function RegisterPage() {
               <AnimatePresence>
                 {apiError && (
                   <motion.div
-                    initial={{ opacity: 0, y: -12, scale: 0.95 }}
+                    initial={{ opacity: 0.99, y: -12, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -12, scale: 0.95 }}
-                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
                     className="rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red backdrop-blur-sm"
                     role="alert"
                   >
@@ -225,8 +225,8 @@ export default function RegisterPage() {
                 {/* Username */}
                 <motion.div
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <Input
@@ -244,8 +244,8 @@ export default function RegisterPage() {
                 {/* Email */}
                 <motion.div
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <Input
@@ -264,8 +264,8 @@ export default function RegisterPage() {
                 <motion.div
                   className="space-y-1.5"
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <Input
@@ -283,16 +283,16 @@ export default function RegisterPage() {
                   <AnimatePresence>
                     {password.length > 0 && (
                       <motion.ul
-                        initial={{ opacity: 0, height: 0 }}
+                        initial={{ opacity: 0.99, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
                         exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
                         className="space-y-1.5 overflow-hidden pt-1"
                       >
                         {metRequirements.map((req) => (
                           <motion.li
                             key={req.label}
-                            initial={{ opacity: 0, x: -8 }}
+                            initial={{ opacity: 0.99, x: -8 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.25 }}
                             className="flex items-center gap-2 text-xs"
@@ -345,8 +345,8 @@ export default function RegisterPage() {
                 {/* Confirm Password */}
                 <motion.div
                   variants={{
-                    initial: { opacity: 0, y: 16 },
-                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+                    initial: { opacity: 0.99, y: 8 },
+                    animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } },
                   }}
                 >
                   <Input
@@ -365,7 +365,7 @@ export default function RegisterPage() {
               {/* Show password toggle + Submit */}
               <motion.div
                 className="space-y-4"
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0.99, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5, duration: 0.4 }}
               >
@@ -378,7 +378,7 @@ export default function RegisterPage() {
                 >
                   <motion.div
                     key={showPassword ? 'eye-off' : 'eye'}
-                    initial={{ rotateY: 90, opacity: 0 }}
+                    initial={{ rotateY: 90, opacity: 0.99 }}
                     animate={{ rotateY: 0, opacity: 1 }}
                     transition={{ duration: 0.2 }}
                   >
@@ -395,9 +395,8 @@ export default function RegisterPage() {
                 >
                   {!loading && (
                     <motion.span
-                      className="absolute inset-0 bg-gradient-to-r from-primary via-primary-soft to-accent opacity-0"
+                      className="absolute inset-0 bg-gradient-to-r from-primary via-primary-soft to-accent opacity-0 hover:opacity-[0.15] transition-opacity"
                       style={{ mixBlendMode: 'overlay' }}
-                      whileHover={{ opacity: 0.15 }}
                       transition={{ duration: 0.3 }}
                     />
                   )}
@@ -412,7 +411,7 @@ export default function RegisterPage() {
         {/* Footer */}
         <motion.p
           className="mt-6 text-center text-sm text-text-muted"
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.55, duration: 0.5 }}
         >
@@ -434,9 +433,9 @@ export default function RegisterPage() {
         {/* Bottom decorative gradient line */}
         <motion.div
           className="mx-auto mt-8 h-px max-w-[200px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-          initial={{ scaleX: 0, opacity: 0 }}
+          initial={{ scaleX: 0.01, opacity: 0.99 }}
           animate={{ scaleX: 1, opacity: 1 }}
-          transition={{ delay: 0.75, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.75, duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
           aria-hidden="true"
         />
       </div>
