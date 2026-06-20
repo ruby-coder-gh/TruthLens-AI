@@ -1,0 +1,257 @@
+// ─── Auth ───────────────────────────────────────────────────────────────────
+export interface User {
+  id: string;
+  email: string;
+  username: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  username: string;
+  password: string;
+}
+
+// ─── Workspace ──────────────────────────────────────────────────────────────
+export interface Workspace {
+  id: string;
+  name: string;
+  description: string;
+  owner_id: string;
+  member_count: number;
+  document_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  description: string;
+  owner_id: string;
+  member_count: number;
+  document_count: number;
+  created_at: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  role: string;
+  username: string;
+  email: string;
+  joined_at: string;
+}
+
+// ─── Document ───────────────────────────────────────────────────────────────
+export interface Document {
+  id: string;
+  workspace_id: string;
+  filename: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  page_count?: number;
+  chunk_count?: number;
+  status: string;
+  error_message?: string;
+  uploaded_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentStatus {
+  id: string;
+  status: string;
+  chunk_count?: number;
+  error_message?: string;
+}
+
+// ─── Query ──────────────────────────────────────────────────────────────────
+export interface QuerySummary {
+  id: string;
+  workspace_id: string;
+  query_text: string;
+  trust_score?: number;
+  guardrail_passed?: boolean;
+  model_used?: string;
+  created_at: string;
+}
+
+export interface QueryDetail {
+  id: string;
+  workspace_id: string;
+  query_text: string;
+  rewritten_query?: string;
+  response_text?: string;
+  response_sources?: Source[];
+  trust_score?: number;
+  guardrail_score?: number;
+  guardrail_passed?: boolean;
+  model_used?: string;
+  latency_ms?: number;
+  token_count?: number;
+  created_at: string;
+}
+
+export interface Source {
+  chunk_id: string;
+  document_id: string;
+  document_name?: string;
+  excerpt: string;
+  relevance_score: number;
+  rerank_score?: number;
+  page_number?: number;
+}
+
+// ─── Feedback ───────────────────────────────────────────────────────────────
+export interface Feedback {
+  id: string;
+  query_id: string;
+  user_id: string;
+  rating: number;
+  comment?: string;
+  created_at: string;
+}
+
+// ─── Admin ──────────────────────────────────────────────────────────────────
+export interface AdminStats {
+  total_users: number;
+  total_workspaces: number;
+  total_documents: number;
+  total_queries: number;
+  total_chunks: number;
+  avg_trust_score?: number;
+  avg_rating?: number;
+  total_feedback: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details?: Record<string, unknown>;
+  ip_address?: string;
+  created_at: string;
+}
+
+// ─── Investigation ──────────────────────────────────────────────────────────
+export interface InvestigationRequest {
+  query: string;
+  top_k?: number;
+  filters?: Record<string, unknown>;
+}
+
+export interface InvestigationResponse {
+  final_report: string;
+  trust_score?: number;
+  trust_components?: Record<string, number>;
+  reasoning_trace?: string[];
+  sub_questions?: string[];
+  latency_ms: number;
+  error?: string;
+}
+
+// ─── WebSocket ──────────────────────────────────────────────────────────────
+export interface WSMessage {
+  type: string;
+  payload: unknown;
+}
+
+export interface WSToken {
+  type: 'token';
+  content: string;
+}
+
+export interface WSSource {
+  type: 'source';
+  chunk_id: string;
+  document_id: string;
+  excerpt: string;
+  score: number;
+}
+
+export interface WSGuardrail {
+  type: 'guardrail';
+  passed: boolean;
+  score: number;
+  details: string;
+}
+
+export interface WSTrustScore {
+  type: 'trust_score';
+  score: number;
+  components: Record<string, number>;
+}
+
+export interface WSComplete {
+  type: 'complete';
+  query_id: string;
+  latency_ms: number;
+  model_used: string;
+  token_count: number;
+}
+
+export interface WSError {
+  type: 'error';
+  code: string;
+  message: string;
+}
+
+// ─── Generic API response wrappers ──────────────────────────────────────────
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: {
+    page: number;
+    page_size: number;
+    total: number;
+  };
+}
+
+export interface ListResponse<T> {
+  data: T[];
+}
+
+// ─── Helper type for workspace create/update payloads ───────────────────────
+export interface CreateWorkspaceRequest {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateWorkspaceRequest {
+  name?: string;
+  description?: string;
+}
+
+export interface AddMemberRequest {
+  user_id: string;
+  role?: string;
+}
+
+export interface SubmitFeedbackRequest {
+  rating: number;
+  comment?: string;
+}
+
+export interface UpdateUserRequest {
+  email?: string;
+  username?: string;
+}

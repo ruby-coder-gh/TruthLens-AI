@@ -11,7 +11,7 @@ TruthLens AI/
 │   │   ├── config.py                 # pydantic-settings (all env vars)
 │   │   ├── database.py               # SQLAlchemy async engine + session
 │   │   ├── chroma_client.py          # ChromaDB singleton + collection helpers
-│   │   ├── api/                      # REST + WebSocket routes (9 modules)
+│   │   ├── api/                      # REST + WS routes (10 modules)
 │   │   │   ├── router.py             # Aggregates all sub-routers
 │   │   │   ├── auth.py               # /auth/register, login, refresh
 │   │   │   ├── users.py              # /users (admin)
@@ -20,18 +20,19 @@ TruthLens AI/
 │   │   │   ├── queries.py            # Query history, details
 │   │   │   ├── feedback.py           # Submit/list feedback
 │   │   │   ├── admin.py              # Stats, logs, eval
+│   │   │   ├── investigations.py     # Multi-step investigation agent
 │   │   │   └── ws.py                 # WebSocket streaming Q&A
 │   │   ├── core/                     # Cross-cutting: auth, deps, security, exceptions
 │   │   ├── models/                   # SQLAlchemy ORM (8 tables)
-│   │   ├── schemas/                  # Pydantic request/response (8 modules)
-│   │   ├── ingestion/                # Load, chunk, embed, index pipeline
+│   │   ├── schemas/                  # Pydantic request/response (10 modules)
+│   │   ├── ingestion/                # Load, chunk, embed, index, multimodal
 │   │   ├── retrieval/                # Hybrid search, reranker, query rewrite
 │   │   ├── generation/               # Ollama gen, citations, guardrail, streaming
 │   │   ├── evaluation/               # Trust score, RAGAS, feedback loop
-│   │   ├── graph/                    # LangGraph: query_graph, crag_graph, ingestion_graph
+│   │   ├── graph/                    # LangGraph: 4 graphs (query, crag, ingestion, investigation)
 │   │   └── utils/                    # Logger, retry, PII redactor
 │   ├── migrations/                   # Alembic (1 version: 001_initial_schema)
-│   ├── tests/                        # pytest (22 files across 5 test modules)
+│   ├── tests/                        # pytest (24 files across 7 test modules)
 │   ├── data/                         # Runtime: uploads, chroma, bm25, models
 │   ├── Dockerfile                    # python:3.11-slim
 │   ├── requirements.txt
@@ -40,8 +41,16 @@ TruthLens AI/
 ├── ARCHITECTURE.md                   # 2146-line architecture spec
 ├── CODEBASE.md                       # This file
 ├── PROJECT.md                        # Project tracker
+├── REPORT.md                         # Comprehensive project report
 ├── README.md                         # Setup guide + API reference
+├── docs/security/                    # Security audit report (updated 2026-06-20)
+│   └── audit_report.md               # 17 findings, 0 High/Critical — Gate PASS
+├── evaluation/                       # Golden dataset + eval runner
+│   ├── golden_dataset.py             # 10 curated Q&A entries
+│   └── evaluate.py                   # RAGAS + fallback metrics runner
 ├── docker-compose.yml                # App + Ollama services
+├── hf_spaces_setup.sh                # HF Spaces startup script
+├── spaces.Dockerfile                 # HF Spaces Docker config
 ├── prd (1).html                      # Product Requirements Document
 └── .env.example                      # Env var template
 ```
@@ -67,6 +76,7 @@ TruthLens AI/
 | Queries API | `app/api/queries.py` | Query history, details, sources |
 | Feedback API | `app/api/feedback.py` | Submit/list feedback |
 | Admin API | `app/api/admin.py` | Stats, audit logs, evaluation trigger |
+| Investigation API | `app/api/investigations.py` | Multi-step research agent REST endpoint |
 | WebSocket | `app/api/ws.py` | Streaming Q&A over WS |
 | Auth core | `app/core/auth.py` | JWT encode/decode, bcrypt hashing |
 | Dependencies | `app/core/deps.py` | FastAPI DI (current user, DB, etc.) |
@@ -76,19 +86,25 @@ TruthLens AI/
 | Chunker | `app/ingestion/chunker.py` | Recursive text splitting |
 | Embedder | `app/ingestion/embedder.py` | sentence-transformers embeddings |
 | Indexer | `app/ingestion/indexer.py` | Store to ChromaDB + BM25 + SQLite |
+| Multimodal | `app/ingestion/multimodal.py` | LLaVA vision: extract images → text descriptions |
 | Hybrid Search | `app/retrieval/hybrid_search.py` | Vector + BM25 RRF fusion |
 | Reranker | `app/retrieval/reranker.py` | Cross-encoder reranking |
 | Query Rewrite | `app/retrieval/query_rewrite.py` | LLM query rewriting + expansion |
+| Parent Retrieval | `app/retrieval/parent_retrieval.py` | Sibling chunk expansion for richer context |
 | Generator | `app/generation/generator.py` | Ollama answer generation |
 | Citer | `app/generation/citer.py` | Citation matching |
 | Guardrail | `app/generation/guardrail.py` | NLI hallucination detection |
+| Safety | `app/generation/safety.py` | Prompt-injection defense + input sanitizer |
 | Streamer | `app/generation/streamer.py` | Token streaming via WS |
 | Trust Score | `app/evaluation/trust_score.py` | Composite trust score |
-| RAGAS Eval | `app/evaluation/ragas_eval.py` | RAGAS metrics |
+| RAGAS Eval | `app/evaluation/ragas_eval.py` | RAGAS metrics + golden dataset eval |
+| Golden Dataset | `evaluation/golden_dataset.py` | 10 curated Q&A entries |
+| Eval Runner | `evaluation/evaluate.py` | CLI runner for golden dataset evaluation |
 | Feedback Loop | `app/evaluation/feedback_loop.py` | Feedback ingestion + stats |
 | Query Graph | `app/graph/query_graph.py` | Standard RAG LangGraph flow |
 | CRAG Graph | `app/graph/crag_graph.py` | Self-correcting RAG loop |
 | Ingestion Graph | `app/graph/ingestion_graph.py` | Load→chunk→embed→store |
+| Investigation Graph | `app/graph/investigation.py` | Multi-step research: decompose → investigate → synthesize → trust |
 | Logger | `app/utils/logger.py` | structlog structured logging |
 | Retry | `app/utils/retry.py` | tenacity async retry |
 | PII Redactor | `app/utils/pii_redactor.py` | PII detection/masking |
@@ -101,7 +117,7 @@ TruthLens AI/
 - `workspace_members` — workspace_id, user_id, role
 - `documents` — id, workspace_id, filename, content_type, status, chunk_count, error_message, created_at
 - `chunks` — id, document_id, content, token_count, chunk_index, created_at
-- `queries` — id, workspace_id, user_id, query_text, response_text, confidence_score, trust_score, guardrail_score, latency_ms, sources (JSON), created_at
+- `queries` — id, workspace_id, user_id, query_text, response_text, confidence_score, trust_score, guardrail_score, latency_ms, sources (JSON), conversation_id, created_at
 - `feedback` — id, query_id, rating (1-5), comment, created_at
 - `audit_logs` — id, user_id, action, resource, resource_id, ip_address, details (JSON), created_at
 
@@ -141,14 +157,15 @@ TruthLens AI/
 | GET | `/api/admin/logs` | `api/admin.py` | Audit logs (admin) |
 | POST | `/api/admin/evaluation` | `api/admin.py` | Trigger evaluation (admin) |
 | GET | `/api/admin/evaluation` | `api/admin.py` | Get eval results (admin) |
+| POST | `/api/workspaces/{id}/investigate` | `api/investigations.py` | Multi-step investigation agent |
 | WS | `/api/ws/query` | `api/ws.py` | Streaming Q&A WebSocket |
 | GET | `/api/health` | `app/main.py` | Health check |
 
 ## Key Dependencies
 - **Backend:** Python 3.11, FastAPI, SQLAlchemy (async), aiosqlite
 - **Vector:** ChromaDB, sentence-transformers (BAAI/bge-base-en-v1.5)
-- **Search:** rank-bm25 (BM25), CrossEncoder (BAAI/bge-reranker-v2-m3)
-- **LLM:** Ollama (llama3.1:8b primary, phi3:3b fallback)
+- **Search:** rank-bm25 (BM25, JSON serialization), CrossEncoder (BAAI/bge-reranker-v2-m3)
+- **LLM:** Ollama (qwen3:4b primary+fallback, nomic-embed-text embed)
 - **Guardrail:** CrossEncoder NLI (microsoft/deberta-v3-base)
 - **Orchestration:** LangGraph, LangChain
 - **Auth:** python-jose (JWT), passlib (bcrypt)

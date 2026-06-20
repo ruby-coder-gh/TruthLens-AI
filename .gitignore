@@ -1,0 +1,33 @@
+# --- Backend generated / local data ---
+backend/data/
+backend/.coverage*
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.pyre/
+.mypy_cache/
+
+# --- Node / Frontend ---
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.turbo/
+
+# --- macOS ---
+.DS_Store
+
+# --- Logs ---
+*.log
+
+# --- Env files ---
+.env
+.env.*
+
+# --- Misc ---
+*.swp
+Thumbs.db
+
