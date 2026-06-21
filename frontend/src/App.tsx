@@ -17,6 +17,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import UserDashboard from './pages/UserDashboard'
 import ChatPage from './pages/ChatPage'
 import ChatHistoryPage from './pages/ChatHistoryPage'
+import ChatDetailPage from './pages/ChatDetailPage'
 import DocumentsBrowsePage from './pages/DocumentsBrowsePage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -109,6 +110,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<UserDashboard />} />
         <Route path="/chat/new" element={<ChatNewPage />} />
         <Route path="/chats" element={<ChatHistoryPage />} />
+        <Route path="/chat/:queryId" element={<ChatDetailPage />} />
         <Route path="/documents" element={<DocumentsBrowsePage />} />
         <Route path="/settings" element={<SettingsPage />} />
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, Form
 
 from app.config import settings
 from app.core.deps import check_workspace_access, get_current_admin, get_current_user, get_db
@@ -47,7 +48,6 @@ MAX_FILE_SIZE = 52_428_800  # 50 MB
 async def upload_document(
     workspace_id: str,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
     current_user: User = Depends(get_current_user),
     workspace: Workspace = Depends(check_workspace_access),
     db: AsyncSession = Depends(get_db),
@@ -111,16 +111,16 @@ async def upload_document(
         details=json.dumps({"filename": file.filename, "size": file_size, "mime_type": mime_type}),
     ))
 
-    # Schedule background processing
-    if background_tasks:
-        background_tasks.add_task(
-            process_document_background,
+    # Schedule background processing via asyncio (reliable for async tasks)
+    asyncio.create_task(
+        process_document_background(
             document_id=doc.id,
             workspace_id=workspace_id,
             file_path=file_path,
             mime_type=mime_type,
             original_filename=file.filename or "unknown",
         )
+    )
 
     return DocumentResponse(
         id=doc.id,
@@ -350,7 +350,6 @@ async def list_all_documents(
 async def reindex_document(
     workspace_id: str,
     doc_id: str,
-    background_tasks: BackgroundTasks = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -377,16 +376,17 @@ async def reindex_document(
     doc.status = "pending"
     doc.error_message = None
 
-    # Schedule background processing
+    # Schedule background processing via asyncio
     file_path = settings.upload_path / doc.filename
-    if background_tasks and file_path.exists():
-        background_tasks.add_task(
-            process_document_background,
-            document_id=doc.id,
-            workspace_id=workspace_id,
-            file_path=file_path,
-            mime_type=doc.mime_type,
-            original_filename=doc.original_filename,
+    if file_path.exists():
+        asyncio.create_task(
+            process_document_background(
+                document_id=doc.id,
+                workspace_id=workspace_id,
+                file_path=file_path,
+                mime_type=doc.mime_type,
+                original_filename=doc.original_filename,
+            )
         )
 
     db.add(AuditLog(

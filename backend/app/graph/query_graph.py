@@ -76,6 +76,8 @@ def _retrieve_node(state: GraphState) -> dict:
             "content": r.content,
             "score": r.final_score,
             "rerank_score": r.rerank_score,
+            "document_name": r.metadata.get("document_name", "") if hasattr(r, "metadata") else "",
+            "metadata": r.metadata if hasattr(r, "metadata") else {},
         }
         for r in reranked
     ]

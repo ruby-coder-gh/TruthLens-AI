@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # ─── Guardrail ────────────────────────────
     GUARDRAIL_THRESHOLD: float = 0.7
     GUARDRAIL_MAX_RETRIES: int = 3
-    GUARDRAIL_NLI_MODEL: str = "microsoft/deberta-v3-base"
+    GUARDRAIL_NLI_MODEL: str = "cross-encoder/nli-deberta-v3-base"
 
     # ─── Chunking ─────────────────────────────
     CHUNK_SIZE: int = 512

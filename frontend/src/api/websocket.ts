@@ -129,6 +129,11 @@ export class QueryWebSocket {
               document_name: s.document_name,
               rerank_score: s.rerank_score,
               page_number: s.page_number,
+              confidence: s.confidence,
+              matched_chunks: s.matched_chunks ?? 1,
+              explanation: s.explanation,
+              updated_at: s.updated_at,
+              file_type: s.file_type,
             };
             this.callbacks.onSource?.(source);
           }

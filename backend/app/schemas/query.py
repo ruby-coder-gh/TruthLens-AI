@@ -49,6 +49,11 @@ class SourceResponse(BaseModel):
     relevance_score: float = 0.0
     rerank_score: float | None = None
     page_number: int | None = None
+    confidence: float | None = None
+    matched_chunks: int | None = None
+    explanation: str | None = None
+    updated_at: str | None = None
+    file_type: str | None = None
 
 
 class QueryDetailResponse(BaseModel):

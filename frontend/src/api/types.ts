@@ -118,6 +118,11 @@ export interface Source {
   relevance_score: number;
   rerank_score?: number;
   page_number?: number;
+  confidence?: number;
+  matched_chunks?: number;
+  explanation?: string;
+  updated_at?: string;
+  file_type?: string;
 }
 
 // ─── Feedback ───────────────────────────────────────────────────────────────
@@ -185,8 +190,11 @@ export interface WSSource {
   type: 'source';
   chunk_id: string;
   document_id: string;
+  document_name?: string;
   excerpt: string;
   score: number;
+  confidence?: number;
+  matched_chunks?: number;
 }
 
 export interface WSGuardrail {

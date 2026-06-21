@@ -120,9 +120,11 @@ async def _run_query_pipeline(
             {
                 "chunk_id": r.chunk_id,
                 "document_id": r.document_id,
+                "document_name": r.metadata.get("document_name", ""),
                 "content": r.content,
                 "score": r.final_score,
                 "rerank_score": r.rerank_score,
+                "metadata": r.metadata,
             }
             for r in reranked
         ]
@@ -136,10 +138,12 @@ async def _run_query_pipeline(
                     {
                         "chunk_id": ctx["chunk_id"],
                         "document_id": ctx["document_id"],
-                        "document_name": ctx.get("document_name", "Unknown"),
+                        "document_name": ctx.get("document_name", ""),
                         "excerpt": ctx["content"][:300],
                         "relevance_score": ctx.get("score", 0),
                         "rerank_score": ctx.get("rerank_score"),
+                        "matched_chunks": 1,
+                        "confidence": min(1.0, ctx.get("score", 0) * 1.5 + 0.3),
                     }
                     for ctx in contexts
                 ],

@@ -23,12 +23,19 @@ import {
   Loader2,
   MessageSquare,
   Trash2,
+  ExternalLink,
+  Pin,
+  Search,
+  Flag,
+  ChevronDown,
+  Eye,
+  Quote,
+  Zap,
 } from 'lucide-react';
 import {
   Button,
   Card,
   Badge,
-  Tabs,
   EmptyState,
   Skeleton,
   ProgressBar,
@@ -43,6 +50,7 @@ import {
   queryApi,
   feedbackApi,
 } from '../api/client';
+import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
 import type { Source, QuerySummary } from '../api/types';
 
@@ -52,12 +60,6 @@ const EXAMPLE_QUESTIONS = [
   'What are the key findings in my documents?',
   'Summarise the main topics',
   'Show me the important data points',
-];
-
-const SIDEBAR_TABS = [
-  { id: 'sources', label: 'Sources', icon: <FileText size={16} /> },
-  { id: 'why', label: 'Why this answer?', icon: <Brain size={16} /> },
-  { id: 'history', label: 'Conversation', icon: <MessageSquare size={16} /> },
 ];
 
 const MAX_TEXTAREA_ROWS = 6;
@@ -677,116 +679,34 @@ export default function ChatPage() {
           </div>
         </motion.div>
 
-        {/* ─── Context Sidebar Panel ─────────────────────────────────────── */}
-        <AnimatePresence>
-          {effectiveSidebarOpen && (
-            <motion.aside
-              initial={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
-              animate={isMobile ? { x: 0 } : { opacity: 1, x: 0 }}
-              exit={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-              className={clsx(
-                'flex w-full flex-col border-l border-border/60 glass',
-                'lg:w-[400px] lg:rounded-tr-2xl lg:rounded-br-2xl',
-                'fixed inset-y-0 right-0 z-30 lg:static',
-                isMobile && !sidebarOpen ? 'translate-x-full' : 'translate-x-0',
-              )}
-            >
-              {/* Sidebar header */}
-              <div className="flex items-center justify-between border-b border-border/60 px-4 py-3 rounded-tr-2xl">
-                <motion.h3
-                  className="text-sm font-semibold text-text"
-                  {...fadeIn}
-                >
-                  Context
-                </motion.h3>
-                {isMobile && (
-                  <motion.button
-                    type="button"
-                    onClick={() => setSidebarOpen(false)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-card-2 hover:text-text"
-                    aria-label="Close context panel"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <X size={16} />
-                  </motion.button>
-                )}
-              </div>
-
-              {/* Tabs */}
-              <Tabs
-                tabs={SIDEBAR_TABS}
-                activeTab={sidebarTab}
-                onChange={setSidebarTab}
-              />
-
-              {/* Tab content */}
-              <div className="flex-1 overflow-y-auto">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={sidebarTab}
-                    initial={{ opacity: 0.99, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -8 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    {sidebarTab === 'sources' && (
-                      <SourcesTab
-                        sources={latestSources}
-                        expandedSource={expandedSource}
-                        onToggleExpand={setExpandedSource}
-                        isLoading={isStreaming && latestSources.length === 0}
-                        highlightedSourceId={highlightedSourceId}
-                      />
-                    )}
-                    {sidebarTab === 'why' && (
-                      <WhyThisAnswerTab
-                        guardrail={latestGuardrail}
-                        trustScore={latestTrustScore}
-                        trustComponents={latestTrustComponents}
-                        isLoading={isStreaming && lastAssistantMessage?.status === 'pending'}
-                      />
-                    )}
-                    {sidebarTab === 'history' && (
-                      <ConversationHistoryTab
-                        queries={storedQueries}
-                        historyLoading={historyLoading}
-                        historyError={historyError}
-                        onRetry={refetchHistory}
-                        onSelect={(queryId) => {
-                          setHistoryOpen(queryId === historyOpen ? null : queryId);
-                          if (queryId !== historyOpen) {
-                            loadQueryDetail(queryId);
-                          }
-                        }}
-                        historyOpen={historyOpen}
-                        onDelete={(queryId) => deleteQueryMutation.mutate(queryId)}
-                        isDeleting={deleteQueryMutation.isPending}
-                        conversationId={conversationId}
-                      />
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
-
-        {/* Mobile overlay */}
-        <AnimatePresence>
-          {isMobile && sidebarOpen && (
-            <motion.div
-              initial={{ opacity: 0.99 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm lg:hidden"
-              onClick={() => setSidebarOpen(false)}
-              aria-hidden="true"
-            />
-          )}
-        </AnimatePresence>
+        {/* ─── Evidence Sidebar ──────────────────────────────────────────── */}
+        <EvidenceSidebar
+          sources={latestSources}
+          guardrail={latestGuardrail}
+          trustScore={latestTrustScore}
+          trustComponents={latestTrustComponents}
+          storedQueries={storedQueries}
+          isLoading={isStreaming && latestSources.length === 0}
+          sidebarOpen={effectiveSidebarOpen}
+          onToggleSidebar={() => setSidebarOpen(false)}
+          expandedSource={expandedSource}
+          onToggleExpand={setExpandedSource}
+          highlightedSourceId={highlightedSourceId}
+          historyLoading={historyLoading}
+          historyError={historyError}
+          onRetry={refetchHistory}
+          onHistorySelect={(queryId) => {
+            setHistoryOpen(queryId === historyOpen ? null : queryId);
+            if (queryId !== historyOpen) {
+              loadQueryDetail(queryId);
+            }
+          }}
+          historyOpen={historyOpen}
+          onHistoryDelete={(queryId) => deleteQueryMutation.mutate(queryId)}
+          isDeleting={deleteQueryMutation.isPending}
+          conversationId={conversationId}
+          isMobile={isMobile}
+        />
       </motion.div>
 
       {tracingBeam && (
@@ -1292,8 +1212,55 @@ function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  SOURCES TAB
+//  SOURCES TAB — Premium Evidence Context Panel
 // ═══════════════════════════════════════════════════════════════════════════════
+
+function getFileIcon(fileType?: string) {
+  switch ((fileType ?? '').toLowerCase()) {
+    case 'pdf': return <FileText size={16} className="text-red-400" />;
+    case 'docx':
+    case 'doc': return <FileText size={16} className="text-blue-400" />;
+    case 'txt': return <FileText size={16} className="text-text-muted" />;
+    default: return <FileText size={16} className="text-purple-400" />;
+  }
+}
+
+function getFileTypeLabel(name?: string): string {
+  if (!name) return 'DOC';
+  const ext = name.split('.').pop()?.toUpperCase() ?? 'DOC';
+  return ext;
+}
+
+function getQualityBadge(score: number): { label: string; color: string; icon: React.ReactNode } {
+  if (score >= 0.7) return { label: 'Highly Relevant', color: 'text-green border-green/30 bg-green/10', icon: <Zap size={12} /> };
+  if (score >= 0.4) return { label: 'Partial Match', color: 'text-orange border-orange/30 bg-orange/10', icon: <Flag size={12} /> };
+  return { label: 'Weak Evidence', color: 'text-red border-red/30 bg-red/10', icon: <AlertCircle size={12} /> };
+}
+
+function formatConfidence(score?: number): number {
+  if (score === undefined || score === null) return 0;
+  return Math.round(Math.min(100, Math.max(0, score * 100)));
+}
+
+function highlightMatches(text: string, query?: string): React.ReactNode {
+  if (!query || query.length < 2) return <>{text}</>;
+  const words = query.split(/\s+/).filter(w => w.length > 2);
+  if (words.length === 0) return <>{text}</>;
+  
+  let result: React.ReactNode = text;
+  for (const word of words) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = String(result).split(new RegExp(`(${escaped})`, 'gi'));
+    if (parts.length > 1) {
+      result = parts.map((part: string, i: number) =>
+        part.toLowerCase() === word.toLowerCase()
+          ? <mark key={i} className="rounded bg-purple-500/20 px-0.5 text-purple-200">{part}</mark>
+          : part
+      );
+    }
+  }
+  return result;
+}
 
 function SourcesTab({
   sources,
@@ -1308,31 +1275,79 @@ function SourcesTab({
   isLoading: boolean;
   highlightedSourceId?: string | null;
 }) {
+  // ─── Loading State ───────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="space-y-3 p-4">
         {Array.from({ length: 3 }).map((_, i) => (
           <motion.div
             key={i}
-            initial={{ opacity: 0.99, y: 10 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
           >
-            <Skeleton key={i} height={80} width="100%" />
+            <div className="overflow-hidden rounded-xl border border-border/40 glass">
+              <div className="animate-pulse space-y-3 p-4">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-card-2" />
+                  <div className="h-3 flex-1 rounded bg-card-2" />
+                </div>
+                <div className="h-2 w-full rounded-full bg-card-2" />
+                <div className="h-2 w-3/4 rounded bg-card-2" />
+                <div className="h-2 w-1/2 rounded bg-card-2" />
+              </div>
+            </div>
           </motion.div>
         ))}
       </div>
     );
   }
 
+  // ─── Empty State ─────────────────────────────────────────────────────────
   if (sources.length === 0) {
     return (
-      <div className="p-4">
-        <EmptyState
-          icon={<FileText size={24} />}
-          title="No sources yet"
-          description="Sources will appear here after you ask a question."
-        />
+      <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+        <motion.div
+          initial={{ scale: 0, rotate: -10 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', damping: 12, stiffness: 150 }}
+          className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl glass shadow-lg shadow-primary/10"
+        >
+          <Search size={28} className="text-primary-soft/60" />
+        </motion.div>
+        <motion.h4
+          className="text-sm font-semibold text-text"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          No supporting evidence found
+        </motion.h4>
+        <motion.p
+          className="mt-1 max-w-[220px] text-xs text-text-dim"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+        >
+          Sources will appear after you ask a question.
+        </motion.p>
+        <motion.div
+          className="mt-4 space-y-1.5 text-left"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.25 }}
+        >
+          {[
+            'Rephrase your question',
+            'Upload more documents',
+            'Search with broader terms',
+          ].map((tip) => (
+            <div key={tip} className="flex items-center gap-2 text-[11px] text-text-dim">
+              <div className="h-1 w-1 rounded-full bg-primary-soft/40" />
+              {tip}
+            </div>
+          ))}
+        </motion.div>
       </div>
     );
   }
@@ -1342,17 +1357,33 @@ function SourcesTab({
 
   return (
     <motion.div
-      className="space-y-2 p-4"
+      className="space-y-2 p-3"
       variants={staggerContainer}
       initial="initial"
       animate="animate"
     >
-      <motion.p className="text-xs font-medium text-text-muted" variants={staggerItem}>
-        {sources.length} source{sources.length !== 1 ? 's' : ''} retrieved
-      </motion.p>
-      <div className="space-y-2">
-        {visibleSources.map((source) => {
+      {/* Header count */}
+      <motion.div
+        className="flex items-center justify-between px-1 pb-1"
+        variants={staggerItem}
+      >
+        <span className="text-xs font-medium text-text-muted">
+          {sources.length} source{sources.length !== 1 ? 's' : ''} retrieved
+        </span>
+        <span className="text-[10px] text-text-dim">
+          Sorted by relevance
+        </span>
+      </motion.div>
+
+      <div className="space-y-2.5">
+        {visibleSources.map((source, idx) => {
           const isExpanded = expandedSource === source.chunk_id;
+          const pct = Math.round((source.relevance_score ?? 0) * 100);
+          const conf = formatConfidence(source.confidence ?? source.relevance_score);
+          const quality = getQualityBadge(source.relevance_score ?? 0);
+          const docName = source.document_name || `Document ${source.document_id.slice(0, 8)}`;
+          const fileType = source.file_type || getFileTypeLabel(source.document_name);
+
           return (
             <motion.div
               key={source.chunk_id}
@@ -1360,78 +1391,230 @@ function SourcesTab({
               layout
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
             >
-              <Card 
+              <motion.div
                 id={`source-${source.chunk_id}`}
                 className={clsx(
-                  "p-3 relative overflow-hidden transition-colors",
-                  highlightedSourceId === source.chunk_id ? "border-accent shadow-[0_0_15px_rgba(45,212,191,0.2)]" : ""
+                  'group relative overflow-hidden rounded-xl border transition-all duration-300',
+                  isExpanded
+                    ? 'border-purple-500/40 shadow-[0_0_20px_rgba(168,85,247,0.12)]'
+                    : highlightedSourceId === source.chunk_id
+                      ? 'border-accent shadow-[0_0_15px_rgba(45,212,191,0.2)]'
+                      : 'border-border/40 hover:border-purple-500/25',
+                  'glass backdrop-blur-xl',
                 )}
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
               >
+                {/* Glow sweep on highlight */}
                 {highlightedSourceId === source.chunk_id && (
-                   <div className="absolute inset-0 animate-glow-sweep pointer-events-none mix-blend-screen" />
+                  <div className="pointer-events-none absolute inset-0 animate-glow-sweep mix-blend-screen" />
                 )}
-                <div className="space-y-2 relative z-10">
-                  {/* Document name */}
-                  <div className="flex items-center gap-2">
-                    <FileText size={14} className="shrink-0 text-primary-soft" />
-                    <span className="truncate text-xs font-medium text-text">
-                      {source.document_name ?? `Document ${source.document_id.slice(0, 8)}`}
-                    </span>
+
+                {/* Gradient border overlay on hover */}
+                <div className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(168,85,247,0.08) 0%, transparent 50%)',
+                  }}
+                />
+
+                <div className="relative z-10 space-y-3 p-3.5">
+                  {/* ─── Row 1: Icon + Name + Badge ──────────────────────── */}
+                  <div className="flex items-start gap-2.5">
+                    {/* File type icon with glass bg */}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card-2/80 ring-1 ring-border/30">
+                      {getFileIcon(fileType)}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="truncate text-sm font-medium text-text">
+                          {docName}
+                        </h4>
+                        <span className="shrink-0 rounded-md bg-card-2/60 px-1.5 py-0.5 text-[10px] font-mono font-medium text-text-dim ring-1 ring-border/20">
+                          {fileType}
+                        </span>
+                      </div>
+
+                      {/* Confidence + matched chunks row */}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-dim">
+                        <span className="flex items-center gap-1">
+                          <Shield size={11} className="text-primary-soft/70" />
+                          Confidence: <span className={clsx('font-semibold', conf >= 70 ? 'text-green' : conf >= 40 ? 'text-orange' : 'text-red')}>{conf}%</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Pin size={11} className="text-accent/70" />
+                          Chunks: {source.matched_chunks ?? 1}
+                        </span>
+                        {source.updated_at && (
+                          <span className="flex items-center gap-1">
+                            <Clock size={11} className="text-text-dim/70" />
+                            {new Date(source.updated_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Relevance score bar */}
-                  <ProgressBar
-                    value={source.relevance_score * 100}
-                    size="sm"
-                    label="Relevance"
-                  />
+                  {/* ─── Row 2: Animated Relevance Bar ───────────────────── */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-text-dim">Relevance</span>
+                      <span className={clsx(
+                        'font-semibold font-mono',
+                        pct >= 70 ? 'text-accent' : pct >= 40 ? 'text-orange' : 'text-red'
+                      )}>
+                        {pct}%
+                      </span>
+                    </div>
+                    <div className="relative h-2 overflow-hidden rounded-full bg-card-2">
+                      <motion.div
+                        className="h-full rounded-full"
+                        style={{
+                          background: pct >= 70
+                            ? 'linear-gradient(90deg, #a855f7, #3b82f6)'
+                            : pct >= 40
+                              ? 'linear-gradient(90deg, #f59e0b, #f97316)'
+                              : 'linear-gradient(90deg, #ef4444, #f97316)',
+                        }}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
+                      />
+                      {/* Pulse glow */}
+                      <motion.div
+                        className="absolute inset-y-0 right-0 w-4 rounded-full"
+                        style={{
+                          background: 'linear-gradient(90deg, transparent, rgba(168,85,247,0.4))',
+                          filter: 'blur(4px)',
+                          right: `${100 - pct}%`,
+                        }}
+                        animate={{ opacity: [0, 0.8, 0] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                    </div>
+                  </div>
 
-                  {/* Excerpt */}
-                  <motion.p
-                    className="text-xs leading-relaxed text-text-muted"
-                    layout
-                  >
-                    {isExpanded
-                      ? source.excerpt
-                      : `${source.excerpt.slice(0, 200)}${source.excerpt.length > 200 ? '…' : ''}`}
-                  </motion.p>
+                  {/* ─── Row 3: Quality Badge ────────────────────────────── */}
+                  <div className={clsx(
+                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium',
+                    quality.color
+                  )}>
+                    {quality.icon}
+                    {quality.label}
+                  </div>
 
-                  {/* Expand / collapse */}
-                  {source.excerpt.length > 200 && (
+                  {/* ─── Row 4: Excerpt with highlighting ────────────────── */}
+                  <div className="relative">
+                    <div className={clsx(
+                      'overflow-hidden rounded-lg border border-border/20 bg-bg-soft/40',
+                      isExpanded ? 'max-h-96' : 'max-h-[72px]'
+                    )}>
+                      <p className="px-2.5 py-2 text-xs leading-relaxed text-text-muted font-[family-name:var(--font-mono,monospace)]">
+                        {isExpanded
+                          ? highlightMatches(source.excerpt, '')
+                          : highlightMatches(source.excerpt.slice(0, 200), '')}
+                        {!isExpanded && source.excerpt.length > 200 && '…'}
+                      </p>
+                    </div>
+
+                    {/* Expand / collapse */}
+                    {source.excerpt.length > 200 && (
+                      <motion.button
+                        type="button"
+                        onClick={() => onToggleExpand(isExpanded ? null : source.chunk_id)}
+                        className="mt-1 flex items-center gap-1 text-[10px] font-medium text-primary-soft/70 transition-colors hover:text-primary-soft"
+                        whileHover={{ x: 2 }}
+                      >
+                        {isExpanded ? 'Show less' : 'Show more'}
+                        <ChevronDown
+                          size={12}
+                          className={clsx('transition-transform', isExpanded && 'rotate-180')}
+                        />
+                      </motion.button>
+                    )}
+                  </div>
+
+                  {/* ─── Row 5: AI Explanation ───────────────────────────── */}
+                  {source.explanation && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="rounded-lg border border-purple-500/15 bg-purple-500/5 px-2.5 py-2"
+                    >
+                      <div className="flex items-start gap-2">
+                        <Brain size={12} className="mt-0.5 shrink-0 text-purple-400" />
+                        <div>
+                          <p className="text-[10px] font-medium text-purple-300">Why this source was used</p>
+                          <p className="mt-0.5 text-[11px] leading-relaxed text-text-dim">
+                            {source.explanation}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* ─── Row 6: Action Buttons ───────────────────────────── */}
+                  <div className="flex items-center gap-1.5 pt-0.5">
                     <motion.button
                       type="button"
-                      onClick={() => onToggleExpand(isExpanded ? null : source.chunk_id)}
-                      className="text-xs font-medium text-primary-soft transition-colors hover:text-primary"
-                      whileHover={{ x: 3 }}
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      title="View document"
                     >
-                      {isExpanded ? 'Show less' : 'Show more'}
+                      <Eye size={12} />
+                      View
                     </motion.button>
-                  )}
+                    <motion.button
+                      type="button"
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      title="View match location"
+                    >
+                      <ExternalLink size={12} />
+                      Match
+                    </motion.button>
+                    <motion.button
+                      type="button"
+                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-primary-soft"
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      title="Copy citation"
+                      onClick={() => {
+                        const citation = `[${docName}] (Confidence: ${conf}%) — "${source.excerpt.slice(0, 100)}..."`;
+                        navigator.clipboard.writeText(citation).catch(() => {});
+                      }}
+                    >
+                      <Quote size={12} />
+                      Cite
+                    </motion.button>
 
-                  {/* Page number */}
-                  {source.page_number != null && (
-                    <span className="text-[10px] text-text-dim">
-                      Page {source.page_number}
-                    </span>
-                  )}
+                    {/* Page number */}
+                    {source.page_number != null && (
+                      <span className="ml-auto text-[10px] text-text-dim">
+                        p.{source.page_number}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </Card>
+              </motion.div>
             </motion.div>
           );
         })}
       </div>
 
+      {/* Show all button */}
       {hasMore && (
         <motion.button
           type="button"
           onClick={() => onToggleExpand('__all__')}
-          className="flex w-full items-center justify-center gap-1 rounded-xl glass px-3 py-2.5 text-xs text-text-muted transition-colors hover:bg-card-hover hover:text-text"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl glass px-3 py-2.5 text-xs text-text-muted transition-all hover:border-primary/20 hover:bg-card-hover hover:text-text hover:shadow-lg hover:shadow-primary/5"
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
           variants={staggerItem}
         >
           Show all {sources.length} sources
-          <ChevronRight size={14} />
+          <ChevronDown size={14} />
         </motion.button>
       )}
     </motion.div>

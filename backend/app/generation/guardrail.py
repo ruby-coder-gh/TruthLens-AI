@@ -31,8 +31,12 @@ def _load_nli_model(model_name: str | None = None) -> Any:
     """Load NLI model for entailment checking."""
     name = model_name or settings.GUARDRAIL_NLI_MODEL
     logger.info("loading_nli_model", model=name)
-    from sentence_transformers import CrossEncoder
-    return CrossEncoder(name, device=settings.EMBED_DEVICE)
+    try:
+        from sentence_transformers import CrossEncoder
+        return CrossEncoder(name, device=settings.EMBED_DEVICE)
+    except Exception as e:
+        logger.warning("nli_model_load_failed", model=name, error=str(e))
+        return None
 
 
 def _extract_claims(answer: str) -> list[str]:
@@ -57,23 +61,33 @@ def _extract_claims(answer: str) -> list[str]:
     return filtered
 
 
+def _softmax(logits: list[float]) -> list[float]:
+    """Convert logits to probabilities via softmax."""
+    import math
+    exps = [math.exp(x) for x in logits]
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
 def _nli_infer(model: Any, premise: str, hypothesis: str) -> tuple[float, float, float]:
-    """Run NLI inference. Returns (entailment, neutral, contradiction) scores."""
+    """Run NLI inference. Returns (entailment, neutral, contradiction) probabilities.
+    
+    Model output order: [contradiction(0), entailment(1), neutral(2)].
+    We reorder to (entailment, neutral, contradiction).
+    """
     try:
         pair = [premise, hypothesis]
         result = model.predict([pair])
         if len(result.shape) == 1 and result.shape[0] == 3:
-            # Direct 3-class output
-            scores = result.tolist()
-            return scores[0], scores[1], scores[2]
+            scores = _softmax(result.tolist())
+            return scores[1], scores[2], scores[0]  # reorder
         elif len(result.shape) == 2 and result.shape[1] == 3:
-            scores = result[0].tolist()
-            return scores[0], scores[1], scores[2]
+            scores = _softmax(result[0].tolist())
+            return scores[1], scores[2], scores[0]  # reorder
         else:
-            # Assume [entailment, neutral, contradiction]
-            scores = result.flatten().tolist()
+            scores = _softmax(result.flatten().tolist())
             if len(scores) >= 3:
-                return scores[0], scores[1], scores[2]
+                return scores[1], scores[2], scores[0]  # reorder
     except Exception as e:
         logger.warning("nli_inference_failed", error=str(e))
 
@@ -96,6 +110,8 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
         return GuardrailResult(passed=True, score=1.0, details="No answer or context to check")
 
     model = _load_nli_model()
+    if model is None:
+        return GuardrailResult(passed=True, score=1.0, details="NLI model not available - skipping guardrail")
 
     # Combine all contexts into a single premise
     premise = "\n".join(

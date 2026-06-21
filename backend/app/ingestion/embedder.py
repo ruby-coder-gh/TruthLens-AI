@@ -35,11 +35,12 @@ def _load_model(model_name: str | None = None) -> SentenceTransformer:
     return SentenceTransformer(name, device=settings.EMBED_DEVICE)
 
 
-async def embed(chunks: list[ChunkResult]) -> list[EmbeddingResult]:
+async def embed(chunks: list[ChunkResult], document_name: str = "") -> list[EmbeddingResult]:
     """Convert text chunks to vector embeddings.
 
     Args:
         chunks: List of ChunkResult objects.
+        document_name: Original filename for metadata.
 
     Returns:
         List of EmbeddingResult with numpy arrays.
@@ -64,6 +65,7 @@ async def embed(chunks: list[ChunkResult]) -> list[EmbeddingResult]:
     for chunk, emb in zip(chunks, embeddings):
         metadata: dict[str, Any] = {
             "document_id": chunk.document_id,
+            "document_name": document_name,
             "chunk_id": chunk.id,
             "chunk_index": chunk.index,
             "token_count": chunk.token_count,

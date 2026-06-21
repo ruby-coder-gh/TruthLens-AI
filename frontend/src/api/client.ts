@@ -321,6 +321,9 @@ export const queryApi = {
   get: (workspaceId: string, queryId: string): Promise<QueryDetail> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}`),
 
+  getAnywhere: (queryId: string): Promise<QueryDetail> =>
+    request(`/queries/${queryId}`),
+
   delete: (workspaceId: string, queryId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}`, { method: 'DELETE' }),
 

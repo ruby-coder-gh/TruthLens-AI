@@ -88,7 +88,7 @@ async def run_ingestion_pipeline(
 
         # 3. Embed
         logger.info("ingestion_phase", phase="embed", document_id=document_id, chunks=len(state.chunks))
-        state.embeddings = await embed(state.chunks)
+        state.embeddings = await embed(state.chunks, document_name=state.original_filename)
 
         # 4. Store
         logger.info("ingestion_phase", phase="store", document_id=document_id)
