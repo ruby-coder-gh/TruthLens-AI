@@ -1,0 +1,8 @@
+E101 Alice Present
+E102 Bob Absent
+E103 Charlie Present
+E101 Alice Present
+E102 Bob Absent
+E101 Alice Present
+E102 Bob Absent
+E103 Charlie Present

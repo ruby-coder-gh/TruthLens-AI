@@ -1,0 +1,1 @@
+{"corpus": ["Hello world. This is test content for ingestion."], "metadatas": [{"document_id": "f42bfe6d-8797-460b-bfce-500c75683b82", "chunk_id": "93a28071-8fb5-425d-b72c-813a3b0097a7", "chunk_index": 0, "token_count": 12, "source": "test.txt"}]}
