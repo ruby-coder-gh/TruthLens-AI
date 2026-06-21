@@ -806,7 +806,13 @@ function ReasoningTraceSection({
                 animate="animate"
               >
                 {trace.map((step, i) => (
-                  <motion.div key={i} variants={staggerItem}>
+                  <motion.div 
+                    key={i} 
+                    initial={{ opacity: 0.99, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, margin: "-10px" }}
+                    transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
+                  >
                     <ReasoningStep index={i} step={step} />
                   </motion.div>
                 ))}

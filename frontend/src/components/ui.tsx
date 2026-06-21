@@ -101,23 +101,24 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', loading = false, disabled, className, children, ...props }, ref) => {
     const isDisabled = disabled || loading;
     return (
-      <button
+      <motion.button
         ref={ref}
         disabled={isDisabled}
+        whileHover={{ scale: isDisabled ? 1 : 1.02 }}
+        whileTap={{ scale: isDisabled ? 1 : 0.98 }}
         className={clsx(
           'inline-flex items-center justify-center rounded-xl font-medium transition-all duration-150',
-          'hover:scale-[1.02] active:scale-[0.98]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100',
+          'disabled:cursor-not-allowed disabled:opacity-50',
           variantStyles[variant],
           sizeStyles[size],
           className,
         )}
-        {...props}
+        {...props as any}
       >
         {loading && <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />}
         {children}
-      </button>
+      </motion.button>
     );
   },
 );
@@ -290,13 +291,15 @@ interface CardProps {
 }
 
 export function Card({ children, className, hover = false, onClick }: CardProps) {
-  const Component = onClick ? 'button' : 'div';
+  const Component = onClick ? motion.button : motion.div;
   return (
     <Component
       onClick={onClick}
+      whileHover={hover || onClick ? { y: -4, scale: 1.01 } : {}}
+      whileTap={onClick ? { scale: 0.98 } : {}}
       className={clsx(
         'glass rounded-2xl p-5 lg:p-6 transition-all duration-200',
-        hover && 'hover:-translate-y-1 hover:scale-[1.01] hover:shadow-lg hover:shadow-primary/5 cursor-pointer',
+        (hover || onClick) && 'hover:shadow-lg hover:shadow-primary/5 cursor-pointer',
         onClick && 'w-full text-left',
         className,
       )}

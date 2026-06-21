@@ -1,0 +1,160 @@
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { FileText, File, FileSpreadsheet, FileImage, Search, Filter, Download, Clock } from 'lucide-react';
+import { Card, Badge, Input, LoadingSpinner, EmptyState, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { documentApi } from '../api/client';
+import type { Document } from '../api/types';
+
+const DOCUMENT_TYPE_FILTERS = ['All', 'PDF', 'DOCX', 'TXT'] as const;
+
+function getFileIcon(mime: string) {
+  if (mime.includes('pdf')) return <FileText size={20} />;
+  if (mime.includes('spreadsheet') || mime.includes('excel')) return <FileSpreadsheet size={20} />;
+  if (mime.includes('image')) return <FileImage size={20} />;
+  return <File size={20} />;
+}
+
+function getFileType(mime: string): string {
+  if (mime.includes('pdf')) return 'PDF';
+  if (mime.includes('docx') || mime.includes('document')) return 'DOCX';
+  if (mime.includes('txt')) return 'TXT';
+  return mime.split('/').pop()?.toUpperCase() || 'FILE';
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
+  switch (status) {
+    case 'indexed': return 'green';
+    case 'pending': return 'orange';
+    case 'failed': return 'red';
+    case 'processing': return 'blue';
+    default: return 'gray';
+  }
+}
+
+// ─── Component ─────────────────────────────────────────────────────────────────
+
+export default function DocumentsBrowsePage() {
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('All');
+  const [loading, setLoading] = useState(true);
+  const [documents, setDocuments] = useState<Document[]>([]);
+
+  useEffect(() => {
+    setLoading(true);
+    documentApi.listAll()
+      .then((result) => {
+        setDocuments(result.data || []);
+        setLoading(false);
+      })
+      .catch(() => {
+        setDocuments([]);
+        setLoading(false);
+      });
+  }, []);
+
+  const filtered = documents.filter((doc) => {
+    const matchesSearch = doc.original_filename.toLowerCase().includes(search.toLowerCase());
+    const matchesType = typeFilter === 'All' || getFileType(doc.mime_type) === typeFilter;
+    return matchesSearch && matchesType;
+  });
+
+  return (
+    <motion.div
+      className="space-y-5"
+      variants={pageTransition}
+      initial="initial"
+      animate="animate"
+    >
+      {/* Header */}
+      <motion.div variants={staggerItem}>
+        <h1 className="text-2xl font-bold text-text">Documents</h1>
+        <p className="text-sm text-text-muted mt-1">Browse all indexed documents.</p>
+      </motion.div>
+
+      {/* Search & Filters */}
+      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row gap-3">
+        <div className="flex-1 max-w-md">
+          <Input
+            placeholder="Search documents..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            icon={<Search size={16} />}
+          />
+        </div>
+        <div className="flex gap-1.5">
+          {DOCUMENT_TYPE_FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setTypeFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                typeFilter === f
+                  ? 'bg-primary/15 text-primary-soft border border-primary/20'
+                  : 'glass text-text-muted hover:text-text hover:bg-white/[0.04]'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Document Grid */}
+      <motion.div
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        variants={staggerContainer}
+        initial="initial"
+        animate="animate"
+      >
+        {loading ? (
+          <LoadingSpinner text="Loading documents..." />
+        ) : filtered.length === 0 ? (
+          <div className="col-span-full">
+            <EmptyState
+              icon={<FileText size={24} />}
+              title={search ? 'No documents match your search' : 'No documents available'}
+              description={search ? 'Try modifying your search or filters.' : 'Documents will appear here once uploaded by an administrator.'}
+            />
+          </div>
+        ) : (
+          filtered.map((doc, i) => (
+            <motion.div key={doc.id} variants={staggerItem}>
+              <Card hover className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
+                    {getFileIcon(doc.mime_type)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-text truncate">{doc.original_filename}</p>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
+                      <span className="text-xs text-text-dim">{getFileType(doc.mime_type)}</span>
+                      <span className="text-xs text-text-dim">{formatFileSize(doc.file_size)}</span>
+                      {doc.chunk_count != null && (
+                        <span className="text-xs text-text-dim">{doc.chunk_count} chunks</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 mt-2 text-xs text-text-dim">
+                      <Clock size={11} />
+                      {formatDate(doc.created_at)}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+          ))
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}

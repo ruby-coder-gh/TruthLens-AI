@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, UploadFile, File, Form, BackgroundTasks
 
 from app.config import settings
-from app.core.deps import check_workspace_access, get_current_user, get_db
-from app.core.exceptions import NotFoundException, TooLargeException, UnsupportedTypeException
+from app.core.deps import check_workspace_access, get_current_admin, get_current_user, get_db
+from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -285,6 +285,118 @@ async def delete_document(
         resource_id=doc_id,
     ))
     await db.delete(doc)
+
+
+@router.get("/documents", response_model=PaginatedResponse[DocumentResponse])
+async def list_all_documents(
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List ALL documents across accessible workspaces (no workspace scope)."""
+    from app.models.workspace import WorkspaceMember
+
+    # Admin sees all documents
+    if current_user.role == "admin":
+        query = select(Document)
+        count_query = select(func.count(Document.id))
+        if status:
+            query = query.where(Document.status == status)
+            count_query = count_query.where(Document.status == status)
+    else:
+        # Regular user: documents from workspaces they are members of
+        member_ws_ids = select(WorkspaceMember.workspace_id).where(
+            WorkspaceMember.user_id == current_user.id
+        )
+        query = select(Document).where(Document.workspace_id.in_(member_ws_ids))
+        count_query = select(func.count(Document.id)).where(Document.workspace_id.in_(member_ws_ids))
+        if status:
+            query = query.where(Document.status == status)
+            count_query = count_query.where(Document.status == status)
+
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    result = await db.execute(query.order_by(Document.created_at.desc()).offset(offset).limit(page_size))
+    docs = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[
+            DocumentResponse(
+                id=d.id,
+                workspace_id=d.workspace_id,
+                filename=d.filename,
+                original_filename=d.original_filename,
+                mime_type=d.mime_type,
+                file_size=d.file_size,
+                page_count=d.page_count,
+                chunk_count=d.chunk_count,
+                status=d.status,
+                error_message=d.error_message,
+                uploaded_by=d.uploaded_by,
+                created_at=d.created_at,
+                updated_at=d.updated_at,
+            )
+            for d in docs
+        ],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.post("/workspaces/{workspace_id}/documents/{doc_id}/reindex", status_code=202)
+async def reindex_document(
+    workspace_id: str,
+    doc_id: str,
+    background_tasks: BackgroundTasks = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-trigger ingestion for a document (workspace owner or admin)."""
+    from app.models.workspace import Workspace
+
+    # Check workspace ownership
+    ws_result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    workspace = ws_result.scalar_one_or_none()
+    if not workspace:
+        raise NotFoundException("Workspace", workspace_id)
+
+    if workspace.owner_id != current_user.id and current_user.role != "admin":
+        raise ForbiddenException("Only workspace owner or admin can reindex")
+
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", doc_id)
+
+    # Reset status to trigger re-ingestion
+    doc.status = "pending"
+    doc.error_message = None
+
+    # Schedule background processing
+    file_path = settings.upload_path / doc.filename
+    if background_tasks and file_path.exists():
+        background_tasks.add_task(
+            process_document_background,
+            document_id=doc.id,
+            workspace_id=workspace_id,
+            file_path=file_path,
+            mime_type=doc.mime_type,
+            original_filename=doc.original_filename,
+        )
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="document.reindex",
+        resource_type="document",
+        resource_id=doc_id,
+    ))
+
+    return {"message": "Document reindex initiated", "document_id": doc_id}
 
 
 async def process_document_background(

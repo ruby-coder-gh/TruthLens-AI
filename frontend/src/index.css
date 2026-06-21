@@ -45,8 +45,8 @@ body {
 /* ─── Animated Background ─── */
 .bg-grid {
   background-image:
-    linear-gradient(rgba(60, 75, 110, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(60, 75, 110, 0.08) 1px, transparent 1px);
+    linear-gradient(rgba(60, 75, 110, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(60, 75, 110, 0.05) 1px, transparent 1px);
   background-size: 60px 60px;
   position: fixed;
   inset: 0;
@@ -250,6 +250,18 @@ body {
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+}
+
+/* ─── Glow Sweep for Citation Trace ─── */
+@keyframes glowSweep {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-glow-sweep {
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.4), transparent);
+  background-size: 200% 100%;
+  animation: glowSweep 1.5s ease-out forwards;
 }
 
 /* ─── Reduced Motion ─── */

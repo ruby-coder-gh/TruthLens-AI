@@ -327,6 +327,8 @@ async def websocket_query(websocket: WebSocket):
             })
             await websocket.close(code=4001)
             return
+
+        await websocket.send_json({"type": "auth_success"})
     except Exception:
         await websocket.send_json({
             "type": "error",

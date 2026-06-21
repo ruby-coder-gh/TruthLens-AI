@@ -4,6 +4,26 @@ from app.schemas.auth import (
     RefreshRequest,
     AuthResponse,
     TokenResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ChangePasswordRequest,
+    LogoutRequest,
+)
+from app.schemas.collection import (
+    CollectionCreate,
+    CollectionUpdate,
+    CollectionResponse,
+    CollectionAccessGrant,
+    CollectionAccessResponse,
+)
+from app.schemas.analytics import (
+    FlaggedAnswerResponse,
+    UsageStatsResponse,
+    TrustScoreDistribution,
+    UserActivityResponse,
+    AdminSettingsResponse,
+    AdminSettingsUpdate,
+    EvalRunResponse,
 )
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.workspace import (
@@ -95,4 +115,20 @@ __all__ = [
     "WSCompletePayload",
     "WSErrorPayload",
     "WSProgressPayload",
+    "ForgotPasswordRequest",
+    "ResetPasswordRequest",
+    "ChangePasswordRequest",
+    "LogoutRequest",
+    "CollectionCreate",
+    "CollectionUpdate",
+    "CollectionResponse",
+    "CollectionAccessGrant",
+    "CollectionAccessResponse",
+    "FlaggedAnswerResponse",
+    "UsageStatsResponse",
+    "TrustScoreDistribution",
+    "UserActivityResponse",
+    "AdminSettingsResponse",
+    "AdminSettingsUpdate",
+    "EvalRunResponse",
 ]

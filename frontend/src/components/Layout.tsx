@@ -12,8 +12,11 @@ import {
   LogOut,
   Menu,
   X,
-  ChevronRight,
   Sparkles,
+  BookOpen,
+  Home,
+  Clock,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -38,19 +41,45 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Workspaces', path: '/workspaces', icon: LayoutDashboard },
+  { label: 'Dashboard', path: '/dashboard', icon: Home },
+  { label: 'Chat History', path: '/chats', icon: Clock },
   { label: 'Documents', path: '/documents', icon: FileText },
+  { label: 'Workspaces', path: '/workspaces', icon: LayoutDashboard },
+  { label: 'Settings', path: '/settings', icon: Settings },
+  { label: 'API Catalog', path: '/api-catalog', icon: BookOpen, adminOnly: true },
   { label: 'Admin', path: '/admin', icon: Shield, adminOnly: true },
 ];
 
-// ─── Sidebar nav item component ───────────────────────────────────────────────
-function NavItemLink({ item, active, onClick }: { item: NavItem; active: boolean; onClick: () => void }) {
+// ─── Glow particles ─────────────────────────────────────────────────────────
+function NavGlowParticles() {
+  return (
+    <span className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <motion.span
+          key={i}
+          className="absolute w-1 h-1 rounded-full bg-primary-soft"
+          style={{ left: `${20 + i * 20}%`, top: '50%' }}
+          initial={{ y: 0, opacity: 0 }}
+          animate={{
+            y: [0, -15 - Math.random() * 10],
+            opacity: [0, 0.6, 0],
+          }}
+          transition={{ duration: 1.5, delay: i * 0.3, repeat: Infinity, ease: 'easeOut' }}
+        />
+      ))}
+    </span>
+  );
+}
+
+// ─── Sidebar nav item component (animated glowing) ──────────────────────────
+function NavItemLink({ item, active, collapsed, onClick }: { item: NavItem; active: boolean; collapsed: boolean; onClick: () => void }) {
   const Icon = item.icon;
   return (
     <Link
       to={item.path}
       onClick={onClick}
-      className="relative block"
+      title={collapsed ? item.label : undefined}
+      className={clsx('relative block group', collapsed ? 'mx-auto' : '')}
     >
       {active && (
         <motion.div
@@ -59,26 +88,54 @@ function NavItemLink({ item, active, onClick }: { item: NavItem; active: boolean
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         />
       )}
-      <div
+
+      {/* Active glow background */}
+      {active && (
+        <motion.div
+          className="absolute inset-0 rounded-xl"
+          style={{
+            background: 'radial-gradient(circle at 30% 50%, rgba(139,92,246,0.12), transparent)',
+          }}
+          animate={{ opacity: [0.5, 1, 0.5] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      )}
+
+      {/* Active floating particles */}
+      {active && <NavGlowParticles />}
+
+      <motion.div
         className={clsx(
-          'relative z-10 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200',
+          'relative z-10 flex items-center rounded-xl text-sm font-medium transition-all duration-300',
+          collapsed ? 'justify-center w-10 h-10' : 'gap-3 px-3 py-2.5',
           active
             ? 'text-primary-soft'
-            : 'text-text-muted hover:text-text hover:bg-white/[0.04]',
+            : 'text-text-muted group-hover:text-text group-hover:bg-white/[0.04]',
         )}
+        whileHover={collapsed ? { scale: 1.05 } : { x: 3 }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
       >
-        <Icon size={18} strokeWidth={active ? 2.5 : 1.5} />
-        <span>{item.label}</span>
-        {active && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="ml-auto"
-          >
-            <ChevronRight size={14} className="text-primary-soft" />
-          </motion.div>
-        )}
-      </div>
+        <motion.span
+          className="flex items-center justify-center"
+          whileHover={{ scale: 1.15 }}
+          transition={{ duration: 0.2 }}
+        >
+          <Icon
+            size={18}
+            strokeWidth={active ? 2.5 : 1.5}
+            style={{
+              filter: active ? 'drop-shadow(0 0 6px rgba(139,92,246,0.5))' : 'none',
+            }}
+          />
+        </motion.span>
+        <motion.span
+          animate={{ opacity: collapsed ? 0 : 1, width: collapsed ? 0 : 'auto' }}
+          transition={{ type: 'spring', damping: 22, stiffness: 180, mass: 0.8 }}
+          className="overflow-hidden whitespace-nowrap"
+        >
+          {item.label}
+        </motion.span>
+      </motion.div>
     </Link>
   );
 }
@@ -88,13 +145,19 @@ export default function Layout() {
   const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   const closeSidebar = () => setSidebarOpen(false);
   const filteredNav = navItems.filter((item) => !item.adminOnly || user?.role === 'admin');
 
   const isActive = (path: string) => {
+    if (path === '/dashboard') return location.pathname === '/dashboard';
+    if (path === '/chats') return location.pathname === '/chats';
+    if (path === '/documents') return location.pathname === '/documents';
     if (path === '/workspaces') return location.pathname === '/workspaces' || location.pathname.startsWith('/workspaces/');
-    if (path === '/documents') return location.pathname === '/documents' || location.pathname.startsWith('/documents/');
+    if (path === '/settings') return location.pathname === '/settings';
+    if (path === '/api-catalog') return location.pathname === '/api-catalog';
+    if (path === '/admin') return location.pathname === '/admin' || location.pathname.startsWith('/admin/');
     return location.pathname.startsWith(path);
   };
 
@@ -121,11 +184,10 @@ export default function Layout() {
 
       {/* ─── Sidebar ──────────────────────────────────────────────────── */}
       <motion.aside
-        initial={false}
-        animate={{ x: sidebarOpen ? 0 : -280 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+        animate={{ width: collapsed ? 64 : 256 }}
+        transition={{ type: 'spring', damping: 22, stiffness: 180, mass: 0.8 }}
         className={clsx(
-          'fixed inset-y-0 left-0 z-40 flex w-64 flex-col',
+          'fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden',
           'lg:translate-x-0 lg:static',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         )}
@@ -133,41 +195,64 @@ export default function Layout() {
         {/* Glass sidebar */}
         <div className="absolute inset-0 bg-[#0a0e17]/90 backdrop-blur-2xl border-r border-white/[0.06]" />
 
-        {/* Brand */}
-        <div className="relative z-10 flex h-16 items-center gap-3 border-b border-white/[0.06] px-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-lg shadow-primary/30 transition-transform duration-150 hover:scale-110 hover:rotate-[10deg]">
+        {/* Brand — click to toggle collapse */}
+        <div
+          onClick={() => setCollapsed((prev) => !prev)}
+          className={clsx(
+            'relative z-10 flex h-16 cursor-pointer items-center border-b border-white/[0.06] transition-all duration-300',
+            collapsed ? 'justify-center px-0' : 'gap-3 px-6',
+          )}
+        >
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-lg shadow-primary/30 transition-transform duration-150 hover:scale-110 hover:rotate-[10deg] shrink-0">
             <Sparkles size={16} />
           </div>
-          <div>
+          <motion.div
+            animate={{ opacity: collapsed ? 0 : 1, width: collapsed ? 0 : 'auto' }}
+            transition={{ type: 'spring', damping: 22, stiffness: 180, mass: 0.8 }}
+            className={clsx('overflow-hidden whitespace-nowrap', collapsed ? 'invisible' : 'visible')}
+          >
             <span className="text-base font-bold text-text">TruthLens</span>
             <span className="block text-[10px] uppercase tracking-widest text-text-dim">AI Platform</span>
-          </div>
+          </motion.div>
         </div>
 
         {/* Navigation */}
-        <nav className="relative z-10 flex-1 overflow-y-auto px-3 py-5 space-y-0.5">
+        <nav className={clsx(
+          'relative z-10 flex-1 overflow-y-auto py-5 space-y-0.5',
+          collapsed ? 'px-0 flex flex-col items-center' : 'px-3',
+        )}>
           {filteredNav.map((item) => (
-            <NavItemLink key={item.path} item={item} active={isActive(item.path)} onClick={closeSidebar} />
+            <NavItemLink key={item.path} item={item} active={isActive(item.path)} collapsed={collapsed} onClick={closeSidebar} />
           ))}
 
           {/* Quick actions */}
-          <div className="pt-5 mt-5 border-t border-white/[0.06]">
-            <p className="px-3 pb-2 text-[10px] uppercase tracking-widest text-text-dim font-medium">Quick Links</p>
+          <div className={clsx('pt-5 mt-5 border-t border-white/[0.06]', collapsed ? 'flex flex-col items-center px-0' : '')}>
+            {!collapsed && (
+              <p className="px-3 pb-2 text-[10px] uppercase tracking-widest text-text-dim font-medium">Quick Links</p>
+            )}
             <Link
-              to="/workspaces"
+              to="/chat/new"
               onClick={closeSidebar}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-text-muted hover:text-text hover:bg-white/[0.04] transition-colors"
-            >
-              <Search size={16} />
-              <span>Search Documents</span>
-            </Link>
-            <Link
-              to="/workspaces"
-              onClick={closeSidebar}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-text-muted hover:text-text hover:bg-white/[0.04] transition-colors"
+              className={clsx(
+                'flex items-center rounded-xl text-sm text-text-muted hover:text-text hover:bg-white/[0.04] transition-colors',
+                collapsed ? 'justify-center w-10 h-10' : 'gap-3 px-3 py-2.5',
+              )}
+              title={collapsed ? 'New Chat' : undefined}
             >
               <MessageSquare size={16} />
-              <span>Recent Queries</span>
+              {!collapsed && <span>New Chat</span>}
+            </Link>
+            <Link
+              to="/documents"
+              onClick={closeSidebar}
+              className={clsx(
+                'flex items-center rounded-xl text-sm text-text-muted hover:text-text hover:bg-white/[0.04] transition-colors',
+                collapsed ? 'justify-center w-10 h-10' : 'gap-3 px-3 py-2.5',
+              )}
+              title={collapsed ? 'Browse Documents' : undefined}
+            >
+              <Search size={16} />
+              {!collapsed && <span>Browse Documents</span>}
             </Link>
           </div>
         </nav>
@@ -190,10 +275,18 @@ export default function Layout() {
                   </span>
                 )}
               </div>
+              <Link
+                to="/settings"
+                onClick={closeSidebar}
+                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-text active:scale-[0.98]"
+              >
+                <Settings size={15} />
+                <span>Settings</span>
+              </Link>
               <button
                 type="button"
                 onClick={logout}
-                className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-red active:scale-[0.98]"
+                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-red active:scale-[0.98]"
               >
                 <LogOut size={15} />
                 <span>Sign out</span>
@@ -201,7 +294,7 @@ export default function Layout() {
             </div>
           </div>
         )}
-      </motion.aside>
+        </motion.aside>
 
       {/* ─── Main area ────────────────────────────────────────────────── */}
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">

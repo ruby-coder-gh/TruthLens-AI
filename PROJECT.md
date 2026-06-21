@@ -11,25 +11,40 @@ Offline-first RAG platform (TruthLens AI/VeritasRAG) with local LLMs. No paid AP
 - **UI**: Dark cinematic theme, glassmorphism, ambient blobs, gradient accents
 
 ## Task Board
-### Phase: WAAPI Bug Fix + UI Polish
-- [x] Fix all `initial={{ opacity: 0 }}` → `opacity: 0.99` across all components/pages
-- [x] Replace `whileHover`/`whileTap` with CSS `hover:scale`/`active:scale`
-- [x] Remove `AnimatePresence` from App.tsx (simplify routing)
-- [x] Fix Layout to use `<Outlet />` instead of `{children}` prop
-- [x] Fix all TS build errors (ease arrays, unused imports, duplicate attrs)
-- [x] Fix Button component to use `<button>` not `<motion.button>` (type compat)
-- [x] Fix ProgressBar to use CSS transition instead of framer motion width
-- [ ] Verify login → workspaces redirect flow
-- [ ] Verify all pages render without console errors
+### Phase: Core RAG Backend + Full Frontend Integration
+- [x] Initial schema (users, workspaces, docs, chunks, queries, feedback, audit_log)
+- [x] JWT auth (register, login, refresh, me)
+- [x] Ingestion pipeline (load → chunk → embed → index → BM25)
+- [x] Hybrid retrieval (ChromaDB vector + BM25 keyword) + reranker
+- [x] LangGraph query pipeline + CRAG self-correction loop
+- [x] WebSocket streaming query + Ollama generation
+- [x] NLI guardrail (hallucination detection) + trust score
+- [x] Admin dashboard, stats, audit logs, RAGAS evaluation
+- [x] Docker Compose (api + ollama + model-init)
+- [x] 18 premium frontend pages (public, user, admin)
+- [x] Frontend API client + most pages connected
+- [x] Investigator routes + multi-step investigation graph
 
-### Phase: Features
-- [ ] Document upload with drag-drop
-- [ ] RAG query with streaming
-- [ ] Trust score visualization
-- [ ] Admin dashboard
+### Phase: VeritasRAG Backend Complete (June 21)
+- [x] Collections model + CRUD API + access control
+- [x] Forgot/reset/change password + logout endpoints
+- [x] Admin user management (invite, role, status, activity)
+- [x] Admin analytics (flagged answers, queries over time, trust dist)
+- [x] Admin settings endpoint
+- [x] Global document listing + reindex endpoint
+- [x] Eval runs table + history endpoint
+- [x] Database migration 003 (new tables + columns)
+- [x] Frontend API client methods (18 new)
+- [x] Connected 9 frontend pages to real API calls
+- [x] CODEBASE.md + PROJECT.md updated
 
-## Open Questions
-- (none)
+### Stopped (June 21)
+- [x] All VeritasRAG backend spec implemented
+- [x] Backend 64 routes, frontend 0 TS errors
+- [x] Login verified working
+
+## Stopped
+Project paused by user. All VeritasRAG backend spec implemented per requirements.
 
 ## Artifacts
 - Frontend: `frontend/src/`

@@ -97,75 +97,81 @@ export class QueryWebSocket {
     }
   }
 
-  private handleMessage(msg: WSMessageData): void {
+  private handleMessage(msg: any): void {
+    const payload = msg.payload || {};
+    
     switch (msg.type) {
       case 'auth_success':
         // Auth confirmed — now send the query
         this.send({
           type: 'query',
-          workspace_id: this.workspaceId,
-          query: this.query,
-          ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
+          payload: {
+            workspace_id: this.workspaceId,
+            query: this.query,
+            ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
+          }
         });
         break;
 
       case 'token': {
-        const d = msg as { type: 'token'; content: string };
-        this.callbacks.onToken?.(d.content);
+        this.callbacks.onToken?.(payload.content || payload.token || msg.content);
         break;
       }
 
-      case 'source': {
-        const d = msg as { type: 'source'; chunk_id: string; document_id: string; excerpt: string; score: number; document_name?: string; relevance_score?: number; rerank_score?: number; page_number?: number };
-        const source: Source = {
-          chunk_id: d.chunk_id,
-          document_id: d.document_id,
-          excerpt: d.excerpt,
-          relevance_score: d.relevance_score ?? d.score ?? 0,
-          document_name: d.document_name,
-          rerank_score: d.rerank_score,
-          page_number: d.page_number,
-        };
-        this.callbacks.onSource?.(source);
+      case 'sources': {
+        if (Array.isArray(payload.sources)) {
+          for (const s of payload.sources) {
+            const source: Source = {
+              chunk_id: s.chunk_id,
+              document_id: s.document_id,
+              excerpt: s.excerpt,
+              relevance_score: s.relevance_score ?? s.score ?? 0,
+              document_name: s.document_name,
+              rerank_score: s.rerank_score,
+              page_number: s.page_number,
+            };
+            this.callbacks.onSource?.(source);
+          }
+        }
         break;
       }
 
       case 'guardrail': {
-        const d = msg as { type: 'guardrail'; passed: boolean; score: number; details: string };
         this.callbacks.onGuardrail?.({
-          passed: d.passed,
-          score: d.score,
-          details: d.details,
+          passed: payload.passed,
+          score: payload.score,
+          details: payload.details,
         });
         break;
       }
 
       case 'trust_score': {
-        const d = msg as { type: 'trust_score'; score: number; components: Record<string, number> };
-        this.callbacks.onTrustScore?.(d.score, d.components);
+        this.callbacks.onTrustScore?.(payload.score, payload.components);
         break;
       }
 
       case 'complete': {
-        const d = msg as { type: 'complete'; query_id: string; latency_ms: number; model_used: string; token_count: number };
         this.callbacks.onComplete?.({
-          query_id: d.query_id,
-          latency_ms: d.latency_ms,
-          model_used: d.model_used,
-          token_count: d.token_count,
+          query_id: payload.query_id,
+          latency_ms: payload.latency_ms,
+          model_used: payload.model_used,
+          token_count: payload.token_count,
         });
         break;
       }
 
       case 'error': {
-        const d = msg as { type: 'error'; code: string; message: string };
-        this.callbacks.onError?.(d.code, d.message);
+        this.callbacks.onError?.(payload.code || 'error', payload.message || 'Unknown error');
         break;
       }
 
       case 'progress': {
-        const d = msg as { type: 'progress'; phase: string; progress: number };
-        this.callbacks.onProgress?.(d.phase, d.progress);
+        this.callbacks.onProgress?.(payload.phase, payload.progress);
+        break;
+      }
+
+      case 'ack': {
+        // Query accepted, can track query_id here if needed
         break;
       }
 

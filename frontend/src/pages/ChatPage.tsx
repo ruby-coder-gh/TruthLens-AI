@@ -162,6 +162,8 @@ export default function ChatPage() {
   const [sidebarTab, setSidebarTab] = useState('sources');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
+  const [tracingBeam, setTracingBeam] = useState<{ startId: string; targetId: string } | null>(null);
+  const [highlightedSourceId, setHighlightedSourceId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
   // Track queries stored in API for history tab
   const [storedQueries, setStoredQueries] = useState<StoredQueryDetail[]>([]);
@@ -413,6 +415,8 @@ export default function ChatPage() {
     setStoredQueries([]);
     setHistoryOpen(null);
     setExpandedSource(null);
+    setTracingBeam(null);
+    setHighlightedSourceId(null);
     inputKey.current += 1;
     textareaRef.current?.focus();
   }, [isStreaming]);
@@ -603,10 +607,13 @@ export default function ChatPage() {
                           feedbackMutation.mutate({ queryId: msg.queryId, rating });
                         }
                       }}
-                      onSourceClick={(source) => {
+                      onSourceClick={(source, e, msgId, index) => {
+                        const markerId = `cite-${msgId}-${index}`;
+                        const targetId = `source-${source.chunk_id}`;
                         setSidebarTab('sources');
                         setExpandedSource(source.chunk_id);
                         if (isMobile) setSidebarOpen(true);
+                        setTracingBeam({ startId: markerId, targetId });
                       }}
                     />
                   ))}
@@ -730,6 +737,7 @@ export default function ChatPage() {
                         expandedSource={expandedSource}
                         onToggleExpand={setExpandedSource}
                         isLoading={isStreaming && latestSources.length === 0}
+                        highlightedSourceId={highlightedSourceId}
                       />
                     )}
                     {sidebarTab === 'why' && (
@@ -780,6 +788,19 @@ export default function ChatPage() {
           )}
         </AnimatePresence>
       </motion.div>
+
+      {tracingBeam && (
+        <TraceBeamOverlay
+          startId={tracingBeam.startId}
+          targetId={tracingBeam.targetId}
+          onComplete={() => {
+            const target = tracingBeam.targetId.replace('source-', '');
+            setHighlightedSourceId(target);
+            setTracingBeam(null);
+            setTimeout(() => setHighlightedSourceId(null), 1500);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -886,7 +907,7 @@ function ChatMessageBubble({
   message: ChatMessage;
   onCopy: (text: string) => void;
   onFeedback: (rating: number) => void;
-  onSourceClick: (source: Source) => void;
+  onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
 }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
@@ -966,7 +987,7 @@ function ChatMessageBubble({
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.3 }}
               >
-                {renderMessageWithCitations(message.content, message.sources, onSourceClick)}
+                {renderMessageWithCitations(message.id, message.content, message.sources, onSourceClick)}
               </motion.div>
             )}
 
@@ -1016,10 +1037,13 @@ function ChatMessageBubble({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
               >
-                <span className="text-xs text-text-muted">Trust score:</span>
-                <Badge color={trustScoreColor(message.trustScore)}>
-                  {(message.trustScore * 100).toFixed(0)}% — {trustScoreLabel(message.trustScore)}
-                </Badge>
+                <TrustScoreRing score={message.trustScore} />
+                <div className="flex flex-col">
+                  <span className="text-xs text-text-muted">Trust score</span>
+                  <span className="text-xs font-medium" style={{ color: message.trustScore >= 0.75 ? 'var(--color-accent)' : 'var(--color-orange)' }}>
+                    {trustScoreLabel(message.trustScore)}
+                  </span>
+                </div>
               </motion.div>
             )}
 
@@ -1034,8 +1058,9 @@ function ChatMessageBubble({
                 {message.sources.slice(0, 5).map((source, i) => (
                   <motion.button
                     key={source.chunk_id}
+                    id={`cite-${message.id}-${i}`}
                     type="button"
-                    onClick={() => onSourceClick(source)}
+                    onClick={(e) => onSourceClick(source, e, message.id, i)}
                     className="inline-flex items-center gap-1 rounded-md glass px-2 py-1 text-xs text-text-muted transition-colors hover:border-primary/30 hover:text-primary-soft"
                     title={source.document_name ?? 'Source document'}
                     whileHover={{ scale: 1.05 }}
@@ -1158,9 +1183,10 @@ function TypingIndicator() {
 // ─── Render message with clickable citation markers ──────────────────────────
 
 function renderMessageWithCitations(
+  messageId: string,
   content: string,
   sources: Source[],
-  onSourceClick: (source: Source) => void,
+  onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void,
 ): React.ReactNode {
   // Split on citation patterns like [1], [2], etc.
   const parts = content.split(/(\[\d+\])/g);
@@ -1177,9 +1203,10 @@ function renderMessageWithCitations(
             return (
               <motion.button
                 key={i}
+                id={`cite-${messageId}-${idx}`}
                 type="button"
-                onClick={() => onSourceClick(source)}
-                className="inline-flex items-center justify-center rounded bg-primary/20 px-1 text-xs font-medium text-primary-soft transition-colors hover:bg-primary/30"
+                onClick={(e) => onSourceClick(source, e, messageId, idx)}
+                className="inline-flex items-center justify-center rounded bg-primary/20 px-1 text-xs font-medium text-primary-soft transition-colors hover:bg-primary/30 relative"
                 title={source.document_name ?? `Source ${idx + 1}`}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.95 }}
@@ -1273,11 +1300,13 @@ function SourcesTab({
   expandedSource,
   onToggleExpand,
   isLoading,
+  highlightedSourceId,
 }: {
   sources: Source[];
   expandedSource: string | null;
   onToggleExpand: (id: string | null) => void;
   isLoading: boolean;
+  highlightedSourceId?: string | null;
 }) {
   if (isLoading) {
     return (
@@ -1331,8 +1360,17 @@ function SourcesTab({
               layout
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
             >
-              <Card className="p-3">
-                <div className="space-y-2">
+              <Card 
+                id={`source-${source.chunk_id}`}
+                className={clsx(
+                  "p-3 relative overflow-hidden transition-colors",
+                  highlightedSourceId === source.chunk_id ? "border-accent shadow-[0_0_15px_rgba(45,212,191,0.2)]" : ""
+                )}
+              >
+                {highlightedSourceId === source.chunk_id && (
+                   <div className="absolute inset-0 animate-glow-sweep pointer-events-none mix-blend-screen" />
+                )}
+                <div className="space-y-2 relative z-10">
                   {/* Document name */}
                   <div className="flex items-center gap-2">
                     <FileText size={14} className="shrink-0 text-primary-soft" />
@@ -1771,5 +1809,136 @@ function ConversationHistoryTab({
         })}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRUST SCORE RING (Answer Verification Sequence)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function TrustScoreRing({ score }: { score: number }) {
+  const [complete, setComplete] = useState(false);
+  const size = 32;
+  const strokeWidth = 3;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - score);
+  
+  const isHigh = score >= 0.75;
+  const color = isHigh ? 'var(--color-accent)' : 'var(--color-orange)';
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="shrink-0 -rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="rgba(60,75,110,0.3)"
+          strokeWidth={strokeWidth}
+        />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] as const }}
+          onAnimationComplete={() => setComplete(true)}
+        />
+      </svg>
+      {complete && (
+        <motion.div
+          className="absolute inset-0 rounded-full"
+          initial={{ boxShadow: `0 0 0 0 ${color}` }}
+          animate={{ boxShadow: `0 0 15px 2px ${color}` }}
+          transition={
+            isHigh
+              ? { duration: 0.5 }
+              : { duration: 2, repeat: Infinity, repeatType: 'reverse' as const }
+          }
+          style={{ opacity: 0.5 }}
+        />
+      )}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-[10px] font-mono font-medium" style={{ color }}>
+          {(score * 100).toFixed(0)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TRACE BEAM OVERLAY (Citation Trace Beam)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function TraceBeamOverlay({ 
+  startId, 
+  targetId, 
+  onComplete 
+}: { 
+  startId: string; 
+  targetId: string; 
+  onComplete: () => void;
+}) {
+  const [path, setPath] = useState('');
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      const startEl = document.getElementById(startId);
+      const targetEl = document.getElementById(targetId);
+      
+      if (!startEl || !targetEl) {
+        onComplete();
+        return;
+      }
+      
+      const startRect = startEl.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+
+      const startX = startRect.right;
+      const startY = startRect.top + startRect.height / 2;
+      
+      const endX = targetRect.left;
+      const endY = targetRect.top + targetRect.height / 2;
+      
+      const cp1x = startX + (endX - startX) / 2;
+      const cp1y = startY;
+      const cp2x = startX + (endX - startX) / 2;
+      const cp2y = endY;
+
+      setPath(`M ${startX} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${endX} ${endY}`);
+    }, 150);
+    
+    return () => clearTimeout(timeout);
+  }, [startId, targetId, onComplete]);
+
+  if (!path) return null;
+
+  return (
+    <svg className="fixed inset-0 pointer-events-none z-[100]" style={{ width: '100vw', height: '100vh' }}>
+      <motion.path
+        d={path}
+        fill="none"
+        stroke="var(--color-accent)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        initial={{ pathLength: 0, opacity: 1 }}
+        animate={{ pathLength: 1, opacity: 0 }}
+        transition={{ 
+          pathLength: { duration: 0.5, ease: 'easeOut' as const },
+          opacity: { delay: 0.3, duration: 0.3 }
+        }}
+        onAnimationComplete={onComplete}
+        style={{ filter: 'drop-shadow(0 0 6px var(--color-accent))' }}
+      />
+    </svg>
   );
 }

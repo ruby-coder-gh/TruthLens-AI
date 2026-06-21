@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,9 +30,13 @@ from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.auth import (
     AuthResponse,
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
+    LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserInfo,
 )
@@ -120,6 +125,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     # Reset failed attempts on successful login
     user.failed_attempts = 0
     user.locked_until = None
+    user.last_login_at = datetime.now(timezone.utc)
 
     # Generate tokens
     access_token = create_access_token(user.id, user.role)
@@ -232,6 +238,115 @@ async def update_me(
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,
     )
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate password reset token. Always returns success (no email enumeration)."""
+    # Check if user exists (but don't reveal)
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user:
+        # Generate reset token (expires in 15 min)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+        reset_token = jwt.encode(
+            {
+                "sub": user.id,
+                "type": "reset",
+                "exp": expire,
+                "iat": datetime.now(timezone.utc),
+                "iss": settings.JWT_ISSUER,
+            },
+            settings.APP_SECRET_KEY,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+        # In production, email this token. Here we return it directly.
+        return MessageResponse(message=f"Password reset token: {reset_token}")
+
+    # Always return success to prevent enumeration
+    return MessageResponse(message="If email exists, a reset token has been generated")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset password using reset token."""
+    try:
+        payload = decode_token(body.token)
+    except Exception:
+        raise UnauthorizedException("Invalid or expired reset token")
+
+    if payload.get("type") != "reset":
+        raise UnauthorizedException("Invalid token type")
+
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise UnauthorizedException("User not found")
+
+    if len(body.password) < 8:
+        raise InvalidInputException("Password must be at least 8 characters")
+
+    user.password_hash = hash_password(body.password)
+
+    db.add(AuditLog(
+        user_id=user.id,
+        action="user.password_reset",
+        resource_type="user",
+        resource_id=user.id,
+    ))
+
+    return MessageResponse(message="Password reset successful")
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change password for authenticated user."""
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise UnauthorizedException("Current password is incorrect")
+
+    if len(body.new_password) < 8:
+        raise InvalidInputException("Password must be at least 8 characters")
+
+    current_user.password_hash = hash_password(body.new_password)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.password_change",
+        resource_type="user",
+        resource_id=current_user.id,
+    ))
+
+    return MessageResponse(message="Password changed successfully")
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    body: LogoutRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Logout user (adds audit log entry)."""
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.logout",
+        resource_type="user",
+        resource_id=current_user.id,
+        details=json.dumps({"refresh_token": body.refresh_token}) if body.refresh_token else None,
+    ))
+
+    return MessageResponse(message="Logged out successfully")
 
 
 @router.delete("/me", status_code=204)

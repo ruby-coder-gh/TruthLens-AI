@@ -6,6 +6,8 @@ from app.models.chunk import Chunk
 from app.models.query import Query
 from app.models.feedback import Feedback
 from app.models.audit_log import AuditLog
+from app.models.collection import Collection, CollectionAccess
+from app.models.eval_run import EvalRun
 
 __all__ = [
     "DeclarativeBase",
@@ -19,4 +21,7 @@ __all__ = [
     "Query",
     "Feedback",
     "AuditLog",
+    "Collection",
+    "CollectionAccess",
+    "EvalRun",
 ]

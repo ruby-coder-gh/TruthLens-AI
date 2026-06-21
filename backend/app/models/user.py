@@ -21,6 +21,7 @@ class User(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     failed_attempts: Mapped[int] = mapped_column(default=0)
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
     # Relationships
     workspaces_owned = relationship("Workspace", back_populates="owner", lazy="selectin")

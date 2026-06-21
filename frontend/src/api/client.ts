@@ -12,6 +12,7 @@ import type {
   Feedback,
   AdminStats,
   AuditLogEntry,
+  Collection,
   InvestigationRequest,
   InvestigationResponse,
   PaginatedResponse,
@@ -244,6 +245,18 @@ export const authApi = {
 
   deleteMe: (): Promise<void> =>
     request('/auth/me', { method: 'DELETE' }),
+
+  forgotPassword: (data: { email: string }): Promise<void> =>
+    request('/auth/forgot-password', { method: 'POST', body: JSON.stringify(data) }),
+
+  resetPassword: (data: { token: string; password: string }): Promise<void> =>
+    request('/auth/reset-password', { method: 'POST', body: JSON.stringify(data) }),
+
+  changePassword: (data: { current_password: string; new_password: string }): Promise<void> =>
+    request('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
+
+  logout: (data?: { refresh_token?: string }): Promise<void> =>
+    request('/auth/logout', { method: 'POST', body: JSON.stringify(data || {}) }),
 };
 
 // ─── Workspace API ──────────────────────────────────────────────────────────
@@ -289,6 +302,12 @@ export const documentApi = {
 
   delete: (workspaceId: string, documentId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}`, { method: 'DELETE' }),
+
+  listAll: (params?: { status?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
+    request(`/documents${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  reindex: (workspaceId: string, docId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/documents/${docId}/reindex`, { method: 'POST' }),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
@@ -304,6 +323,9 @@ export const queryApi = {
 
   delete: (workspaceId: string, queryId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}`, { method: 'DELETE' }),
+
+  listAll: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
+    request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
 };
 
 // ─── Feedback API ───────────────────────────────────────────────────────────
@@ -328,6 +350,76 @@ export const adminApi = {
 
   runEvaluation: <T = unknown>(): Promise<T> =>
     request('/admin/evaluation', { method: 'POST' }),
+
+  // ── User management ──────────────────────────────────────────────────────
+  listUsers: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<User>> =>
+    request(`/admin/users${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  inviteUser: (data: { email: string; username: string; role?: string }): Promise<User> =>
+    request('/admin/users/invite', { method: 'POST', body: JSON.stringify(data) }),
+
+  getUser: (userId: string): Promise<User> =>
+    request(`/admin/users/${userId}`),
+
+  updateUserRole: (userId: string, role: string): Promise<User> =>
+    request(`/admin/users/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role }) }),
+
+  updateUserStatus: (userId: string, isActive: boolean): Promise<User> =>
+    request(`/admin/users/${userId}/status`, { method: 'PUT', body: JSON.stringify({ is_active: isActive }) }),
+
+  deleteUser: (userId: string): Promise<void> =>
+    request(`/admin/users/${userId}`, { method: 'DELETE' }),
+
+  getUserActivity: (userId: string, params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<AuditLogEntry>> =>
+    request(`/admin/users/${userId}/activity${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  // ── Analytics ────────────────────────────────────────────────────────────
+  getFlaggedAnswers: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<unknown>> =>
+    request(`/admin/analytics/flagged-answers${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  getQueriesOverTime: (): Promise<unknown> =>
+    request('/admin/analytics/queries-over-time'),
+
+  getTrustScoreDistribution: (): Promise<unknown> =>
+    request('/admin/analytics/trust-score-distribution'),
+
+  // ── Evaluation ───────────────────────────────────────────────────────────
+  getEvalHistory: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<unknown>> =>
+    request(`/admin/evaluation/history${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  // ── Settings ─────────────────────────────────────────────────────────────
+  getSettings: (): Promise<Record<string, unknown>> =>
+    request('/admin/settings'),
+
+  updateSettings: (data: Record<string, unknown>): Promise<Record<string, unknown>> =>
+    request('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+};
+
+// ─── Collection API ─────────────────────────────────────────────────────────
+export const collectionApi = {
+  list: (workspaceId: string): Promise<ListResponse<unknown>> =>
+    request(`/workspaces/${workspaceId}/collections`),
+
+  create: (workspaceId: string, data: { name: string; description?: string }): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections`, { method: 'POST', body: JSON.stringify(data) }),
+
+  get: (workspaceId: string, collectionId: string): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}`),
+
+  update: (workspaceId: string, collectionId: string, data: { name?: string; description?: string }): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: (workspaceId: string, collectionId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}`, { method: 'DELETE' }),
+
+  grantAccess: (workspaceId: string, collectionId: string, userId: string): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/access`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
+
+  revokeAccess: (workspaceId: string, collectionId: string, userId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/access/${userId}`, { method: 'DELETE' }),
+
+  listAccess: (workspaceId: string, collectionId: string): Promise<ListResponse<unknown>> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/access`),
 };
 
 // ─── Investigation API ──────────────────────────────────────────────────────
@@ -345,4 +437,5 @@ export const api = {
   feedback: feedbackApi,
   admin: adminApi,
   investigation: investigationApi,
+  collections: collectionApi,
 };

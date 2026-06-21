@@ -3,15 +3,46 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider } from './components/ui'
 import Layout from './components/Layout'
-import LoginPage from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
-import WorkspacesPage from './pages/WorkspacesPage'
-import WorkspaceDetailPage from './pages/WorkspaceDetailPage'
-import ChatPage from './pages/ChatPage'
-import AdminDashboard from './pages/AdminDashboard'
-import InvestigationPage from './pages/InvestigationPage'
+import AdminLayout from './components/AdminLayout'
 import type { ReactNode } from 'react'
 
+// Public pages
+import LandingPage from './pages/LandingPage'
+import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
+
+// User pages
+import UserDashboard from './pages/UserDashboard'
+import ChatPage from './pages/ChatPage'
+import ChatHistoryPage from './pages/ChatHistoryPage'
+import DocumentsBrowsePage from './pages/DocumentsBrowsePage'
+import SettingsPage from './pages/SettingsPage'
+
+// Admin pages
+import AdminDashboard from './pages/AdminDashboard'
+import AdminDocumentsPage from './pages/AdminDocumentsPage'
+import AdminUploadPage from './pages/AdminUploadPage'
+import AdminDocumentDetailPage from './pages/AdminDocumentDetailPage'
+import AdminCollectionsPage from './pages/AdminCollectionsPage'
+import AdminUsersPage from './pages/AdminUsersPage'
+import AdminInviteUserPage from './pages/AdminInviteUserPage'
+import AdminUserDetailPage from './pages/AdminUserDetailPage'
+import AdminSettingsPage from './pages/AdminSettingsPage'
+import AdminAnalyticsPage from './pages/AdminAnalyticsPage'
+import AdminAuditLogPage from './pages/AdminAuditLogPage'
+
+// Chat workspace selector
+import ChatNewPage from './pages/ChatNewPage'
+
+// Legacy workspace pages (keep for backward compat)
+import WorkspacesPage from './pages/WorkspacesPage'
+import WorkspaceDetailPage from './pages/WorkspaceDetailPage'
+import InvestigationPage from './pages/InvestigationPage'
+import ApiCatalogPage from './pages/ApiCatalogPage'
+
+// ─── HOC helpers ────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false },
@@ -55,14 +86,19 @@ function AdminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+// ─── App Routes ─────────────────────────────────────────────────────────────
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public routes */}
+      {/* ── PUBLIC ──────────────────────────────────────────────────────── */}
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<RegisterPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
-      {/* Protected routes with layout */}
+      {/* ── USER (protected, with Layout) ────────────────────────────────── */}
       <Route
         element={
           <ProtectedRoute>
@@ -70,23 +106,53 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
+        <Route path="/dashboard" element={<UserDashboard />} />
+        <Route path="/chat/new" element={<ChatNewPage />} />
+        <Route path="/chats" element={<ChatHistoryPage />} />
+        <Route path="/documents" element={<DocumentsBrowsePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+
+        {/* Legacy workspace routes */}
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         <Route path="/workspaces/:id/chat" element={<ChatPage />} />
         <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute>
-              <AdminDashboard />
-            </AdminRoute>
-          }
-        />
       </Route>
 
-      {/* Default redirect */}
-      <Route path="/" element={<Navigate to="/workspaces" replace />} />
-      <Route path="*" element={<Navigate to="/workspaces" replace />} />
+      {/* ── ADMIN (protected) ────────────────────────────────────────────── */}
+      <Route
+        element={
+          <AdminRoute>
+            <Layout />
+          </AdminRoute>
+        }
+      >
+        <Route path="/api-catalog" element={<ApiCatalogPage />} />
+
+        {/* Admin sub-layout */}
+        <Route
+          element={
+            <AdminRoute>
+              <AdminLayout />
+            </AdminRoute>
+          }
+        >
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/documents" element={<AdminDocumentsPage />} />
+          <Route path="/admin/documents/upload" element={<AdminUploadPage />} />
+          <Route path="/admin/documents/:docId" element={<AdminDocumentDetailPage />} />
+          <Route path="/admin/collections" element={<AdminCollectionsPage />} />
+          <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/admin/users/invite" element={<AdminInviteUserPage />} />
+          <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
+          <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+        </Route>
+      </Route>
+
+      {/* ── FALLBACK ─────────────────────────────────────────────────────── */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

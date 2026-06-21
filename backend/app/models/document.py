@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from datetime import datetime
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import DeclarativeBase, TimestampMixin, UUIDPkMixin
@@ -27,11 +28,14 @@ class Document(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     uploaded_by: Mapped[str | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
+    collection_id: Mapped[str | None] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"), nullable=True, index=True)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="documents", lazy="selectin")
     uploader = relationship("User", back_populates="documents_uploaded", lazy="selectin")
     chunks = relationship("Chunk", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
+    collection = relationship("Collection", back_populates="documents", lazy="selectin")
 
     __table_args__ = (
         Index("idx_docs_workspace", "workspace_id"),

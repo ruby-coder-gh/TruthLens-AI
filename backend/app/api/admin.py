@@ -3,30 +3,83 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-from sqlalchemy import select, func
+from pydantic import BaseModel
+from sqlalchemy import cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
 
+from app.config import settings
+from app.core.auth import hash_password
 from app.core.deps import get_current_admin, get_db
+from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.eval_run import EvalRun
 from app.models.feedback import Feedback
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
-from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
+from app.schemas.analytics import (
+    AdminSettingsResponse,
+    AdminSettingsUpdate,
+    EvalRunResponse,
+    FlaggedAnswerResponse,
+    TrustScoreDistribution,
+    UsageStatsResponse,
+    UserActivityResponse,
+)
+from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, MessageResponse, PaginatedResponse
+from app.schemas.user import UserResponse
 from app.utils.logger import logger
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
+
+# In-memory settings overrides (reset on restart)
+_settings_overrides: dict[str, Any] = {}
+
+TRUST_SCORE_LOW_THRESHOLD = 0.4
+
+
+# ─── Inline schemas for admin-only operations ────────────────────────
+
+
+class UserInviteRequest(BaseModel):
+    email: str
+    username: str
+    role: str = "user"
+
+
+class UserDetailResponse(BaseModel):
+    id: str
+    email: str
+    username: str
+    role: str
+    is_active: bool
+    query_count: int = 0
+    last_login_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+
+
+# ─── Existing endpoints ─────────────────────────────────────────────
 
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     """Get system-wide metrics (admin only)."""
-    # Counts
     users = await db.execute(select(func.count(User.id)))
     total_users = users.scalar() or 0
 
@@ -42,13 +95,11 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     feedback = await db.execute(select(func.count(Feedback.id)))
     total_feedback = feedback.scalar() or 0
 
-    # Average trust score
     trust = await db.execute(
         select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))
     )
     avg_trust = trust.scalar()
 
-    # Average rating
     rating = await db.execute(
         select(func.avg(Feedback.rating))
     )
@@ -59,7 +110,7 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
         total_workspaces=total_workspaces,
         total_documents=total_documents,
         total_queries=total_queries,
-        total_chunks=0,  # Would need separate count
+        total_chunks=0,
         avg_trust_score=round(float(avg_trust), 4) if avg_trust else None,
         avg_rating=round(float(avg_rating), 2) if avg_rating else None,
         total_feedback=total_feedback,
@@ -113,7 +164,6 @@ async def get_evaluation(db: AsyncSession = Depends(get_db)):
     """Get RAGAS evaluation scores (admin only)."""
     from app.evaluation.ragas_eval import RagasScores
 
-    # Attempt to load cached evaluation results
     try:
         with open("data/evaluation_results.json") as f:
             data = json.load(f)
@@ -134,7 +184,6 @@ async def run_evaluation(db: AsyncSession = Depends(get_db)):
     """Trigger RAGAS evaluation on golden dataset (admin only)."""
     from app.evaluation.ragas_eval import ragas_evaluate
 
-    # Get sample queries with responses
     result = await db.execute(
         select(Query).where(
             Query.response_text.isnot(None),
@@ -159,7 +208,6 @@ async def run_evaluation(db: AsyncSession = Depends(get_db)):
 
     scores = await ragas_evaluate(q_texts, answers, contexts)
 
-    # Cache results
     import json as json_mod
 
     results_data = {
@@ -179,3 +227,432 @@ async def run_evaluation(db: AsyncSession = Depends(get_db)):
 
     logger.info("evaluation_run_complete", scores=vars(scores))
     return {"message": "Evaluation complete", "scores": vars(scores)}
+
+
+# ─── User Management ────────────────────────────────────────────────
+
+
+@router.get("/users", response_model=PaginatedResponse[UserResponse])
+async def list_users(
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all users with pagination (admin only)."""
+    count_result = await db.execute(select(func.count(User.id)))
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(User).order_by(User.created_at.desc()).offset(offset).limit(page_size)
+    )
+    users = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[
+            UserResponse(
+                id=u.id,
+                email=u.email,
+                username=u.username,
+                role=u.role,
+                is_active=u.is_active,
+                created_at=u.created_at,
+                updated_at=u.updated_at,
+            )
+            for u in users
+        ],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.post("/users/invite", response_model=UserResponse, status_code=201)
+async def invite_user(
+    body: UserInviteRequest,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Invite a new user (admin only). Creates with temporary password."""
+    # Check uniqueness
+    email_exists = await db.execute(select(User).where(User.email == body.email))
+    user_exists = await db.execute(select(User).where(User.username == body.username))
+    if email_exists.scalar_one_or_none() or user_exists.scalar_one_or_none():
+        raise ConflictException("Email or username already registered")
+
+    temp_password = secrets.token_urlsafe(12)
+    user = User(
+        email=body.email,
+        username=body.username,
+        password_hash=hash_password(temp_password),
+        role=body.role,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.invite",
+        resource_type="user",
+        resource_id=user.id,
+        details=json.dumps({"email": body.email, "username": body.username, "role": body.role}),
+    ))
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=user.role,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.get("/users/{user_id}", response_model=UserDetailResponse)
+async def get_user_detail(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get full user detail (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundException("User", user_id)
+
+    query_count = await db.execute(
+        select(func.count(Query.id)).where(Query.user_id == user_id)
+    )
+
+    return UserDetailResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=user.role,
+        is_active=user.is_active,
+        query_count=query_count.scalar() or 0,
+        last_login_at=user.last_login_at,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.put("/users/{user_id}/role", response_model=UserResponse)
+async def update_user_role(
+    user_id: str,
+    body: UserRoleUpdate,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update user role (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundException("User", user_id)
+
+    user.role = body.role
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.role_update",
+        resource_type="user",
+        resource_id=user_id,
+        details=json.dumps({"new_role": body.role}),
+    ))
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=user.role,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.put("/users/{user_id}/status", response_model=UserResponse)
+async def update_user_status(
+    user_id: str,
+    body: UserStatusUpdate,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activate or deactivate user (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundException("User", user_id)
+
+    user.is_active = body.is_active
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.status_update",
+        resource_type="user",
+        resource_id=user_id,
+        details=json.dumps({"is_active": body.is_active}),
+    ))
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=user.role,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def delete_user(
+    user_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete user by deactivating (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundException("User", user_id)
+
+    user.is_active = False
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="user.deactivate",
+        resource_type="user",
+        resource_id=user_id,
+    ))
+
+
+@router.get("/users/{user_id}/activity", response_model=PaginatedResponse[UserActivityResponse])
+async def get_user_activity(
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get query history for a specific user (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    if not result.scalar_one_or_none():
+        raise NotFoundException("User", user_id)
+
+    count_query = select(func.count(Query.id)).where(Query.user_id == user_id)
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    query_result = await db.execute(
+        select(Query)
+        .where(Query.user_id == user_id)
+        .order_by(Query.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    queries = query_result.scalars().all()
+
+    return PaginatedResponse(
+        data=[
+            UserActivityResponse(
+                id=q.id,
+                query_text=q.query_text,
+                trust_score=q.trust_score,
+                created_at=q.created_at,
+            )
+            for q in queries
+        ],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+# ─── Analytics ──────────────────────────────────────────────────────
+
+
+@router.get("/analytics/flagged-answers", response_model=PaginatedResponse[FlaggedAnswerResponse])
+async def get_flagged_answers(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return queries with low trust scores (admin only)."""
+    count_query = select(func.count(Query.id)).where(
+        Query.trust_score.isnot(None),
+        Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
+    )
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(Query)
+        .where(
+            Query.trust_score.isnot(None),
+            Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
+        )
+        .order_by(Query.trust_score.asc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    queries = result.scalars().all()
+
+    responses = []
+    for q in queries:
+        # Get user name
+        user_name = None
+        if q.user_id:
+            user_result = await db.execute(select(User).where(User.id == q.user_id))
+            u = user_result.scalar_one_or_none()
+            if u:
+                user_name = u.username
+
+        # Get workspace name
+        ws_name = None
+        if q.workspace_id:
+            ws_result = await db.execute(select(Workspace).where(Workspace.id == q.workspace_id))
+            ws = ws_result.scalar_one_or_none()
+            if ws:
+                ws_name = ws.name
+
+        responses.append(FlaggedAnswerResponse(
+            id=q.id,
+            query_text=q.query_text,
+            response_text=q.response_text,
+            trust_score=q.trust_score,
+            user_name=user_name,
+            workspace_name=ws_name,
+            created_at=q.created_at,
+        ))
+
+    return PaginatedResponse(
+        data=responses,
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.get("/analytics/queries-over-time", response_model=list[UsageStatsResponse])
+async def get_queries_over_time(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return daily query count for last N days (admin only)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.execute(
+        select(
+            cast(Query.created_at, Date).label("date"),
+            func.count(Query.id).label("count"),
+        )
+        .where(Query.created_at >= cutoff)
+        .group_by(cast(Query.created_at, Date))
+        .order_by(cast(Query.created_at, Date))
+    )
+    rows = result.all()
+
+    return [
+        UsageStatsResponse(
+            date=str(row.date),
+            query_count=row.count,
+            user_count=0,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/analytics/trust-score-distribution", response_model=list[TrustScoreDistribution])
+async def get_trust_score_distribution(
+    db: AsyncSession = Depends(get_db),
+):
+    """Return count of queries in trust score buckets (admin only)."""
+    buckets = [
+        (0.0, 0.25, "0-25"),
+        (0.26, 0.50, "26-50"),
+        (0.51, 0.75, "51-75"),
+        (0.76, 1.0, "76-100"),
+    ]
+    results = []
+    for low, high, label in buckets:
+        cnt = await db.execute(
+            select(func.count(Query.id)).where(
+                Query.trust_score.isnot(None),
+                Query.trust_score >= low,
+                Query.trust_score <= high,
+            )
+        )
+        results.append(TrustScoreDistribution(
+            range=label,
+            count=cnt.scalar() or 0,
+        ))
+
+    return results
+
+
+# ─── Evaluation history ─────────────────────────────────────────────
+
+
+@router.get("/evaluation/history", response_model=PaginatedResponse[EvalRunResponse])
+async def get_evaluation_history(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all past eval runs (admin only)."""
+    count_result = await db.execute(select(func.count(EvalRun.id)))
+    total = count_result.scalar() or 0
+
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(EvalRun).order_by(EvalRun.run_at.desc()).offset(offset).limit(page_size)
+    )
+    runs = result.scalars().all()
+
+    return PaginatedResponse(
+        data=[
+            EvalRunResponse(
+                id=r.id,
+                run_at=r.run_at,
+                faithfulness=r.faithfulness,
+                context_precision=r.context_precision,
+                context_recall=r.context_recall,
+                answer_relevance=r.answer_relevance,
+                answer_correctness=r.answer_correctness,
+                refusal_accuracy=r.refusal_accuracy,
+                golden_set_version=r.golden_set_version,
+            )
+            for r in runs
+        ],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+# ─── Settings ────────────────────────────────────────────────────────
+
+
+@router.get("/settings", response_model=AdminSettingsResponse)
+async def get_admin_settings():
+    """Get current app settings (admin only)."""
+    return AdminSettingsResponse(
+        app_name=settings.APP_NAME,
+        app_version=settings.APP_VERSION,
+        max_upload_size_mb=settings.SERVER_MAX_UPLOAD_SIZE // 1024 // 1024,
+        trust_score_high_threshold=settings.GUARDRAIL_THRESHOLD,
+        trust_score_low_threshold=_settings_overrides.get("trust_score_low_threshold", TRUST_SCORE_LOW_THRESHOLD),
+        rate_limit_enabled=_settings_overrides.get("rate_limit_enabled", settings.RATE_LIMIT_ENABLED),
+        rate_limit_requests=_settings_overrides.get("rate_limit_requests", settings.RATE_LIMIT_REQUESTS),
+        rate_limit_window_seconds=_settings_overrides.get("rate_limit_window_seconds", settings.RATE_LIMIT_WINDOW),
+    )
+
+
+@router.put("/settings", response_model=AdminSettingsResponse)
+async def update_admin_settings(body: AdminSettingsUpdate):
+    """Update app settings in-memory (admin only, reset on restart)."""
+    if body.max_upload_size_mb is not None:
+        _settings_overrides["max_upload_size_mb"] = body.max_upload_size_mb
+    if body.trust_score_high_threshold is not None:
+        _settings_overrides["trust_score_high_threshold"] = body.trust_score_high_threshold
+    if body.trust_score_low_threshold is not None:
+        _settings_overrides["trust_score_low_threshold"] = body.trust_score_low_threshold
+    if body.rate_limit_enabled is not None:
+        _settings_overrides["rate_limit_enabled"] = body.rate_limit_enabled
+
+    return await get_admin_settings()

@@ -1095,7 +1095,7 @@ export default function AdminDashboard() {
                 className="text-xl font-bold tabular-nums"
                 style={{ color: trustScoreColor(stats.avg_trust_score) }}
               >
-                {stats.avg_trust_score !== undefined
+                {stats.avg_trust_score != null
                   ? stats.avg_trust_score.toFixed(2)
                   : 'N/A'}
               </span>
@@ -1117,7 +1117,7 @@ export default function AdminDashboard() {
             label="Avg Rating"
           >
             <div className="flex items-center gap-2">
-              {stats.avg_rating !== undefined ? (
+              {stats.avg_rating != null ? (
                 <>
                   <span className="text-xl font-bold text-text tabular-nums">
                     {stats.avg_rating.toFixed(1)}

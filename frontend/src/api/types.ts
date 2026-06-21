@@ -216,6 +216,16 @@ export interface WSError {
   message: string;
 }
 
+// ─── Collection ─────────────────────────────────────────────────────────────
+export interface Collection {
+  id: string;
+  name: string;
+  description: string;
+  workspace_id: string;
+  document_count: number;
+  created_at: string;
+}
+
 // ─── Generic API response wrappers ──────────────────────────────────────────
 export interface PaginatedResponse<T> {
   data: T[];
