@@ -1,32 +1,57 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, FileText, Clock, Trash2, RefreshCw, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
+import { ArrowLeft, FileText, Clock, Trash2, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
 import { Button, Card, Badge, Modal, LoadingSpinner, EmptyState, useToast, pageTransition, fadeInUp } from '../components/ui';
+import { documentApi } from '../api/client';
 import type { Document } from '../api/types';
 
-// ─── Mock Data ─────────────────────────────────────────────────────────────────
+const STATUS_ORDER = ['uploaded', 'parsing', 'chunking', 'embedding', 'indexing', 'indexed'] as const;
 
-const MOCK_DOCUMENTS: Record<string, Document> = {
-  d1: { id: 'd1', workspace_id: 'w1', filename: 'q3-financial-report-2025.pdf', original_filename: 'Q3 Financial Report 2025.pdf', mime_type: 'application/pdf', file_size: 2450000, page_count: 24, chunk_count: 48, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-15T10:00:00Z', updated_at: '2026-06-15T10:05:00Z' },
-  d2: { id: 'd2', workspace_id: 'w1', filename: 'employment-contract-template.docx', original_filename: 'Employment Contract Template.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_size: 520000, page_count: 8, chunk_count: 16, status: 'indexed', uploaded_by: 'bob@example.com', created_at: '2026-06-14T14:30:00Z', updated_at: '2026-06-14T14:35:00Z' },
-  d3: { id: 'd3', workspace_id: 'w1', filename: 'annual-report-2024.pdf', original_filename: 'Annual Report 2024.pdf', mime_type: 'application/pdf', file_size: 5200000, page_count: 62, chunk_count: 124, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-13T09:00:00Z', updated_at: '2026-06-13T09:08:00Z' },
+const STATUS_LABELS: Record<string, string> = {
+  uploaded: 'Uploaded',
+  parsing: 'Parsing',
+  chunking: 'Chunking',
+  embedding: 'Embedding',
+  indexing: 'Indexing',
+  indexed: 'Indexed',
 };
 
-const MOCK_CHUNKS = [
-  { id: 'c1', excerpt: 'Revenue for Q3 2025 increased by 23% year-over-year, reaching $4.2 million. This growth was primarily driven by expansion in the enterprise segment, which saw a 31% increase in new customer acquisitions.' },
-  { id: 'c2', excerpt: 'Operating expenses decreased by 8% compared to the same period last year, attributed to improved operational efficiency and strategic cost management initiatives implemented in Q1.' },
-  { id: 'c3', excerpt: 'The company\'s cash position remains strong at $12.8 million, with a healthy operating runway of approximately 18 months based on current burn rate projections.' },
-];
+function SkeletonBlock({ className = '' }: { className?: string }) {
+  return <div className={`animate-pulse rounded-xl bg-card-2/50 ${className}`} />;
+}
 
-const STATUS_TIMELINE: { status: string; label: string; date: string }[] = [
-  { status: 'uploaded', label: 'Uploaded', date: '2026-06-15T10:00:00Z' },
-  { status: 'parsing', label: 'Parsing', date: '2026-06-15T10:01:00Z' },
-  { status: 'chunking', label: 'Chunking', date: '2026-06-15T10:02:00Z' },
-  { status: 'embedding', label: 'Embedding', date: '2026-06-15T10:03:00Z' },
-  { status: 'indexing', label: 'Indexing', date: '2026-06-15T10:04:00Z' },
-  { status: 'indexed', label: 'Indexed', date: '2026-06-15T10:05:00Z' },
-];
+function DetailSkeleton() {
+  return (
+    <motion.div className="space-y-5" variants={pageTransition} initial="initial" animate="animate">
+      <SkeletonBlock className="h-4 w-32" />
+      <div className="rounded-2xl border border-border bg-card p-5 lg:p-6 space-y-4">
+        <div className="flex items-start gap-3">
+          <SkeletonBlock className="h-12 w-12 rounded-xl" />
+          <div className="flex-1 space-y-2">
+            <SkeletonBlock className="h-6 w-3/4" />
+            <div className="flex gap-3">
+              <SkeletonBlock className="h-5 w-16 rounded-full" />
+              <SkeletonBlock className="h-4 w-12" />
+              <SkeletonBlock className="h-4 w-16" />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-5 border-t border-border">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="space-y-1">
+              <SkeletonBlock className="h-3 w-16" />
+              <SkeletonBlock className="h-4 w-24" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <SkeletonBlock className="h-48 rounded-2xl" />
+      <SkeletonBlock className="h-40 rounded-2xl" />
+    </motion.div>
+  );
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -55,47 +80,66 @@ function getFileType(mime: string): string {
   return 'FILE';
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
-
 export default function AdminDocumentDetailPage() {
   const { docId } = useParams<{ docId: string }>();
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
 
-  const [loading, setLoading] = useState(true);
-  const [doc, setDoc] = useState<Document | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [reindexLoading, setReindexLoading] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDoc(MOCK_DOCUMENTS[docId || ''] || null);
-      setLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [docId]);
+  const { data: doc, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['document', docId],
+    queryFn: () => documentApi.get('default', docId!),
+    enabled: !!docId,
+  });
 
-  function handleReindex() {
-    setReindexLoading(true);
-    setTimeout(() => {
-      setReindexLoading(false);
-      addToast('Document re-indexing started', 'success');
-    }, 2000);
-  }
+  const workspaceId = doc?.workspace_id || 'default';
 
-  function handleDelete() {
-    setDeleteLoading(true);
-    setTimeout(() => {
-      setDeleteLoading(false);
+  const deleteMutation = useMutation({
+    mutationFn: () => documentApi.delete(workspaceId, docId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
       setDeleteModalOpen(false);
       addToast('Document deleted', 'success');
       navigate('/admin/documents');
-    }, 1500);
+    },
+    onError: (err) => {
+      addToast(err instanceof Error ? err.message : 'Failed to delete document', 'error');
+    },
+  });
+
+  const reindexMutation = useMutation({
+    mutationFn: () => documentApi.reindex(workspaceId, docId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['document', docId] });
+      addToast('Document re-indexing started', 'success');
+    },
+    onError: (err) => {
+      addToast(err instanceof Error ? err.message : 'Failed to re-index document', 'error');
+    },
+  });
+
+  if (isLoading) {
+    return <DetailSkeleton />;
   }
 
-  if (loading) {
-    return <motion.div variants={pageTransition} initial="initial" animate="animate"><LoadingSpinner text="Loading document..." /></motion.div>;
+  if (isError) {
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <EmptyState
+          icon={<AlertTriangle size={24} />}
+          title="Failed to load document"
+          description={error instanceof Error ? error.message : 'An unexpected error occurred'}
+          action={
+            <Button variant="secondary" onClick={() => refetch()}>
+              <RefreshCw size={14} />
+              Retry
+            </Button>
+          }
+        />
+      </motion.div>
+    );
   }
 
   if (!doc) {
@@ -111,6 +155,8 @@ export default function AdminDocumentDetailPage() {
     );
   }
 
+  const currentIdx = STATUS_ORDER.indexOf(doc.status as typeof STATUS_ORDER[number]);
+
   return (
     <motion.div
       className="space-y-5"
@@ -118,7 +164,6 @@ export default function AdminDocumentDetailPage() {
       initial="initial"
       animate="animate"
     >
-      {/* Back */}
       <button
         type="button"
         onClick={() => navigate('/admin/documents')}
@@ -128,112 +173,108 @@ export default function AdminDocumentDetailPage() {
         Back to Documents
       </button>
 
-      {/* Header Card */}
-      <Card className="p-5 lg:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl glass text-primary-soft">
-              <FileText size={24} />
+      <motion.div variants={fadeInUp}>
+        <Card className="p-5 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl glass text-primary-soft">
+                <FileText size={24} />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-text">{doc.original_filename}</h1>
+                <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                  <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
+                  <span className="text-xs text-text-muted">{getFileType(doc.mime_type)}</span>
+                  <span className="text-xs text-text-muted">{formatFileSize(doc.file_size)}</span>
+                  {doc.page_count != null && <span className="text-xs text-text-muted">{doc.page_count} pages</span>}
+                  {doc.chunk_count != null && <span className="text-xs text-text-muted">{doc.chunk_count} chunks</span>}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={reindexMutation.isPending}
+                onClick={() => reindexMutation.mutate()}
+              >
+                <RefreshCw size={14} />
+                Re-index
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => setDeleteModalOpen(true)}
+              >
+                <Trash2 size={14} />
+                Delete
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-border">
+            <div>
+              <p className="text-xs text-text-dim">Uploaded by</p>
+              <p className="text-sm text-text">{doc.uploaded_by}</p>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-text">{doc.original_filename}</h1>
-              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
-                <span className="text-xs text-text-muted">{getFileType(doc.mime_type)}</span>
-                <span className="text-xs text-text-muted">{formatFileSize(doc.file_size)}</span>
-                {doc.page_count != null && <span className="text-xs text-text-muted">{doc.page_count} pages</span>}
-                {doc.chunk_count != null && <span className="text-xs text-text-muted">{doc.chunk_count} chunks</span>}
-              </div>
+              <p className="text-xs text-text-dim">Created</p>
+              <p className="text-sm text-text">{formatDate(doc.created_at)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-text-dim">Updated</p>
+              <p className="text-sm text-text">{formatDate(doc.updated_at)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-text-dim">Workspace ID</p>
+              <p className="text-sm font-mono text-text-dim text-xs">{doc.workspace_id}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={reindexLoading}
-              onClick={handleReindex}
-            >
-              <RefreshCw size={14} />
-              Re-index
-            </Button>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setDeleteModalOpen(true)}
-            >
-              <Trash2 size={14} />
-              Delete
-            </Button>
-          </div>
-        </div>
+        </Card>
+      </motion.div>
 
-        {/* Metadata */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-border">
-          <div>
-            <p className="text-xs text-text-dim">Uploaded by</p>
-            <p className="text-sm text-text">{doc.uploaded_by}</p>
-          </div>
-          <div>
-            <p className="text-xs text-text-dim">Created</p>
-            <p className="text-sm text-text">{formatDate(doc.created_at)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-text-dim">Updated</p>
-            <p className="text-sm text-text">{formatDate(doc.updated_at)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-text-dim">Workspace ID</p>
-            <p className="text-sm font-mono text-text-dim text-xs">{doc.workspace_id}</p>
-          </div>
-        </div>
-      </Card>
-
-      {/* Status Timeline */}
-      <Card className="p-5 lg:p-6">
-        <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
-          <Clock size={14} className="text-primary-soft" />
-          Processing Timeline
-        </h2>
-        <div className="space-y-2">
-          {STATUS_TIMELINE.map((step) => {
-            const isDone = STATUS_TIMELINE.findIndex((s) => s.status === doc.status) >= STATUS_TIMELINE.findIndex((s) => s.status === step.status);
-            return (
-              <div key={step.status} className="flex items-center gap-3">
-                <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                  isDone ? 'bg-green/15 text-green' : 'bg-card-2 text-text-dim'
-                }`}>
-                  {isDone ? <CheckCircle size={12} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+      <motion.div variants={fadeInUp}>
+        <Card className="p-5 lg:p-6">
+          <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
+            <Clock size={14} className="text-primary-soft" />
+            Processing Timeline
+          </h2>
+          <div className="space-y-2">
+            {STATUS_ORDER.map((status, i) => {
+              const isDone = currentIdx >= 0 && i <= currentIdx;
+              const isLastCompleted = isDone && (i === currentIdx || currentIdx === STATUS_ORDER.length - 1);
+              return (
+                <div key={status} className="flex items-center gap-3">
+                  <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                    isDone ? 'bg-green/15 text-green' : 'bg-card-2 text-text-dim'
+                  }`}>
+                    {isDone ? <CheckCircle size={12} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+                  </div>
+                  <div className="flex-1 flex items-center justify-between">
+                    <span className={`text-xs ${isDone ? 'text-text' : 'text-text-dim'}`}>{STATUS_LABELS[status]}</span>
+                    {isLastCompleted && (
+                      <span className="text-[10px] text-text-dim">{formatDate(doc.updated_at)}</span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-1 flex items-center justify-between">
-                  <span className={`text-xs ${isDone ? 'text-text' : 'text-text-dim'}`}>{step.label}</span>
-                  {isDone && <span className="text-[10px] text-text-dim">{formatDate(step.date)}</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+              );
+            })}
+          </div>
+        </Card>
+      </motion.div>
 
-      {/* Chunk Preview */}
-      <Card className="p-5 lg:p-6">
-        <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
-          <FileText size={14} className="text-accent" />
-          Chunk Preview
-        </h2>
-        <div className="space-y-3">
-          {MOCK_CHUNKS.map((chunk, i) => (
-            <div key={chunk.id} className="rounded-xl glass p-4">
-              <div className="flex items-center gap-2 mb-1.5">
-                <Badge color="gray">Chunk {i + 1}</Badge>
-                <span className="text-[10px] text-text-dim">{chunk.id}</span>
-              </div>
-              <p className="text-sm text-text-muted leading-relaxed">&ldquo;{chunk.excerpt}&rdquo;</p>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <motion.div variants={fadeInUp}>
+        <Card className="p-5 lg:p-6">
+          <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
+            <FileText size={14} className="text-accent" />
+            Chunks
+          </h2>
+          <p className="text-sm text-text-muted">
+            Chunks are loaded on demand from the document viewer.
+          </p>
+        </Card>
+      </motion.div>
 
-      {/* Delete Modal */}
       <Modal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Document">
         <div className="space-y-4">
           <div className="flex items-start gap-3 rounded-xl bg-red/10 border border-red/20 p-4">
@@ -246,7 +287,7 @@ export default function AdminDocumentDetailPage() {
             </div>
           </div>
           <div className="flex gap-3">
-            <Button variant="danger" size="sm" loading={deleteLoading} onClick={handleDelete}>
+            <Button variant="danger" size="sm" loading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
               <Trash2 size={14} />
               Delete
             </Button>

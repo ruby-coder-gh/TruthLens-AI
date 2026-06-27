@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import cast, Date, func, select
+from sqlalchemy import case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
@@ -80,30 +81,22 @@ class UserStatusUpdate(BaseModel):
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     """Get system-wide metrics (admin only)."""
-    users = await db.execute(select(func.count(User.id)))
-    total_users = users.scalar() or 0
+    async def _count(model):
+        r = await db.execute(select(func.count(model.id)))
+        return r.scalar() or 0
 
-    workspaces = await db.execute(select(func.count(Workspace.id)))
-    total_workspaces = workspaces.scalar() or 0
-
-    docs = await db.execute(select(func.count(Document.id)))
-    total_documents = docs.scalar() or 0
-
-    queries = await db.execute(select(func.count(Query.id)))
-    total_queries = queries.scalar() or 0
-
-    feedback = await db.execute(select(func.count(Feedback.id)))
-    total_feedback = feedback.scalar() or 0
-
-    trust = await db.execute(
-        select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))
+    counts = await asyncio.gather(
+        _count(User), _count(Workspace), _count(Document),
+        _count(Query), _count(Feedback),
     )
-    avg_trust = trust.scalar()
+    total_users, total_workspaces, total_documents, total_queries, total_feedback = counts
 
-    rating = await db.execute(
-        select(func.avg(Feedback.rating))
+    trust_r, rating_r = await asyncio.gather(
+        db.execute(select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))),
+        db.execute(select(func.avg(Feedback.rating))),
     )
-    avg_rating = rating.scalar()
+    avg_trust = trust_r.scalar()
+    avg_rating = rating_r.scalar()
 
     return AdminStatsResponse(
         total_users=total_users,
@@ -499,29 +492,13 @@ async def get_flagged_answers(
 
     responses = []
     for q in queries:
-        # Get user name
-        user_name = None
-        if q.user_id:
-            user_result = await db.execute(select(User).where(User.id == q.user_id))
-            u = user_result.scalar_one_or_none()
-            if u:
-                user_name = u.username
-
-        # Get workspace name
-        ws_name = None
-        if q.workspace_id:
-            ws_result = await db.execute(select(Workspace).where(Workspace.id == q.workspace_id))
-            ws = ws_result.scalar_one_or_none()
-            if ws:
-                ws_name = ws.name
-
         responses.append(FlaggedAnswerResponse(
             id=q.id,
             query_text=q.query_text,
             response_text=q.response_text,
             trust_score=q.trust_score,
-            user_name=user_name,
-            workspace_name=ws_name,
+            user_name=q.user.username if q.user else None,
+            workspace_name=q.workspace.name if q.workspace else None,
             created_at=q.created_at,
         ))
 
@@ -564,27 +541,22 @@ async def get_trust_score_distribution(
     db: AsyncSession = Depends(get_db),
 ):
     """Return count of queries in trust score buckets (admin only)."""
-    buckets = [
-        (0.0, 0.25, "0-25"),
-        (0.26, 0.50, "26-50"),
-        (0.51, 0.75, "51-75"),
-        (0.76, 1.0, "76-100"),
-    ]
-    results = []
-    for low, high, label in buckets:
-        cnt = await db.execute(
-            select(func.count(Query.id)).where(
-                Query.trust_score.isnot(None),
-                Query.trust_score >= low,
-                Query.trust_score <= high,
-            )
-        )
-        results.append(TrustScoreDistribution(
-            range=label,
-            count=cnt.scalar() or 0,
-        ))
+    result = await db.execute(
+        select(
+            func.sum(case((Query.trust_score.between(0.0, 0.25), 1), else_=0)).label("bucket_0_25"),
+            func.sum(case((Query.trust_score.between(0.26, 0.50), 1), else_=0)).label("bucket_26_50"),
+            func.sum(case((Query.trust_score.between(0.51, 0.75), 1), else_=0)).label("bucket_51_75"),
+            func.sum(case((Query.trust_score.between(0.76, 1.0), 1), else_=0)).label("bucket_76_100"),
+        ).where(Query.trust_score.isnot(None))
+    )
+    row = result.one()
 
-    return results
+    return [
+        TrustScoreDistribution(range="0-25", count=row.bucket_0_25 or 0),
+        TrustScoreDistribution(range="26-50", count=row.bucket_26_50 or 0),
+        TrustScoreDistribution(range="51-75", count=row.bucket_51_75 or 0),
+        TrustScoreDistribution(range="76-100", count=row.bucket_76_100 or 0),
+    ]
 
 
 # ─── Evaluation history ─────────────────────────────────────────────

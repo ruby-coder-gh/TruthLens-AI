@@ -24,6 +24,8 @@ import {
   Shield,
   Copy,
   Check,
+  MessageSquare,
+  Loader2,
 } from 'lucide-react';
 import {
   Button,
@@ -49,6 +51,7 @@ import {
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type {
+  ActivityEntry,
   Workspace,
   Document,
   WorkspaceMember,
@@ -57,6 +60,7 @@ import type {
 // ─── Tab definitions ─────────────────────────────────────────────────────────
 const TABS = [
   { id: 'documents', label: 'Documents', icon: <FileText size={15} /> },
+  { id: 'activity', label: 'Activity', icon: <Clock size={15} /> },
   { id: 'members', label: 'Members', icon: <Users size={15} /> },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
 ];
@@ -580,6 +584,9 @@ export default function WorkspaceDetailPage() {
                 {activeTab === 'documents' && (
                   <DocumentsTab workspaceId={workspaceId} />
                 )}
+                {activeTab === 'activity' && (
+                  <ActivityTab workspaceId={workspaceId} />
+                )}
                 {activeTab === 'members' && (
                   <MembersTab workspaceId={workspaceId} isOwner={isOwner} members={members} />
                 )}
@@ -592,6 +599,80 @@ export default function WorkspaceDetailPage() {
         </motion.div>
       </motion.div>
       </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  ACTIVITY TAB
+// ═════════════════════════════════════════════════════════════════════════════
+
+function ActivityTab({ workspaceId }: { workspaceId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['workspace-activity', workspaceId],
+    queryFn: () => workspaceApi.activity(workspaceId),
+    enabled: !!workspaceId,
+  });
+
+  const activities = data?.data ?? [];
+
+  const iconMap: Record<string, React.ReactNode> = {
+    query: <MessageSquare size={16} className="text-accent-2" />,
+    document_upload: <UploadCloud size={16} className="text-primary-soft" />,
+    workspace_created: <CheckCircle2 size={16} className="text-green" />,
+  };
+
+  function timeAgo(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glass text-text-dim">
+          <Clock size={28} />
+        </div>
+        <h3 className="text-lg font-semibold text-text">No activity yet</h3>
+        <p className="mt-1 text-sm text-text-muted">Upload documents or ask questions to see activity here.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {activities.map((entry: ActivityEntry) => (
+        <div
+          key={entry.id}
+          className="flex items-start gap-4 rounded-xl px-4 py-3 transition-colors hover:bg-white/[0.03]"
+        >
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5">
+            {iconMap[entry.type] || <Clock size={16} className="text-text-dim" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-text truncate">{entry.description}</p>
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-text-dim">
+              {entry.user_name && <span>{entry.user_name}</span>}
+              <span>{timeAgo(entry.timestamp)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

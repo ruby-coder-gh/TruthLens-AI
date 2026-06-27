@@ -1,8 +1,10 @@
-import { useState, useCallback, type DragEvent, type ChangeEvent } from 'react';
+import { useState, type DragEvent, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
-import { Button, Card, Badge, ProgressBar, useToast, pageTransition } from '../components/ui';
+import { Button, useToast, pageTransition } from '../components/ui';
+import { documentApi } from '../api/client';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -10,7 +12,7 @@ interface UploadFile {
   id: string;
   file: File;
   progress: number;
-  status: 'pending' | 'uploading' | 'parsing' | 'chunking' | 'embedding' | 'indexing' | 'complete' | 'error';
+  status: 'pending' | 'uploading' | 'complete' | 'error';
   error?: string;
 }
 
@@ -24,59 +26,37 @@ const ALLOWED_TYPES = [
 
 const ACCEPT_STRING = '.pdf,.docx,.xlsx,.txt,.md';
 
-const INGESTION_STEPS = ['Parsing', 'Chunking', 'Embedding', 'Indexing'] as const;
-
-const STAGE_ORDER: UploadFile['status'][] = ['parsing', 'chunking', 'embedding', 'indexing', 'complete'];
-
 // ─── Ingestion Tracker ─────────────────────────────────────────────────────────
 
 function IngestionTracker({ status }: { status: UploadFile['status'] }) {
-  const currentStepIndex = STAGE_ORDER.indexOf(status as typeof STAGE_ORDER[number]);
-  const isError = status === 'error';
+  if (status === 'pending') return null;
 
   return (
     <div className="flex items-center gap-2 mt-2">
-      {INGESTION_STEPS.map((step, i) => {
-        const stepStatus: 'active' | 'done' | 'pending' | 'error' =
-          isError && i === currentStepIndex
-            ? 'error'
-            : currentStepIndex >= i
-              ? 'done'
-              : 'pending';
-        if (i === currentStepIndex && !isError && status !== 'complete') {
-          // Currently processing this step
-          return (
-            <div key={step} className="flex items-center gap-1.5">
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-2/20">
-                <Loader2 size={10} className="animate-spin text-accent-2" />
-              </span>
-              <span className="text-[10px] text-accent-2 font-medium">{step}</span>
-              {i < INGESTION_STEPS.length - 1 && <span className="text-text-dim text-[10px]">→</span>}
-            </div>
-          );
-        }
-        return (
-          <div key={step} className="flex items-center gap-1.5">
-            <span className={`flex h-5 w-5 items-center justify-center rounded-full ${
-              stepStatus === 'done' ? 'bg-green/15' : stepStatus === 'error' ? 'bg-red/15' : 'bg-card-2'
-            }`}>
-              {stepStatus === 'done' ? (
-                <CheckCircle size={10} className="text-green" />
-              ) : stepStatus === 'error' ? (
-                <AlertCircle size={10} className="text-red" />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-text-dim" />
-              )}
-            </span>
-            <span className={`text-[10px] ${
-              stepStatus === 'done' ? 'text-green' : stepStatus === 'error' ? 'text-red' : 'text-text-dim'
-            }`}>
-              {step}
-            </span>
-            {i < INGESTION_STEPS.length - 1 && <span className="text-text-dim text-[10px]">→</span>}
-          </div>
-        );
-      })}
+      {status === 'uploading' && (
+        <>
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-2/20">
+            <Loader2 size={10} className="animate-spin text-accent-2" />
+          </span>
+          <span className="text-[10px] text-accent-2 font-medium">Uploading...</span>
+        </>
+      )}
+      {status === 'complete' && (
+        <>
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green/15">
+            <CheckCircle size={10} className="text-green" />
+          </span>
+          <span className="text-[10px] text-green font-medium">Complete</span>
+        </>
+      )}
+      {status === 'error' && (
+        <>
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red/15">
+            <AlertCircle size={10} className="text-red" />
+          </span>
+          <span className="text-[10px] text-red font-medium">Error</span>
+        </>
+      )}
     </div>
   );
 }
@@ -92,7 +72,6 @@ function FileRow({
 }) {
   const isComplete = item.status === 'complete';
   const isError = item.status === 'error';
-  const isUploading = item.status === 'uploading';
 
   return (
     <motion.div
@@ -124,9 +103,6 @@ function FileRow({
             </button>
           )}
         </div>
-        {isUploading && (
-          <ProgressBar value={item.progress} size="sm" className="mt-2" />
-        )}
         <IngestionTracker status={item.status} />
         {item.error && (
           <p className="mt-1 text-xs text-red flex items-center gap-1">
@@ -143,12 +119,21 @@ function FileRow({
 
 export default function AdminUploadPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState('default');
 
-  const addFiles = useCallback((newFiles: FileList | File[]) => {
+  const uploadMutation = useMutation({
+    mutationFn: ({ workspaceId, file }: { workspaceId: string; file: File }) =>
+      documentApi.upload(workspaceId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'documents'] });
+    },
+  });
+
+  function addFiles(newFiles: FileList | File[]) {
     const valid: UploadFile[] = [];
     for (const f of Array.from(newFiles)) {
       if (!ALLOWED_TYPES.includes(f.type) && !f.name.match(/\.(pdf|docx|xlsx|txt|md)$/i)) {
@@ -163,7 +148,7 @@ export default function AdminUploadPage() {
       });
     }
     setFiles((prev) => [...prev, ...valid]);
-  }, [addToast]);
+  }
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
@@ -188,49 +173,52 @@ export default function AdminUploadPage() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   }
 
-  function simulateIngestion(item: UploadFile) {
-    const stages: UploadFile['status'][] = ['uploading', 'parsing', 'chunking', 'embedding', 'indexing', 'complete'];
-    let idx = 0;
-
-    setFiles((prev) =>
-      prev.map((f) => (f.id === item.id ? { ...f, status: 'uploading' as const, progress: 0 } : f)),
-    );
-
-    const interval = setInterval(() => {
-      idx++;
-      if (idx >= stages.length) {
-        clearInterval(interval);
-        return;
-      }
-      const status = stages[idx];
-      const progress = Math.min(100, Math.round((idx / (stages.length - 1)) * 100));
-
-      setFiles((prev) =>
-        prev.map((f) =>
-          f.id === item.id ? { ...f, status, progress: status === 'uploading' ? Math.min(90, f.progress + 25) : progress } : f,
-        ),
-      );
-    }, 800);
-  }
-
-  function handleUpload() {
+  async function handleUpload() {
     const pending = files.filter((f) => f.status === 'pending');
     if (pending.length === 0) {
       addToast('No files to upload', 'info');
       return;
     }
 
-    setUploading(true);
-    pending.forEach((item) => simulateIngestion(item));
+    let successCount = 0;
+    let errorCount = 0;
 
-    setTimeout(() => {
-      setUploading(false);
-      addToast('Upload complete!', 'success');
-    }, pending.length * 4000 + 1000);
+    for (const item of pending) {
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === item.id ? { ...f, status: 'uploading' as const, progress: 50 } : f,
+        ),
+      );
+
+      try {
+        await uploadMutation.mutateAsync({ workspaceId, file: item.file });
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === item.id ? { ...f, status: 'complete' as const, progress: 100 } : f,
+          ),
+        );
+        successCount++;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed';
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === item.id ? { ...f, status: 'error' as const, error: message } : f,
+          ),
+        );
+        errorCount++;
+      }
+    }
+
+    if (errorCount === 0) {
+      addToast(`Uploaded ${successCount} file${successCount > 1 ? 's' : ''} successfully!`, 'success');
+    } else {
+      addToast(`${successCount} uploaded, ${errorCount} failed`, 'error');
+    }
   }
 
   const allComplete = files.length > 0 && files.every((f) => f.status === 'complete' || f.status === 'error');
   const hasPending = files.some((f) => f.status === 'pending');
+  const isUploading = files.some((f) => f.status === 'uploading');
 
   return (
     <motion.div
@@ -253,6 +241,22 @@ export default function AdminUploadPage() {
           <h1 className="text-2xl font-bold text-text">Upload Documents</h1>
           <p className="text-sm text-text-muted mt-1">Upload PDF, DOCX, XLSX, TXT, or MD files.</p>
         </div>
+      </div>
+
+      {/* Workspace Selector */}
+      <div className="flex items-center gap-3">
+        <label htmlFor="workspace" className="text-sm font-medium text-text whitespace-nowrap">
+          Workspace
+        </label>
+        <select
+          id="workspace"
+          value={workspaceId}
+          onChange={(e) => setWorkspaceId(e.target.value)}
+          disabled={isUploading}
+          className="rounded-lg glass border border-border px-3 py-2 text-sm text-text bg-card focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+        >
+          <option value="default">Default</option>
+        </select>
       </div>
 
       {/* Drop Zone */}
@@ -312,12 +316,12 @@ export default function AdminUploadPage() {
             <div className="flex items-center gap-3 pt-2">
               <Button
                 onClick={handleUpload}
-                loading={uploading}
+                loading={isUploading}
                 disabled={!hasPending}
                 size="md"
               >
                 <Upload size={14} />
-                {uploading ? 'Uploading...' : `Upload ${files.filter((f) => f.status === 'pending').length} file${files.filter((f) => f.status === 'pending').length > 1 ? 's' : ''}`}
+                {isUploading ? 'Uploading...' : `Upload ${files.filter((f) => f.status === 'pending').length} file${files.filter((f) => f.status === 'pending').length > 1 ? 's' : ''}`}
               </Button>
               {allComplete && (
                 <Button

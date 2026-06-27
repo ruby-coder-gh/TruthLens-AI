@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { staggerContainer, staggerItem } from '../ui';
 import HeroSection from './HeroSection';
@@ -11,26 +11,11 @@ import type { ApiEndpoint, HttpMethod } from './types';
 import { EmptyState } from '../ui';
 import { SearchX } from 'lucide-react';
 
-interface CenterContentProps {
-  activeGroup?: string;
-}
-
-export default function CenterContent({ activeGroup }: CenterContentProps) {
+export default function CenterContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMethod, setActiveMethod] = useState<HttpMethod | 'ALL'>('ALL');
   const [selectedEndpoint, setSelectedEndpoint] = useState<ApiEndpoint | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  // Scroll to active group when sidebar item clicked
-  useEffect(() => {
-    if (!activeGroup || searchQuery) return;
-    const el = groupRefs.current[activeGroup] as HTMLElement | null;
-    if (el && scrollRef.current) {
-      const top = el.getBoundingClientRect().top - scrollRef.current.getBoundingClientRect().top + scrollRef.current.scrollTop - 16;
-      scrollRef.current.scrollTo({ top, behavior: 'smooth' });
-    }
-  }, [activeGroup, searchQuery]);
 
   const filteredGroups = useMemo(() => {
     return API_GROUPS
@@ -84,7 +69,6 @@ export default function CenterContent({ activeGroup }: CenterContentProps) {
                 <motion.div
                   key={group.id}
                   variants={staggerItem}
-                  ref={(el) => { groupRefs.current[group.id] = el as HTMLDivElement | null; }}
                 >
                   <EndpointGroup
                     group={group}

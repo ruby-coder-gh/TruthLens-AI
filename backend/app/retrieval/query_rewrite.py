@@ -26,13 +26,11 @@ async def rewrite(
         return query
 
     try:
-        from langchain_ollama import ChatOllama
+        from app.generation.provider import get_chat_llm
 
-        llm = ChatOllama(
-            model=settings.OLLAMA_PRIMARY_MODEL,
-            base_url=settings.OLLAMA_BASE_URL,
+        llm = get_chat_llm(
             temperature=settings.REWRITE_TEMPERATURE,
-            num_predict=settings.REWRITE_MAX_TOKENS,
+            max_tokens=settings.REWRITE_MAX_TOKENS,
         )
 
         system_prompt = (
@@ -83,13 +81,11 @@ async def expand(
     variations = [query]
 
     try:
-        from langchain_ollama import ChatOllama
+        from app.generation.provider import get_chat_llm
 
-        llm = ChatOllama(
-            model=settings.OLLAMA_PRIMARY_MODEL,
-            base_url=settings.OLLAMA_BASE_URL,
+        llm = get_chat_llm(
             temperature=0.3,
-            num_predict=512,
+            max_tokens=512,
         )
 
         prompt = (

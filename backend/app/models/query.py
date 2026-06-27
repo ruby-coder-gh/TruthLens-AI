@@ -39,6 +39,7 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         Index("idx_queries_workspace", "workspace_id"),
         Index("idx_queries_user", "user_id"),
         Index("idx_queries_created", "created_at"),
+        Index("idx_queries_trust_score", "trust_score"),
     )
 
     def __repr__(self) -> str:

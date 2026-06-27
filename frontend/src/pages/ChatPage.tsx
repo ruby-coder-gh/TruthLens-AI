@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, createPortal, type FormEvent, type KeyboardEvent } from 'react';
+import type { ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -31,6 +32,7 @@ import {
   Eye,
   Quote,
   Zap,
+  Layers,
 } from 'lucide-react';
 import {
   Button,
@@ -167,6 +169,8 @@ export default function ChatPage() {
   const [tracingBeam, setTracingBeam] = useState<{ startId: string; targetId: string } | null>(null);
   const [highlightedSourceId, setHighlightedSourceId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
+  const [pipelinePhase, setPipelinePhase] = useState<string | null>(null);
   // Track queries stored in API for history tab
   const [storedQueries, setStoredQueries] = useState<StoredQueryDetail[]>([]);
 
@@ -347,6 +351,7 @@ export default function ChatPage() {
           );
           setIsStreaming(false);
           setStreamingMessageId(null);
+          setPipelinePhase(null);
 
           // Refetch conversation history to pick up new query
           setTimeout(() => {
@@ -368,10 +373,11 @@ export default function ChatPage() {
           );
           setIsStreaming(false);
           setStreamingMessageId(null);
+          setPipelinePhase(null);
         },
 
-        onProgress: (_phase: string, _progress: number) => {
-          // Could show a mini progress indicator; not needed for v1
+        onProgress: (phase: string, _progress: number) => {
+          setPipelinePhase(phase);
         },
       }, convId);
 
@@ -414,6 +420,7 @@ export default function ChatPage() {
     setConversationId(null);
     setStreamingMessageId(null);
     setIsStreaming(false);
+    setPipelinePhase(null);
     setStoredQueries([]);
     setHistoryOpen(null);
     setExpandedSource(null);
@@ -506,7 +513,7 @@ export default function ChatPage() {
 
   // ─── Responsive sidebar toggle ────────────────────────────────────────────
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
-  const effectiveSidebarOpen = isMobile ? sidebarOpen : true;
+  const effectiveSidebarOpen = sidebarOpen;
 
   // ══════════════════════════════════════════════════════════════════════════
   //  RENDER
@@ -526,10 +533,7 @@ export default function ChatPage() {
         {/* ─── Chat Panel ─────────────────────────────────────────────────── */}
         <motion.div
           layout
-          className={clsx(
-            'flex flex-col',
-            effectiveSidebarOpen ? 'hidden lg:flex lg:flex-1' : 'flex-1',
-          )}
+          className="flex flex-col flex-1"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border/60 glass px-4 py-3 lg:px-6 rounded-tl-2xl">
@@ -562,16 +566,31 @@ export default function ChatPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Mobile sidebar toggle */}
+              {/* Evidence toggle — always visible */}
               <motion.button
                 type="button"
                 onClick={() => setSidebarOpen((prev) => !prev)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-card-2 hover:text-text lg:hidden"
-                aria-label={sidebarOpen ? 'Close context panel' : 'Open context panel'}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-card-2 hover:text-text"
+                aria-label={sidebarOpen ? 'Close evidence panel' : 'Open evidence panel'}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
                 {sidebarOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              </motion.button>
+
+              {/* Sources button */}
+              <motion.button
+                type="button"
+                onClick={() => setSourcesModalOpen(true)}
+                disabled={latestSources.length === 0}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 hover:border-primary/30 hover:bg-primary/[0.06] hover:text-primary-soft disabled:cursor-not-allowed disabled:opacity-40"
+                whileTap={{ scale: 0.97 }}
+              >
+                <FileText size={15} />
+                <span className="hidden sm:inline">Sources</span>
+                {latestSources.length > 0 && (
+                  <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary/20 px-1 text-[9px] font-semibold text-primary-soft">{latestSources.length}</span>
+                )}
               </motion.button>
 
               {/* New conversation */}
@@ -626,10 +645,10 @@ export default function ChatPage() {
           </div>
 
           {/* ─── Input Area ──────────────────────────────────────────────── */}
-          <div className="border-t border-border/60 glass px-4 py-4 lg:px-6 rounded-bl-2xl">
+          <div className="border-t border-border/30 px-4 py-4 lg:px-6 rounded-bl-2xl">
             <motion.form
               onSubmit={handleSubmit}
-              className="mx-auto flex max-w-3xl items-end gap-3"
+              className="mx-auto flex max-w-3xl items-start gap-3"
               initial={{ opacity: 0.99, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2, duration: 0.3 }}
@@ -649,65 +668,188 @@ export default function ChatPage() {
                   placeholder="Ask a question about your documents…"
                   disabled={isStreaming}
                   rows={1}
-                  className="w-full resize-none rounded-xl border border-border/50 bg-bg-soft/80 px-4 py-3 pr-12 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="relative w-full resize-none rounded-xl border border-border/40 bg-bg-soft/90 px-4 py-3 pr-12 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 z-10"
                   aria-label="Type your question"
                 />
+                {/* Breathing glow border */}
+                <motion.div
+                  className="absolute inset-0 rounded-xl pointer-events-none -z-10"
+                  animate={{
+                    boxShadow: [
+                      '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
+                      '0 0 18px 6px rgba(124,92,255,0.22), inset 0 0 14px 4px rgba(124,92,255,0.06)',
+                      '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
+                    ],
+                  }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                />
               </div>
-              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                <Button
-                  type="submit"
-                  disabled={!inputValue.trim() || isStreaming}
-                  className="shrink-0"
-                  aria-label="Send message"
-                >
-                  {isStreaming ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Send size={18} />
-                  )}
-                </Button>
-              </motion.div>
+              <motion.button
+                type="submit"
+                disabled={!inputValue.trim() || isStreaming}
+                className="shrink-0 flex items-center justify-center rounded-xl border border-primary/30 bg-primary px-4 text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-transparent disabled:bg-white/5"
+                style={{ height: '44px', minWidth: '44px' }}
+                animate={
+                  inputValue.trim() && !isStreaming
+                    ? {
+                        boxShadow: [
+                          '0 0 10px 3px rgba(124,92,255,0.3)',
+                          '0 0 22px 8px rgba(124,92,255,0.45)',
+                          '0 0 10px 3px rgba(124,92,255,0.3)',
+                        ],
+                        borderColor: 'rgba(124,92,255,0.6)',
+                      }
+                    : {
+                        boxShadow: 'none',
+                        borderColor: 'rgba(255,255,255,0.08)',
+                      }
+                }
+                transition={{ duration: 2, repeat: inputValue.trim() && !isStreaming ? Infinity : 0, ease: 'easeInOut' }}
+                whileHover={inputValue.trim() && !isStreaming ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(124,92,255,0.5)' } : {}}
+                whileTap={{ scale: 0.95 }}
+              >
+                {isStreaming ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Send size={18} />
+                )}
+              </motion.button>
             </motion.form>
-            <motion.p
-              className="mt-2 text-center text-xs text-text-dim"
-              initial={{ opacity: 0.99 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              VeritasRAG may produce inaccurate information. Verify important claims.
-            </motion.p>
           </div>
         </motion.div>
 
         {/* ─── Evidence Sidebar ──────────────────────────────────────────── */}
         <EvidenceSidebar
-          sources={latestSources}
           guardrail={latestGuardrail}
           trustScore={latestTrustScore}
           trustComponents={latestTrustComponents}
-          storedQueries={storedQueries}
-          isLoading={isStreaming && latestSources.length === 0}
+          isLoading={isStreaming && !pipelinePhase}
+          isStreaming={isStreaming}
           sidebarOpen={effectiveSidebarOpen}
-          onToggleSidebar={() => setSidebarOpen(false)}
-          expandedSource={expandedSource}
-          onToggleExpand={setExpandedSource}
-          highlightedSourceId={highlightedSourceId}
-          historyLoading={historyLoading}
-          historyError={historyError}
-          onRetry={refetchHistory}
-          onHistorySelect={(queryId) => {
-            setHistoryOpen(queryId === historyOpen ? null : queryId);
-            if (queryId !== historyOpen) {
-              loadQueryDetail(queryId);
-            }
-          }}
-          historyOpen={historyOpen}
-          onHistoryDelete={(queryId) => deleteQueryMutation.mutate(queryId)}
-          isDeleting={deleteQueryMutation.isPending}
-          conversationId={conversationId}
+          onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+          pipelinePhase={pipelinePhase}
           isMobile={isMobile}
         />
       </motion.div>
+
+      {/* ─── Sources Popup Modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {sourcesModalOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+              initial={{ opacity: 0.99 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.1 }}
+              onClick={() => setSourcesModalOpen(false)}
+            />
+            <motion.div
+              className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-2xl max-h-[70vh] overflow-y-auto rounded-2xl border border-border/40 bg-[rgba(8,11,18,0.97)] backdrop-blur-2xl shadow-2xl"
+              initial={{ opacity: 0.99, scale: 0.93, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+            >
+              <div className="flex items-center justify-between border-b border-border/40 px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <FileText size={16} className="text-primary-soft" />
+                  <h3 className="text-sm font-bold text-text">Sources Used</h3>
+                  <Badge color="purple">{latestSources.length}</Badge>
+                </div>
+                <motion.button
+                  type="button"
+                  onClick={() => setSourcesModalOpen(false)}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-dim hover:bg-card-2 hover:text-text"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M11 3L3 11M3 3l8 8" />
+                  </svg>
+                </motion.button>
+              </div>
+              <div className="p-4 space-y-3">
+                {latestSources.length === 0 ? (
+                  <p className="text-sm text-text-muted text-center py-8">No sources retrieved yet.</p>
+                ) : (
+                  latestSources.map((source, i) => {
+                    const relevancePct = Math.round((source.relevance_score || 0) * 100);
+                    const confidencePct = Math.round((source.confidence ?? source.relevance_score ?? 0) * 100);
+                    const docName = source.document_name || `Source ${i + 1}`;
+                    const fileExt = docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC';
+
+                    return (
+                      <motion.div
+                        key={source.chunk_id || i}
+                        initial={{ opacity: 0.99, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                        className="group relative rounded-2xl border border-border/40 bg-card/60 p-4 hover:border-primary/30 hover:bg-card-hover transition-all duration-300"
+                        whileHover={{ y: -2, scale: 1.005 }}
+                      >
+                        <div className="space-y-3">
+                          {/* Row 1: Icon + Name + Type */}
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20">
+                              <FileText size={16} className="text-primary-soft" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-text truncate">{docName}</p>
+                                <Badge color="gray" className="shrink-0 text-[10px]">{fileExt}</Badge>
+                              </div>
+                              <p className="text-xs text-text-dim mt-0.5">
+                                {source.page_number ? `p. ${source.page_number}` : ''}
+                                {source.updated_at ? ` · Updated ${new Date(source.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Row 2: Relevance bar */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-text-dim">Relevance</span>
+                              <span className={`font-medium tabular-nums ${relevancePct >= 70 ? 'text-green' : relevancePct >= 40 ? 'text-orange' : 'text-red'}`}>
+                                {relevancePct}%
+                              </span>
+                            </div>
+                            <div className="relative h-2 rounded-full bg-white/5 overflow-hidden">
+                              <motion.div
+                                className={`absolute inset-y-0 left-0 rounded-full ${relevancePct >= 70 ? 'bg-gradient-to-r from-green-400 to-emerald-500' : relevancePct >= 40 ? 'bg-gradient-to-r from-orange-400 to-amber-500' : 'bg-gradient-to-r from-red-400 to-rose-500'}`}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${relevancePct}%` }}
+                                transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Row 3: Excerpt */}
+                          <p className="text-xs text-text-muted leading-relaxed line-clamp-2">
+                            {source.excerpt || source.text || 'No content'}
+                          </p>
+
+                          {/* Row 4: Confidence + Meta */}
+                          <div className="flex items-center gap-3 text-[11px] text-text-dim">
+                            <span className="flex items-center gap-1">
+                              <Shield size={10} /> {confidencePct}%
+                            </span>
+                            {source.matched_chunks !== undefined && (
+                              <span className="flex items-center gap-1">
+                                <Layers size={10} /> {source.matched_chunks} chunk{source.matched_chunks !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {tracingBeam && (
         <TraceBeamOverlay
@@ -967,39 +1109,7 @@ function ChatMessageBubble({
               </motion.div>
             )}
 
-            {/* Source citation chips */}
-            {message.sources.length > 0 && (
-              <motion.div
-                className="flex flex-wrap gap-1.5"
-                initial={{ opacity: 0.99 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-              >
-                {message.sources.slice(0, 5).map((source, i) => (
-                  <motion.button
-                    key={source.chunk_id}
-                    id={`cite-${message.id}-${i}`}
-                    type="button"
-                    onClick={(e) => onSourceClick(source, e, message.id, i)}
-                    className="inline-flex items-center gap-1 rounded-md glass px-2 py-1 text-xs text-text-muted transition-colors hover:border-primary/30 hover:text-primary-soft"
-                    title={source.document_name ?? 'Source document'}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    initial={{ opacity: 0.99, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.2 + i * 0.05 }}
-                  >
-                    <FileText size={12} />
-                    [{i + 1}]
-                  </motion.button>
-                ))}
-                {message.sources.length > 5 && (
-                  <span className="text-xs text-text-dim">
-                    +{message.sources.length - 5} more
-                  </span>
-                )}
-              </motion.div>
-            )}
+
 
             {/* Footer: latency + model info + actions */}
             {(isComplete || isError) && (
@@ -1100,6 +1210,96 @@ function TypingIndicator() {
   );
 }
 
+// ─── Citation Hover Card — shows source excerpt on hover ─────────────────────
+
+function CitationHoverCard({ source, children }: { source: Source; children: ReactNode }) {
+  const [show, setShow] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  const relevancePct = Math.round((source.relevance_score || 0) * 100);
+  const docName = source.document_name || 'Source';
+
+  const showCard = () => {
+    hoverTimer.current = setTimeout(() => {
+      if (triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setPos({
+          top: rect.bottom + 8,
+          left: Math.min(rect.left, window.innerWidth - 360),
+        });
+        setShow(true);
+      }
+    }, 300); // small delay to avoid flicker
+  };
+
+  const hideCard = () => {
+    clearTimeout(hoverTimer.current);
+    setShow(false);
+  };
+
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={showCard}
+        onMouseLeave={hideCard}
+        className="relative inline-flex"
+      >
+        {children}
+      </span>
+      {show && createPortal(
+        <motion.div
+          initial={{ opacity: 0.99, y: -4, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0.99, y: -4, scale: 0.97 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          onMouseEnter={showCard}
+          onMouseLeave={hideCard}
+          className="fixed z-[70] w-80 rounded-2xl border border-glass-border bg-[#0e121d]/95 backdrop-blur-2xl shadow-2xl shadow-black/60 overflow-hidden"
+          style={{ top: pos.top, left: pos.left }}
+        >
+          {/* Header */}
+          <div className="px-4 pt-3 pb-2 border-b border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              <FileText size={14} className="text-primary-soft shrink-0" />
+              <span className="text-sm font-medium text-text truncate">{docName}</span>
+              <span className="ml-auto text-[10px] text-text-dim tabular-nums">{relevancePct}%</span>
+            </div>
+          </div>
+
+          {/* Excerpt */}
+          <div className="px-4 py-3 max-h-28 overflow-y-auto">
+            <p className="text-xs text-text-muted leading-relaxed line-clamp-4">
+              {source.excerpt || 'No excerpt available'}
+            </p>
+          </div>
+
+          {/* Score bar */}
+          <div className="px-4 pb-3">
+            <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-700"
+                style={{ width: `${relevancePct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Click hint */}
+          <div className="px-4 pb-3 flex items-center gap-1.5 text-[10px] text-text-dim border-t border-white/[0.06] pt-2">
+            <Brain size={10} />
+            Click to locate in sidebar
+          </div>
+        </motion.div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // ─── Render message with clickable citation markers ──────────────────────────
 
 function renderMessageWithCitations(
@@ -1121,18 +1321,18 @@ function renderMessageWithCitations(
           const source = sources[idx];
           if (source) {
             return (
-              <motion.button
-                key={i}
-                id={`cite-${messageId}-${idx}`}
-                type="button"
-                onClick={(e) => onSourceClick(source, e, messageId, idx)}
-                className="inline-flex items-center justify-center rounded bg-primary/20 px-1 text-xs font-medium text-primary-soft transition-colors hover:bg-primary/30 relative"
-                title={source.document_name ?? `Source ${idx + 1}`}
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {match[0]}
-              </motion.button>
+              <CitationHoverCard key={i} source={source}>
+                <motion.button
+                  id={`cite-${messageId}-${idx}`}
+                  type="button"
+                  onClick={(e) => onSourceClick(source, e, messageId, idx)}
+                  className="inline-flex items-center justify-center rounded bg-primary/20 px-1 text-xs font-medium text-primary-soft transition-colors hover:bg-primary/30 relative"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  {match[0]}
+                </motion.button>
+              </CitationHoverCard>
             );
           }
           return <sup key={i} className="text-primary-soft font-medium">{match[0]}</sup>;

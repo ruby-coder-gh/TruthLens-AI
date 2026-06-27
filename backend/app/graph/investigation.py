@@ -23,6 +23,7 @@ from app.config import settings
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.citer import CitedSpan, cite
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
+from app.generation.provider import get_chat_llm
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
 from app.retrieval.hybrid_search import RetrievalResult, hybrid_search
 from app.retrieval.query_rewrite import expand, rewrite
@@ -125,15 +126,12 @@ to the source number. Be factual and grounded in the evidence provided."""
 # ─── Helper: run LLM call ─────────────────────────────────────────────────────
 
 def _run_llm(system_prompt: str, user_prompt: str, temperature: float = 0.3, max_tokens: int = 1024) -> str:
-    """Synchronous LLM call via LangChain Ollama."""
-    from langchain_ollama import ChatOllama
+    """Synchronous LLM call via provider."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    llm = ChatOllama(
-        model=settings.OLLAMA_PRIMARY_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
+    llm = get_chat_llm(
         temperature=temperature,
-        num_predict=max_tokens,
+        max_tokens=max_tokens,
         timeout=30,
     )
     messages = [

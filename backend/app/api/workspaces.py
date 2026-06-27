@@ -12,10 +12,13 @@ from fastapi import APIRouter, Depends
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from app.models.audit_log import AuditLog
+from app.models.document import Document
+from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.common import ListResponse, MessageResponse
 from app.schemas.workspace import (
+    ActivityEntry,
     MemberAdd,
     MemberResponse,
     MemberUpdate,
@@ -360,3 +363,63 @@ async def list_members(
         ))
 
     return ListResponse(data=member_responses)
+
+
+@router.get("/{workspace_id}/activity", response_model=ListResponse[ActivityEntry])
+async def get_workspace_activity(
+    workspace_id: str,
+    workspace: Workspace = Depends(check_workspace_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get unified activity feed for a workspace (queries, uploads, member events)."""
+    activity: list[ActivityEntry] = []
+
+    # Recent queries (with user info)
+    result = await db.execute(
+        select(Query, User)
+        .outerjoin(User, Query.user_id == User.id)
+        .where(Query.workspace_id == workspace_id)
+        .order_by(Query.created_at.desc())
+        .limit(20)
+    )
+    for query, user in result:
+        activity.append(ActivityEntry(
+            id=f"q_{query.id}",
+            type="query",
+            description=f"Asked: {query.query_text[:150]}",
+            user_name=user.username if user else None,
+            timestamp=query.created_at,
+            metadata={"trust_score": query.trust_score} if query.trust_score else None,
+        ))
+
+    # Recent document uploads (with user info)
+    result = await db.execute(
+        select(Document, User)
+        .outerjoin(User, Document.uploaded_by == User.id)
+        .where(Document.workspace_id == workspace_id)
+        .order_by(Document.created_at.desc())
+        .limit(20)
+    )
+    for doc, user in result:
+        activity.append(ActivityEntry(
+            id=f"d_{doc.id}",
+            type="document_upload",
+            description=f"Uploaded: {doc.original_filename or doc.filename}",
+            user_name=user.username if user else None,
+            timestamp=doc.created_at,
+            metadata={"status": doc.status, "size": doc.file_size},
+        ))
+
+    # Workspace creation event
+    activity.append(ActivityEntry(
+        id=f"ws_{workspace.id}",
+        type="workspace_created",
+        description=f"Created workspace: {workspace.name}",
+        user_name=None,
+        timestamp=workspace.created_at,
+    ))
+
+    # Sort by timestamp descending
+    activity.sort(key=lambda a: a.timestamp, reverse=True)
+
+    return ListResponse(data=activity[:50])

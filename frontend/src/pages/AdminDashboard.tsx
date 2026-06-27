@@ -68,24 +68,15 @@ interface ActionFilterOption {
   label: string;
 }
 
-// ─── Chart mock data ──────────────────────────────────────────────────────────
+interface QueriesOverTimePoint {
+  month: string;
+  queries: number;
+}
 
-const queriesOverTimeData = [
-  { month: 'Jan', queries: 420 },
-  { month: 'Feb', queries: 580 },
-  { month: 'Mar', queries: 490 },
-  { month: 'Apr', queries: 720 },
-  { month: 'May', queries: 640 },
-  { month: 'Jun', queries: 890 },
-];
-
-const trustScoreDistributionData = [
-  { range: '0–0.2', count: 12 },
-  { range: '0.2–0.4', count: 28 },
-  { range: '0.4–0.6', count: 45 },
-  { range: '0.6–0.8', count: 72 },
-  { range: '0.8–1.0', count: 93 },
-];
+interface TrustScoreBucket {
+  range: string;
+  count: number;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -383,8 +374,38 @@ function ErrorBanner({
   );
 }
 
-/** Charts section with mock data overlay */
-function ChartsSection() {
+/** Chart loading skeleton */
+function ChartSkeleton() {
+  return (
+    <div className="h-64 flex items-center justify-center">
+      <div className="w-full space-y-3 px-4">
+        <Skeleton height={14} width="30%" className="mb-6" />
+        <Skeleton height={160} width="100%" />
+      </div>
+    </div>
+  );
+}
+
+/** Charts section connected to real API data */
+function ChartsSection({
+  queriesData,
+  queriesLoading,
+  queriesError,
+  trustData,
+  trustLoading,
+  trustError,
+  onRetryQueries,
+  onRetryTrust,
+}: {
+  queriesData: QueriesOverTimePoint[] | undefined;
+  queriesLoading: boolean;
+  queriesError: boolean;
+  trustData: TrustScoreBucket[] | undefined;
+  trustLoading: boolean;
+  trustError: boolean;
+  onRetryQueries: () => void;
+  onRetryTrust: () => void;
+}) {
   return (
     <motion.div
       className="grid gap-4 lg:grid-cols-2"
@@ -394,82 +415,114 @@ function ChartsSection() {
     >
       {/* Line chart */}
       <motion.div variants={staggerItem}>
-        <Card className="relative">
+        <Card>
           <div className="mb-4 flex items-center gap-2">
             <Activity size={18} className="text-primary-soft" />
             <h3 className="text-sm font-semibold text-text">Queries over time</h3>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={queriesOverTimeData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
-                <YAxis stroke="#6b7888" fontSize={12} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(27, 34, 48, 0.85)',
-                    backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(100, 120, 170, 0.15)',
-                    borderRadius: '8px',
-                    color: '#e6edf3',
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="queries"
-                  stroke="#7c5cff"
-                  strokeWidth={2}
-                  dot={{ fill: '#7c5cff', r: 4 }}
-                  activeDot={{ r: 6 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
-            <Badge color="gray" className="px-3 py-1 text-xs">
-              Coming soon with real data
-            </Badge>
-          </div>
+          {queriesLoading ? (
+            <ChartSkeleton />
+          ) : queriesError ? (
+            <div className="flex h-64 flex-col items-center justify-center text-center">
+              <AlertTriangle size={20} className="text-red mb-2" />
+              <p className="text-xs text-text-muted mb-3">Failed to load chart data</p>
+              <Button variant="secondary" size="sm" onClick={onRetryQueries}>
+                <RefreshCw size={14} />
+                Retry
+              </Button>
+            </div>
+          ) : !queriesData || queriesData.length === 0 ? (
+            <div className="h-64 flex items-center justify-center">
+              <EmptyState
+                icon={<Activity size={20} />}
+                title="No data yet"
+                description="Queries over time will appear here once users start submitting queries."
+              />
+            </div>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={queriesData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
+                  <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
+                  <YAxis stroke="#6b7888" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(100, 120, 170, 0.15)',
+                      borderRadius: '8px',
+                      color: '#e6edf3',
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="queries"
+                    stroke="#7c5cff"
+                    strokeWidth={2}
+                    dot={{ fill: '#7c5cff', r: 4 }}
+                    activeDot={{ r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Card>
       </motion.div>
 
       {/* Bar chart */}
       <motion.div variants={staggerItem}>
-        <Card className="relative">
+        <Card>
           <div className="mb-4 flex items-center gap-2">
             <BarChart3 size={18} className="text-accent" />
             <h3 className="text-sm font-semibold text-text">
               Trust score distribution
             </h3>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trustScoreDistributionData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
-                <YAxis stroke="#6b7888" fontSize={12} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'rgba(27, 34, 48, 0.85)',
-                    backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(100, 120, 170, 0.15)',
-                    borderRadius: '8px',
-                    color: '#e6edf3',
-                  }}
-                />
-                <Bar
-                  dataKey="count"
-                  fill="#2dd4bf"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/60 backdrop-blur-[2px]">
-            <Badge color="gray" className="px-3 py-1 text-xs">
-              Coming soon with real data
-            </Badge>
-          </div>
+          {trustLoading ? (
+            <ChartSkeleton />
+          ) : trustError ? (
+            <div className="flex h-64 flex-col items-center justify-center text-center">
+              <AlertTriangle size={20} className="text-red mb-2" />
+              <p className="text-xs text-text-muted mb-3">Failed to load chart data</p>
+              <Button variant="secondary" size="sm" onClick={onRetryTrust}>
+                <RefreshCw size={14} />
+                Retry
+              </Button>
+            </div>
+          ) : !trustData || trustData.length === 0 ? (
+            <div className="h-64 flex items-center justify-center">
+              <EmptyState
+                icon={<BarChart3 size={20} />}
+                title="No data yet"
+                description="Trust score distribution will appear here once queries have been scored."
+              />
+            </div>
+          ) : (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={trustData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
+                  <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
+                  <YAxis stroke="#6b7888" fontSize={12} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                      backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(100, 120, 170, 0.15)',
+                      borderRadius: '8px',
+                      color: '#e6edf3',
+                    }}
+                  />
+                  <Bar
+                    dataKey="count"
+                    fill="#2dd4bf"
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Card>
       </motion.div>
     </motion.div>
@@ -958,6 +1011,16 @@ export default function AdminDashboard() {
     queryFn: () => adminApi.evaluation<EvaluationMetrics>(),
   });
 
+  const queriesOverTimeQuery = useQuery({
+    queryKey: ['admin', 'queries-over-time'],
+    queryFn: () => adminApi.getQueriesOverTime(),
+  });
+
+  const trustDistributionQuery = useQuery({
+    queryKey: ['admin', 'trust-distribution'],
+    queryFn: () => adminApi.getTrustScoreDistribution(),
+  });
+
   // ─── Mutations ─────────────────────────────────────────────────────────────
 
   const runEvalMutation = useMutation({
@@ -1005,6 +1068,9 @@ export default function AdminDashboard() {
   const logs = logsData?.data ?? [];
   const totalLogs = logsData?.meta?.total ?? 0;
   const totalLogPages = Math.max(1, Math.ceil(totalLogs / PAGE_SIZE));
+
+  const queriesData = queriesOverTimeQuery.data as QueriesOverTimePoint[] | undefined;
+  const trustData = trustDistributionQuery.data as TrustScoreBucket[] | undefined;
 
   return (
     <>
@@ -1146,7 +1212,16 @@ export default function AdminDashboard() {
         </motion.div>
 
         {/* ── Charts ─────────────────────────────────────────────────────────── */}
-        <ChartsSection />
+        <ChartsSection
+          queriesData={queriesData}
+          queriesLoading={queriesOverTimeQuery.isLoading}
+          queriesError={queriesOverTimeQuery.isError}
+          trustData={trustData}
+          trustLoading={trustDistributionQuery.isLoading}
+          trustError={trustDistributionQuery.isError}
+          onRetryQueries={() => queriesOverTimeQuery.refetch()}
+          onRetryTrust={() => trustDistributionQuery.refetch()}
+        />
 
         {/* ── Tabs: Audit Logs / Evaluation ──────────────────────────────────── */}
         <motion.div variants={fadeIn} initial="initial" animate="animate">

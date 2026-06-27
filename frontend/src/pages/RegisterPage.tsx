@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, User, Eye, EyeOff, UserPlus, Sparkles, Shield, Check } from 'lucide-react';
@@ -36,9 +36,9 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
 
   // Redirect if already logged in
-  if (isAuthenticated) {
-    navigate('/workspaces', { replace: true });
-  }
+  useEffect(() => {
+    if (isAuthenticated) navigate('/workspaces', { replace: true });
+  }, [isAuthenticated, navigate]);
 
   function validate(): boolean {
     const next: Record<string, string> = {};

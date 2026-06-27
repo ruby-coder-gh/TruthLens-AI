@@ -31,3 +31,4 @@ frontend/.turbo/
 *.swp
 Thumbs.db
 
+.gstack/

@@ -1,4 +1,4 @@
-"""Ollama-based answer generation with context."""
+"""Answer generation with hybrid LLM provider support."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import time
 from typing import Any, AsyncIterator
 
 from app.config import settings
+from app.generation.provider import get_chat_llm
 from app.utils.logger import logger
 
 
@@ -74,7 +75,7 @@ def _build_context_text(contexts: list[dict[str, Any]]) -> str:
 
 
 async def generate(input: GenerationInput) -> GenerationResult:
-    """Generate answer from retrieved context using Ollama.
+    """Generate answer from retrieved context using LLM provider.
 
     Args:
         input: GenerationInput with query and contexts.
@@ -82,7 +83,6 @@ async def generate(input: GenerationInput) -> GenerationResult:
     Returns:
         GenerationResult with answer text.
     """
-    from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage, SystemMessage
 
     start_time = time.time()
@@ -90,14 +90,11 @@ async def generate(input: GenerationInput) -> GenerationResult:
     context_text = _build_context_text(input.contexts)
     system_prompt = input.system_prompt or DEFAULT_SYSTEM_PROMPT
 
-    llm = ChatOllama(
-        model=settings.OLLAMA_PRIMARY_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
+    llm = get_chat_llm(
         temperature=settings.OLLAMA_TEMPERATURE,
-        top_p=settings.OLLAMA_TOP_P,
-        num_predict=settings.OLLAMA_MAX_TOKENS,
-        num_ctx=settings.OLLAMA_NUM_CTX,
+        max_tokens=settings.OLLAMA_MAX_TOKENS,
         timeout=settings.OLLAMA_TIMEOUT,
+        top_p=settings.OLLAMA_TOP_P,
     )
 
     query_text = input.rewritten_query or input.query
@@ -120,14 +117,17 @@ async def generate(input: GenerationInput) -> GenerationResult:
     try:
         response = llm.invoke(messages)
         answer = response.content.strip()
+        meta = getattr(response, "response_metadata", {}) or {}
+        model_used = meta.get("model_name", "") or getattr(llm, "model_name", "") or settings.OPENAI_MODEL
     except Exception as e:
         logger.error("generation_failed", error=str(e))
-        # Try fallback model
+        # Try fallback model (Ollama only — use explicit fallback model)
         try:
-            llm_fallback = ChatOllama(
-                model=settings.OLLAMA_FALLBACK_MODEL,
-                base_url=settings.OLLAMA_BASE_URL,
+            llm_fallback = get_chat_llm(
                 temperature=settings.OLLAMA_TEMPERATURE,
+                max_tokens=settings.OLLAMA_MAX_TOKENS,
+                timeout=settings.OLLAMA_TIMEOUT,
+                _fallback=True,
             )
             response = llm_fallback.invoke(messages)
             answer = response.content.strip()
@@ -135,8 +135,6 @@ async def generate(input: GenerationInput) -> GenerationResult:
         except Exception as e2:
             logger.error("fallback_generation_failed", error=str(e2))
             raise RuntimeError(f"Generation failed: {e}") from e
-    else:
-        model_used = settings.OLLAMA_PRIMARY_MODEL
 
     elapsed_ms = int((time.time() - start_time) * 1000)
     token_count = len(answer.split())
@@ -163,7 +161,7 @@ async def generate(input: GenerationInput) -> GenerationResult:
 
 
 async def stream(input: GenerationInput) -> AsyncIterator[str]:
-    """Stream tokens from Ollama generation.
+    """Stream tokens from LLM provider.
 
     Args:
         input: GenerationInput.
@@ -171,20 +169,16 @@ async def stream(input: GenerationInput) -> AsyncIterator[str]:
     Yields:
         Tokens one by one.
     """
-    from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage, SystemMessage
 
     context_text = _build_context_text(input.contexts)
     system_prompt = input.system_prompt or DEFAULT_SYSTEM_PROMPT
 
-    llm = ChatOllama(
-        model=settings.OLLAMA_PRIMARY_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
+    llm = get_chat_llm(
         temperature=settings.OLLAMA_TEMPERATURE,
+        max_tokens=settings.OLLAMA_MAX_TOKENS,
+        timeout=settings.OLLAMA_TIMEOUT,
         top_p=settings.OLLAMA_TOP_P,
-        num_predict=settings.OLLAMA_MAX_TOKENS,
-        num_ctx=settings.OLLAMA_NUM_CTX,
-        streaming=True,
     )
 
     query_text = input.rewritten_query or input.query
@@ -199,13 +193,13 @@ async def stream(input: GenerationInput) -> AsyncIterator[str]:
                 yield chunk.content
     except Exception as e:
         logger.error("stream_generation_failed", error=str(e))
-        # Fallback model
+        # Fallback model (Ollama)
         try:
-            llm_fallback = ChatOllama(
-                model=settings.OLLAMA_FALLBACK_MODEL,
-                base_url=settings.OLLAMA_BASE_URL,
+            llm_fallback = get_chat_llm(
                 temperature=settings.OLLAMA_TEMPERATURE,
-                streaming=True,
+                max_tokens=settings.OLLAMA_MAX_TOKENS,
+                timeout=settings.OLLAMA_TIMEOUT,
+                _fallback=True,
             )
             async for chunk in llm_fallback.astream(messages):
                 if chunk.content:

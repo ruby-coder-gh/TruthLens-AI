@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, field_validator
 
@@ -76,3 +77,12 @@ class MemberResponse(BaseModel):
     username: str | None = None
     email: str | None = None
     joined_at: datetime
+
+
+class ActivityEntry(BaseModel):
+    id: str
+    type: str  # query | document_upload | member_joined | workspace_created
+    description: str
+    user_name: str | None = None
+    timestamp: datetime
+    metadata: dict[str, Any] | None = None

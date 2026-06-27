@@ -1,22 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, Search, Upload, ChevronRight, Clock } from 'lucide-react';
-import { Button, Card, Badge, Input, LoadingSpinner, EmptyState, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { useQuery } from '@tanstack/react-query';
+import { Button, Badge, Input, LoadingSpinner, EmptyState, staggerContainer, staggerItem, pageTransition, useToast } from '../components/ui';
+import { documentApi } from '../api/client';
 import type { Document } from '../api/types';
-
-const MOCK_DOCUMENTS: Document[] = [
-  { id: 'd1', workspace_id: 'w1', filename: 'q3-financial-report-2025.pdf', original_filename: 'Q3 Financial Report 2025.pdf', mime_type: 'application/pdf', file_size: 2450000, page_count: 24, chunk_count: 48, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-15T10:00:00Z', updated_at: '2026-06-15T10:05:00Z' },
-  { id: 'd2', workspace_id: 'w1', filename: 'employment-contract-template.docx', original_filename: 'Employment Contract Template.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_size: 520000, page_count: 8, chunk_count: 16, status: 'indexed', uploaded_by: 'bob@example.com', created_at: '2026-06-14T14:30:00Z', updated_at: '2026-06-14T14:35:00Z' },
-  { id: 'd3', workspace_id: 'w1', filename: 'annual-report-2024.pdf', original_filename: 'Annual Report 2024.pdf', mime_type: 'application/pdf', file_size: 5200000, page_count: 62, chunk_count: 124, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-13T09:00:00Z', updated_at: '2026-06-13T09:08:00Z' },
-  { id: 'd4', workspace_id: 'w1', filename: 'project-charter-v3.docx', original_filename: 'Project Charter v3.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', file_size: 380000, page_count: 5, chunk_count: 10, status: 'indexed', uploaded_by: 'carol@example.com', created_at: '2026-06-12T16:00:00Z', updated_at: '2026-06-12T16:03:00Z' },
-  { id: 'd5', workspace_id: 'w1', filename: 'compliance-audit-2025.pdf', original_filename: 'Compliance Audit 2025.pdf', mime_type: 'application/pdf', file_size: 3100000, page_count: 36, chunk_count: 72, status: 'pending', uploaded_by: 'bob@example.com', created_at: '2026-06-11T11:00:00Z', updated_at: '2026-06-11T11:00:00Z' },
-  { id: 'd6', workspace_id: 'w1', filename: 'environmental-impact-assessment.pdf', original_filename: 'Environmental Impact Assessment.pdf', mime_type: 'application/pdf', file_size: 8900000, page_count: 98, chunk_count: 196, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-10T08:00:00Z', updated_at: '2026-06-10T08:10:00Z' },
-  { id: 'd7', workspace_id: 'w1', filename: 'meeting-notes-june.txt', original_filename: 'Meeting Notes June.txt', mime_type: 'text/plain', file_size: 15000, chunk_count: 3, status: 'failed', uploaded_by: 'carol@example.com', created_at: '2026-06-09T15:00:00Z', updated_at: '2026-06-09T15:02:00Z' },
-  { id: 'd8', workspace_id: 'w1', filename: 'research-paper-ai-ethics.pdf', original_filename: 'Research Paper - AI Ethics.pdf', mime_type: 'application/pdf', file_size: 1200000, page_count: 15, chunk_count: 30, status: 'indexed', uploaded_by: 'alice@example.com', created_at: '2026-06-08T12:00:00Z', updated_at: '2026-06-08T12:04:00Z' },
-  { id: 'd9', workspace_id: 'w1', filename: 'budget-proposal-2026.xlsx', original_filename: 'Budget Proposal 2026.xlsx', mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', file_size: 890000, chunk_count: 18, status: 'pending', uploaded_by: 'bob@example.com', created_at: '2026-06-07T09:00:00Z', updated_at: '2026-06-07T09:00:00Z' },
-  { id: 'd10', workspace_id: 'w1', filename: 'security-policy-v2.pdf', original_filename: 'Security Policy v2.pdf', mime_type: 'application/pdf', file_size: 450000, page_count: 6, chunk_count: 12, status: 'indexed', uploaded_by: 'carol@example.com', created_at: '2026-06-06T16:00:00Z', updated_at: '2026-06-06T16:02:00Z' },
-];
 
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
@@ -46,30 +35,46 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
   }
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
-
 export default function AdminDocumentsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDocuments(MOCK_DOCUMENTS);
-      setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, []);
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['admin', 'documents', search, page],
+    queryFn: () => documentApi.listAll({
+      page,
+      page_size: 20,
+      ...(search ? { q: search } : {}),
+    } as any),
+    placeholderData: (prev) => prev,
+  });
+
+  const documents = data?.data ?? [];
+  const total = data?.meta?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 20));
 
   const filtered = documents.filter((doc) =>
     doc.original_filename.toLowerCase().includes(search.toLowerCase()),
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
         <LoadingSpinner text="Loading documents..." />
+      </motion.div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <FileText size={40} className="text-red-400 mb-4" />
+          <h2 className="text-lg font-semibold text-text mb-2">Failed to load documents</h2>
+          <p className="text-sm text-text-muted mb-4">{(error as Error)?.message ?? 'An unexpected error occurred.'}</p>
+          <Button onClick={() => refetch()} size="sm">Retry</Button>
+        </div>
       </motion.div>
     );
   }
@@ -100,7 +105,7 @@ export default function AdminDocumentsPage() {
         <Input
           placeholder="Search documents..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           icon={<Search size={16} />}
         />
       </motion.div>
@@ -123,7 +128,7 @@ export default function AdminDocumentsPage() {
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
-          <tbody>
+          <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-12">
@@ -136,8 +141,9 @@ export default function AdminDocumentsPage() {
               </tr>
             ) : (
               filtered.map((doc) => (
-                <tr
+                <motion.tr
                   key={doc.id}
+                  variants={staggerItem}
                   onClick={() => navigate(`/admin/documents/${doc.id}`)}
                   className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50 cursor-pointer"
                 >
@@ -163,16 +169,40 @@ export default function AdminDocumentsPage() {
                   <td className="px-4 py-3">
                     <ChevronRight size={14} className="text-text-dim" />
                   </td>
-                </tr>
+                </motion.tr>
               ))
             )}
-          </tbody>
+          </motion.tbody>
         </table>
       </motion.div>
 
-      <motion.p variants={staggerItem} className="text-xs text-text-muted">
-        Showing {filtered.length} of {documents.length} documents
-      </motion.p>
+      {/* Pagination */}
+      <motion.div variants={staggerItem} className="flex items-center justify-between">
+        <p className="text-xs text-text-muted">
+          Showing {filtered.length} of {total} documents
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </Button>
+          <span className="text-xs text-text-muted tabular-nums">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </Button>
+        </div>
+      </motion.div>
     </motion.div>
   );
 }

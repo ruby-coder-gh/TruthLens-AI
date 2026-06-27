@@ -8,7 +8,6 @@
  * Design tokens: glassmorphism, purple-blue glow, backdrop blur, Framer Motion.
  */
 
-import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -18,7 +17,6 @@ import {
   MessageSquare,
   ChevronDown,
   ChevronRight,
-  ExternalLink,
   Copy,
   Download,
   Eye,
@@ -66,27 +64,14 @@ interface StoredQueryDetail {
 }
 
 interface EvidenceSidebarProps {
-  sources: Source[];
   guardrail: GuardrailResult | null;
   trustScore: number | null;
   trustComponents: Record<string, number>;
-  storedQueries: StoredQueryDetail[];
   isLoading: boolean;
+  isStreaming?: boolean;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
-  expandedSource: string | null;
-  onToggleExpand: (id: string | null) => void;
-  highlightedSourceId: string | null;
-  /** Callback when citation marker [N] is clicked — opens sidebar + traces */
-  onSourceClick?: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
-  historyLoading?: boolean;
-  historyError?: boolean;
-  onRetry?: () => void;
-  onHistorySelect?: (queryId: string) => void;
-  historyOpen?: string | null;
-  onHistoryDelete?: (queryId: string) => void;
-  isDeleting?: boolean;
-  conversationId?: string | null;
+  pipelinePhase?: string | null;
   isMobile?: boolean;
 }
 
@@ -161,12 +146,11 @@ function fileTypeIcon(mime?: string) {
 }
 
 /** Overall status badge at top */
-function StatusBadge({ sources, trustScore, isLoading }: { sources: Source[]; trustScore: number | null; isLoading: boolean }) {
+function StatusBadge({ trustScore, isLoading }: { trustScore: number | null; isLoading: boolean }) {
   if (isLoading) return <Badge color="gray"><Loader2 size={10} className="animate-spin mr-1" /> ANALYZING</Badge>;
-  if (sources.length === 0) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
+  if (trustScore === null) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
 
-  const avgScore = sources.reduce((s, src) => s + (src.relevance_score || 0), 0) / sources.length;
-  const trust = trustScore ?? avgScore;
+  const trust = trustScore;
 
   if (trust >= 0.7) {
     return (
@@ -489,18 +473,29 @@ function AIReasoningTab({
   trustScore,
   trustComponents,
   isLoading,
+  isStreaming,
+  pipelinePhase,
 }: {
   guardrail: GuardrailResult | null;
   trustScore: number | null;
   trustComponents: Record<string, number>;
   isLoading: boolean;
+  isStreaming?: boolean;
+  pipelinePhase: string | null;
 }) {
+  // Pipeline done once we hit guardrail phase (last phase)
+  // Doesn't wait for stream complete — guardrail phase fires before final tokens
+  const pipelineDone = pipelinePhase === 'guardrail' || (!isStreaming && !!guardrail && !!trustScore);
+  // Map backend phases → pipeline steps
+  const phaseOrder = ['retrieval', 'generation', 'guardrail'];
+  const currentIdx = pipelineDone ? 99 : pipelinePhase ? phaseOrder.indexOf(pipelinePhase) : -1;
+
   const steps = [
-    { id: 'query', label: 'Query Analysis',       icon: Search,        done: true },
-    { id: 'search', label: 'Document Search',      icon: FileText,      done: true },
-    { id: 'rank',   label: 'Chunk Ranking',         icon: Layers,        done: true },
-    { id: 'gen',    label: 'Answer Generation',     icon: Zap,           done: !!trustScore },
-    { id: 'verify', label: 'Claim Verification',    icon: Shield,        done: !!guardrail },
+    { id: 'query', label: 'Query Analysis',       icon: Search,        done: pipelineDone || currentIdx >= 0 },
+    { id: 'search', label: 'Document Search',      icon: FileText,      done: pipelineDone || currentIdx >= 0 },
+    { id: 'rank',   label: 'Chunk Ranking',         icon: Layers,        done: pipelineDone || currentIdx >= 0 },
+    { id: 'gen',    label: 'Answer Generation',     icon: Zap,           done: pipelineDone || currentIdx >= 1 },
+    { id: 'verify', label: 'Claim Verification',    icon: Shield,        done: pipelineDone || currentIdx >= 2 || !!guardrail },
   ];
 
   if (isLoading) {
@@ -897,230 +892,90 @@ function EvidenceEmptyState() {
 // ─── Evidence Sidebar (Main) ─────────────────────────────────────────────────
 
 const SIDEBAR_TABS = [
-  { id: 'sources', label: 'Sources',     icon: <FileText size={15} /> },
   { id: 'reasoning', label: 'AI Reasoning', icon: <Brain size={15} /> },
-  { id: 'conversation', label: 'Conversation', icon: <MessageSquare size={15} /> },
 ];
 
 export default function EvidenceSidebar({
-  sources,
   guardrail,
   trustScore,
   trustComponents,
-  storedQueries,
   isLoading,
+  isStreaming,
   sidebarOpen,
   onToggleSidebar,
-  expandedSource,
-  onToggleExpand,
-  highlightedSourceId,
-  historyLoading,
-  historyError,
-  onRetry,
-  onHistorySelect,
-  historyOpen,
-  onHistoryDelete,
-  isDeleting,
-  conversationId,
+  pipelinePhase,
   isMobile,
 }: EvidenceSidebarProps) {
-  const [activeTab, setActiveTab] = useState('sources');
+  const effectiveTrust = trustScore ?? 0;
 
-  // Compute overall evidence status
-  const avgRelevance = sources.length
-    ? sources.reduce((s, src) => s + (src.relevance_score || 0), 0) / sources.length
-    : 0;
-  const effectiveTrust = trustScore ?? avgRelevance;
-
-  // Visible sources (expand to show all if expandedSource === '__all__')
-  const initialCount = 5;
-  const showAll = expandedSource === '__all__';
-  const visibleSources = showAll ? sources : sources.slice(0, initialCount);
-  const hasMore = sources.length > initialCount;
 
   return (
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          initial={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
-          animate={isMobile ? { x: 0 } : { opacity: 1, x: 0 }}
-          exit={isMobile ? { x: '100%' } : { opacity: 0.99, x: 12 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+          initial={isMobile ? { x: '100%' } : { opacity: 0.99, y: -8 }}
+          animate={isMobile ? { x: 0 } : { opacity: 1, y: 0 }}
+          exit={isMobile ? { x: '100%' } : { opacity: 0, y: -6 }}
+          transition={{ duration: 0.12, ease: 'easeOut' }}
           className={clsx(
-            'flex w-full flex-col border-l border-border/40',
-            'bg-[rgba(8,11,18,0.85)] backdrop-blur-2xl',
-            'lg:w-[440px] lg:rounded-tr-2xl lg:rounded-br-2xl',
-            'fixed inset-y-0 right-0 z-30 lg:static',
+            'flex flex-col',
+            'lg:w-72',
+            'fixed z-30',
+            isMobile
+              ? 'inset-y-0 right-0 w-full'
+              : 'max-h-[60vh]',
             isMobile && !sidebarOpen ? 'translate-x-full' : 'translate-x-0',
           )}
+          style={isMobile ? {} : { right: 16, bottom: 96 }}
+          drag={isMobile ? false : true}
+          dragMomentum={false}
+          dragElastic={0.1}
+          dragConstraints={{ left: -300, right: 100, top: -80, bottom: 200 }}
+          whileDrag={{ scale: 1.03, boxShadow: '0 0 50px rgba(124,92,255,0.2)' }}
         >
-          {/* ─── Header ──────────────────────────────────────────────────── */}
-          <div className="shrink-0 border-b border-border/40 px-5 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2.5">
+          {/* Floating glass card */}
+          <div className="flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[rgba(8,11,18,0.7)] backdrop-blur-2xl shadow-2xl shadow-primary/5">
+            {/* ─── Drag Handle / Header ──────────────────────────────────── */}
+            <div className="shrink-0 px-4 py-3 cursor-grab active:cursor-grabbing">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   <motion.div
                     animate={{ rotate: [0, 3, -3, 0] }}
                     transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
                   >
-                    <Sparkles size={18} className="text-primary-soft" />
+                    <Sparkles size={14} className="text-primary-soft shrink-0" />
                   </motion.div>
-                  <h3 className="text-sm font-bold text-text">
-                    Evidence Intelligence
+                  <h3 className="text-xs font-semibold text-text">
+                    Evidence
                   </h3>
+                  <StatusBadge trustScore={effectiveTrust} isLoading={isLoading} />
                 </div>
-                <p className="text-xs text-text-dim mt-1 ml-8">
-                  {isLoading
-                    ? 'Searching for evidence…'
-                    : sources.length === 0
-                      ? 'No sources for current answer'
-                      : `${sources.length} Source${sources.length !== 1 ? 's' : ''} Supporting Current Answer`
-                  }
-                </p>
-              </div>
-              {isMobile && (
                 <motion.button
                   type="button"
                   onClick={onToggleSidebar}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-text-dim hover:bg-card-2 hover:text-text transition-colors"
+                  className="flex h-6 w-6 items-center justify-center rounded-lg text-text-dim hover:bg-card-2 hover:text-text transition-colors"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M11 3L3 11M3 3l8 8" />
                   </svg>
                 </motion.button>
-              )}
+              </div>
             </div>
 
-            {/* Status Badge */}
-            <div className="mt-3">
-              <StatusBadge sources={sources} trustScore={effectiveTrust} isLoading={isLoading} />
+            {/* ─── AI Reasoning Content ──────────────────────────────────── */}
+            <div className="overflow-y-auto overflow-x-hidden px-4 pb-4 max-h-[60vh]">
+              <AIReasoningTab
+                guardrail={guardrail}
+                trustScore={trustScore}
+                trustComponents={trustComponents}
+                isLoading={isLoading && !pipelinePhase}
+                isStreaming={isStreaming ?? isLoading}
+                pipelinePhase={pipelinePhase ?? null}
+              />
             </div>
           </div>
-
-          {/* ─── Tabs ────────────────────────────────────────────────────── */}
-          <div className="flex gap-1 rounded-none px-4 pt-3 pb-0 border-b border-border/30">
-            {SIDEBAR_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={clsx(
-                  'relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors rounded-t-lg',
-                  activeTab === tab.id
-                    ? 'text-primary-soft bg-primary/5'
-                    : 'text-text-dim hover:text-text hover:bg-white/5',
-                )}
-              >
-                {tab.icon}
-                {tab.label}
-                {activeTab === tab.id && (
-                  <motion.div
-                    layoutId="evidence-tab-active"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary-soft to-accent"
-                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                  />
-                )}
-              </button>
-            ))}
-          </div>
-
-          {/* ─── Tab Content ─────────────────────────────────────────────── */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0.99, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.15 }}
-              >
-                {/* SOURCES TAB */}
-                {activeTab === 'sources' && (
-                  <>
-                    {isLoading && sources.length === 0 ? (
-                      <div className="p-4 space-y-4">
-                        <SourceCardSkeleton />
-                        <SourceCardSkeleton />
-                        <SourceCardSkeleton />
-                      </div>
-                    ) : sources.length === 0 ? (
-                      <EvidenceEmptyState />
-                    ) : (
-                      <div className="p-4 space-y-3">
-                        <motion.div
-                          variants={staggerContainer}
-                          initial="initial"
-                          animate="animate"
-                          className="space-y-3"
-                        >
-                          {visibleSources.map((source, i) => (
-                            <SourceCard
-                              key={source.chunk_id || i}
-                              source={source}
-                              index={i}
-                              isExpanded={expandedSource === source.chunk_id}
-                              onToggle={() => onToggleExpand(
-                                expandedSource === source.chunk_id ? null : source.chunk_id
-                              )}
-                              isHighlighted={highlightedSourceId === source.chunk_id}
-                              streaming={isLoading}
-                            />
-                          ))}
-                        </motion.div>
-
-                        {/* Show more / less */}
-                        {hasMore && (
-                          <motion.div variants={staggerItem} className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => onToggleExpand(showAll ? null : '__all__')}
-                              className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-border/30 bg-card/40 px-4 py-2.5 text-xs text-text-dim hover:border-primary/30 hover:text-primary-soft transition-all"
-                            >
-                              {showAll ? (
-                                <>Show less <ChevronDown size={12} /></>
-                              ) : (
-                                 <>Show all {sources.length} sources <ChevronDown size={12} /></>
-                              )}
-                            </button>
-                          </motion.div>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* AI REASONING TAB */}
-                {activeTab === 'reasoning' && (
-                  <AIReasoningTab
-                    guardrail={guardrail}
-                    trustScore={trustScore}
-                    trustComponents={trustComponents}
-                    isLoading={isLoading}
-                  />
-                )}
-
-                {/* CONVERSATION TAB */}
-                {activeTab === 'conversation' && (
-                  <ConversationTab
-                    queries={storedQueries}
-                    loading={historyLoading ?? false}
-                    error={historyError ?? false}
-                    onRetry={onRetry}
-                    onSelect={onHistorySelect}
-                    historyOpen={historyOpen}
-                    onDelete={onHistoryDelete}
-                    isDeleting={isDeleting}
-                    conversationId={conversationId}
-                  />
-                )}
-              </motion.div>
-            </AnimatePresence>
-          </div>
-
-          {/* ─── Footer gradient ─────────────────────────────────────────── */}
-          <div className="shrink-0 h-6 bg-gradient-to-t from-[rgba(8,11,18,0.9)] to-transparent pointer-events-none" />
         </motion.aside>
       )}
     </AnimatePresence>

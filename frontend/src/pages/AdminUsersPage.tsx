@@ -1,34 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Users, Search, UserPlus, User, Shield, Ban, ChevronRight, Clock } from 'lucide-react';
-import { Button, Card, Badge, Input, LoadingSpinner, EmptyState, Select, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Users, Search, UserPlus, User, Ban, ChevronRight, Clock } from 'lucide-react';
+import { Button, Badge, Input, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { adminApi } from '../api/client';
+import type { User as AdminUserType } from '../api/types';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-interface AdminUser {
-  id: string;
-  username: string;
-  email: string;
-  role: 'admin' | 'user';
-  is_active: boolean;
+interface AdminUser extends AdminUserType {
   last_login: string;
-  created_at: string;
 }
 
-// ─── Mock Data ─────────────────────────────────────────────────────────────────
-
-const MOCK_USERS: AdminUser[] = [
-  { id: 'u1', username: 'alice', email: 'alice@example.com', role: 'admin', is_active: true, last_login: '2026-06-20T08:30:00Z', created_at: '2026-01-15T10:00:00Z' },
-  { id: 'u2', username: 'bob', email: 'bob@example.com', role: 'user', is_active: true, last_login: '2026-06-19T14:00:00Z', created_at: '2026-02-20T09:00:00Z' },
-  { id: 'u3', username: 'carol', email: 'carol@example.com', role: 'user', is_active: true, last_login: '2026-06-18T11:00:00Z', created_at: '2026-03-10T12:00:00Z' },
-  { id: 'u4', username: 'dave', email: 'dave@example.com', role: 'user', is_active: false, last_login: '2026-05-30T16:00:00Z', created_at: '2026-03-15T08:00:00Z' },
-  { id: 'u5', username: 'eve', email: 'eve@example.com', role: 'admin', is_active: true, last_login: '2026-06-20T09:00:00Z', created_at: '2026-01-10T14:00:00Z' },
-  { id: 'u6', username: 'frank', email: 'frank@example.com', role: 'user', is_active: true, last_login: '2026-06-17T10:00:00Z', created_at: '2026-04-01T11:00:00Z' },
-];
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
 // ─── Component ─────────────────────────────────────────────────────────────────
@@ -36,38 +27,73 @@ function formatDate(iso: string): string {
 export default function AdminUsersPage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setUsers(MOCK_USERS);
-      setLoading(false);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, []);
+  const usersQuery = useQuery({
+    queryKey: ['admin', 'users', page],
+    queryFn: () => adminApi.listUsers({ page, page_size: 20 }),
+  });
 
-  const filtered = users.filter((u) =>
+  const usersData = usersQuery.data as
+    | { data: AdminUser[]; meta: { page: number; page_size: number; total: number } }
+    | undefined;
+
+  const allUsers = usersData?.data ?? [];
+  const total = usersData?.meta?.total ?? 0;
+  const pageSize = usersData?.meta?.page_size ?? 20;
+  const totalPages = Math.ceil(total / pageSize);
+
+  const filtered = allUsers.filter((u) =>
     u.username.toLowerCase().includes(search.toLowerCase()) ||
     u.email.toLowerCase().includes(search.toLowerCase()),
   );
 
-  function handleRoleChange(userId: string, newRole: 'admin' | 'user') {
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)));
-    addToast(`User role updated to ${newRole}`, 'success');
-  }
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      adminApi.updateUserRole(userId, role),
+    onSuccess: (_data, variables) => {
+      addToast(`User role updated to ${variables.role}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: () => {
+      addToast('Failed to update role', 'error');
+    },
+  });
 
-  function handleToggleActive(userId: string) {
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, is_active: !u.is_active } : u)),
+  const statusMutation = useMutation({
+    mutationFn: ({ userId, isActive }: { userId: string; isActive: boolean }) =>
+      adminApi.updateUserStatus(userId, isActive),
+    onSuccess: (_data, variables) => {
+      addToast(`User ${variables.isActive ? 'activated' : 'deactivated'}`, 'info');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+    onError: () => {
+      addToast('Failed to update status', 'error');
+    },
+  });
+
+  if (usersQuery.isLoading) {
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <LoadingSpinner text="Loading users..." />
+      </motion.div>
     );
-    const user = users.find((u) => u.id === userId);
-    addToast(`User ${user?.is_active ? 'deactivated' : 'activated'}`, 'info');
   }
 
-  if (loading) {
-    return <motion.div variants={pageTransition} initial="initial" animate="animate"><LoadingSpinner text="Loading users..." /></motion.div>;
+  if (usersQuery.isError) {
+    return (
+      <motion.div
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+        className="flex flex-col items-center justify-center py-20 gap-4"
+      >
+        <p className="text-text-muted">Failed to load users</p>
+        <Button onClick={() => usersQuery.refetch()} size="sm">Retry</Button>
+      </motion.div>
+    );
   }
 
   return (
@@ -118,7 +144,7 @@ export default function AdminUsersPage() {
               <th className="w-10" />
             </tr>
           </thead>
-          <tbody>
+          <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-12">
@@ -131,8 +157,9 @@ export default function AdminUsersPage() {
               </tr>
             ) : (
               filtered.map((user) => (
-                <tr
+                <motion.tr
                   key={user.id}
+                  variants={staggerItem}
                   className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
                 >
                   <td className="px-4 py-3">
@@ -147,7 +174,7 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3">
                     <select
                       value={user.role}
-                      onChange={(e) => handleRoleChange(user.id, e.target.value as 'admin' | 'user')}
+                      onChange={(e) => roleMutation.mutate({ userId: user.id, role: e.target.value })}
                       className={`rounded-lg border px-2 py-1 text-xs font-medium transition-all ${
                         user.role === 'admin'
                           ? 'bg-primary/15 text-primary-soft border-primary/20'
@@ -174,7 +201,7 @@ export default function AdminUsersPage() {
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => handleToggleActive(user.id)}
+                        onClick={() => statusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
                         className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-all ${
                           user.is_active
                             ? 'text-orange hover:bg-orange/10'
@@ -197,16 +224,44 @@ export default function AdminUsersPage() {
                       <ChevronRight size={14} />
                     </button>
                   </td>
-                </tr>
+                </motion.tr>
               ))
             )}
-          </tbody>
+          </motion.tbody>
         </table>
       </motion.div>
 
-      <motion.p variants={staggerItem} className="text-xs text-text-muted">
-        Showing {filtered.length} of {users.length} users
-      </motion.p>
+      {/* Pagination */}
+      {totalPages > 1 ? (
+        <motion.div variants={staggerItem} className="flex items-center justify-between">
+          <p className="text-xs text-text-muted">
+            Showing {filtered.length} of {total} users
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+            >
+              Previous
+            </Button>
+            <span className="text-xs text-text-muted px-1">
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              size="sm"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+            >
+              Next
+            </Button>
+          </div>
+        </motion.div>
+      ) : (
+        <motion.p variants={staggerItem} className="text-xs text-text-muted">
+          Showing {filtered.length} of {total} users
+        </motion.p>
+      )}
     </motion.div>
   );
 }

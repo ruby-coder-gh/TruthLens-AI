@@ -1,24 +1,49 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Settings, Save, RotateCcw, Bot, Database, Sliders, BarChart3 } from 'lucide-react';
-import { Button, Card, Input, Select, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
-
-// ─── Defaults ──────────────────────────────────────────────────────────────────
+import { Button, Card, Input, Select, useToast, LoadingSpinner, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { adminApi } from '../api/client';
 
 const DEFAULTS = {
   workspaceName: 'TruthLens AI',
-  llmModel: 'gpt-4',
-  embeddingModel: 'text-embedding-3-small',
+  llmModel: 'qwen3:4b',
+  embeddingModel: 'nomic-embed-text',
   topK: 5,
   chunkSize: 512,
   trustThresholdHigh: 0.75,
   trustThresholdMedium: 0.5,
 };
 
-// ─── Component ─────────────────────────────────────────────────────────────────
+const LLM_OPTIONS = [
+  { value: 'qwen3:4b', label: 'Qwen3 4B' },
+  { value: 'llama3.1:8b', label: 'Llama 3.1 8B' },
+  { value: 'phi3:3b', label: 'Phi-3 3B' },
+  { value: 'mistral:7b', label: 'Mistral 7B' },
+];
+
+const EMBEDDING_OPTIONS = [
+  { value: 'nomic-embed-text', label: 'Nomic Embed Text' },
+  { value: 'bge-base:latest', label: 'BGE Base' },
+  { value: 'bge-large:latest', label: 'BGE Large' },
+];
+
+function pick<T>(settings: Record<string, unknown> | undefined, key: string, fallback: T): T {
+  if (!settings) return fallback;
+  const val = settings[key];
+  return (val !== undefined && val !== null ? val : fallback) as T;
+}
 
 export default function AdminSettingsPage() {
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const settingsQuery = useQuery({
+    queryKey: ['admin', 'settings'],
+    queryFn: () => adminApi.getSettings(),
+  });
+
+  const settings = settingsQuery.data ?? {};
 
   const [workspaceName, setWorkspaceName] = useState(DEFAULTS.workspaceName);
   const [llmModel, setLlmModel] = useState(DEFAULTS.llmModel);
@@ -30,13 +55,37 @@ export default function AdminSettingsPage() {
 
   const [savingSection, setSavingSection] = useState<string | null>(null);
 
-  function handleSave(section: string, callback?: () => void) {
+  useEffect(() => {
+    if (settingsQuery.data) {
+      setWorkspaceName(pick(settings, 'workspace_name', DEFAULTS.workspaceName));
+      setLlmModel(pick(settings, 'llm_model', DEFAULTS.llmModel));
+      setEmbeddingModel(pick(settings, 'embedding_model', DEFAULTS.embeddingModel));
+      setTopK(pick(settings, 'top_k', DEFAULTS.topK));
+      setChunkSize(pick(settings, 'chunk_size', DEFAULTS.chunkSize));
+      setTrustHigh(pick(settings, 'trust_threshold_high', DEFAULTS.trustThresholdHigh));
+      setTrustMed(pick(settings, 'trust_threshold_medium', DEFAULTS.trustThresholdMedium));
+    }
+  }, [settingsQuery.data]);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => adminApi.updateSettings(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'settings'] });
+    },
+  });
+
+  function handleSave(section: string, data: Record<string, unknown>) {
     setSavingSection(section);
-    setTimeout(() => {
-      setSavingSection(null);
-      callback?.();
-      addToast(`${section} settings saved`, 'success');
-    }, 600);
+    saveMutation.mutate(data, {
+      onSuccess: () => {
+        setSavingSection(null);
+        addToast(`${section} settings saved`, 'success');
+      },
+      onError: () => {
+        setSavingSection(null);
+        addToast(`Failed to save ${section} settings`, 'error');
+      },
+    });
   }
 
   function resetToDefaults() {
@@ -50,6 +99,26 @@ export default function AdminSettingsPage() {
     addToast('Settings reset to defaults', 'info');
   }
 
+  if (settingsQuery.isLoading) {
+    return <LoadingSpinner text="Loading settings..." />;
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <motion.div
+        className="flex flex-col items-center justify-center gap-4 py-20"
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+      >
+        <p className="text-text-muted text-sm">Failed to load settings.</p>
+        <Button variant="secondary" size="sm" onClick={() => settingsQuery.refetch()}>
+          Retry
+        </Button>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div
       className="space-y-6 max-w-2xl"
@@ -57,7 +126,6 @@ export default function AdminSettingsPage() {
       initial="initial"
       animate="animate"
     >
-      {/* Header */}
       <motion.div variants={staggerItem} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-text">Settings</h1>
@@ -75,7 +143,6 @@ export default function AdminSettingsPage() {
         initial="initial"
         animate="animate"
       >
-        {/* General */}
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
@@ -91,7 +158,7 @@ export default function AdminSettingsPage() {
               <Button
                 size="sm"
                 loading={savingSection === 'General'}
-                onClick={() => handleSave('General')}
+                onClick={() => handleSave('General', { workspace_name: workspaceName })}
               >
                 <Save size={14} />
                 Save
@@ -100,7 +167,6 @@ export default function AdminSettingsPage() {
           </Card>
         </motion.div>
 
-        {/* Model Config */}
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
@@ -112,29 +178,18 @@ export default function AdminSettingsPage() {
                 label="LLM Model"
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
-                options={[
-                  { value: 'gpt-4', label: 'GPT-4' },
-                  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-                  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-                  { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-                  { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
-                  { value: 'claude-3-haiku', label: 'Claude 3 Haiku' },
-                ]}
+                options={LLM_OPTIONS}
               />
               <Select
                 label="Embedding Model"
                 value={embeddingModel}
                 onChange={(e) => setEmbeddingModel(e.target.value)}
-                options={[
-                  { value: 'text-embedding-3-small', label: 'OpenAI text-embedding-3-small' },
-                  { value: 'text-embedding-3-large', label: 'OpenAI text-embedding-3-large' },
-                  { value: 'text-embedding-ada-002', label: 'OpenAI text-embedding-ada-002' },
-                ]}
+                options={EMBEDDING_OPTIONS}
               />
               <Button
                 size="sm"
                 loading={savingSection === 'Model'}
-                onClick={() => handleSave('Model')}
+                onClick={() => handleSave('Model', { llm_model: llmModel, embedding_model: embeddingModel })}
               >
                 <Save size={14} />
                 Save
@@ -143,7 +198,6 @@ export default function AdminSettingsPage() {
           </Card>
         </motion.div>
 
-        {/* Retrieval */}
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
@@ -171,7 +225,7 @@ export default function AdminSettingsPage() {
               <Button
                 size="sm"
                 loading={savingSection === 'Retrieval'}
-                onClick={() => handleSave('Retrieval')}
+                onClick={() => handleSave('Retrieval', { top_k: topK, chunk_size: chunkSize })}
               >
                 <Save size={14} />
                 Save
@@ -180,7 +234,6 @@ export default function AdminSettingsPage() {
           </Card>
         </motion.div>
 
-        {/* Trust Score Thresholds */}
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
@@ -188,7 +241,6 @@ export default function AdminSettingsPage() {
               Trust Score Thresholds
             </h2>
             <div className="space-y-6">
-              {/* High threshold */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-sm font-medium text-text-muted">High Trust (green)</label>
@@ -207,7 +259,6 @@ export default function AdminSettingsPage() {
                 <p className="text-xs text-text-dim mt-1">Scores above this are considered high trust.</p>
               </div>
 
-              {/* Medium threshold */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-sm font-medium text-text-muted">Medium Trust (orange)</label>
@@ -234,7 +285,12 @@ export default function AdminSettingsPage() {
               <Button
                 size="sm"
                 loading={savingSection === 'Thresholds'}
-                onClick={() => handleSave('Thresholds')}
+                onClick={() =>
+                  handleSave('Thresholds', {
+                    trust_threshold_high: trustHigh,
+                    trust_threshold_medium: trustMed,
+                  })
+                }
               >
                 <Save size={14} />
                 Save Thresholds

@@ -167,13 +167,13 @@ def _generate_primary_node(state: CRAGState) -> dict:
 
 
 def _generate_fallback_node(state: CRAGState) -> dict:
-    """Generate answer using fallback LLM (Phi-3) with relaxed constraints."""
+    """Generate answer using fallback LLM with relaxed constraints."""
     import asyncio
 
     loop = asyncio.get_event_loop()
 
-    from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage, SystemMessage
+    from app.generation.provider import get_chat_llm
 
     contexts = state.get("contexts", [])
     context_text = "\n".join(ctx.get("content", "") for ctx in contexts)
@@ -183,10 +183,9 @@ def _generate_fallback_node(state: CRAGState) -> dict:
         "If you're not sure, say so. Be concise."
     )
 
-    llm = ChatOllama(
-        model=settings.OLLAMA_FALLBACK_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
+    llm = get_chat_llm(
         temperature=0.5,
+        _fallback=True,
     )
 
     messages = [

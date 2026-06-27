@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     OLLAMA_TOP_P: float = 0.9
     OLLAMA_NUM_CTX: int = 4096
 
+    # ─── LLM Provider (API fallback) ──────────
+    LLM_PROVIDER: str = "auto"  # auto, api, ollama
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_TIMEOUT: int = 60
+
     # ─── Sentence Transformers ─────────────────
     EMBED_MODEL_NAME: str = "BAAI/bge-base-en-v1.5"
     EMBED_DIMENSION: int = 768

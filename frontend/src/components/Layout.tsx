@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation, Outlet } from 'react-router-dom';
+import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -9,14 +9,17 @@ import {
   MessageSquare,
   Search,
   User,
-  LogOut,
-  Menu,
-  X,
   Sparkles,
   BookOpen,
   Home,
   Clock,
   Settings,
+  LogOut,
+  Upload,
+  Users,
+  BarChart3,
+  ClipboardList,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -43,11 +46,18 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', icon: Home },
   { label: 'Chat History', path: '/chats', icon: Clock },
-  { label: 'Documents', path: '/documents', icon: FileText },
+  { label: 'My Documents', path: '/documents', icon: FileText },
   { label: 'Workspaces', path: '/workspaces', icon: LayoutDashboard },
   { label: 'Settings', path: '/settings', icon: Settings },
+  // ── Admin ──
+  { label: 'Admin Dashboard', path: '/admin', icon: Shield, adminOnly: true },
+  { label: 'Documents', path: '/admin/documents', icon: FileText, adminOnly: true },
+  { label: 'Upload', path: '/admin/documents/upload', icon: Upload, adminOnly: true },
+  { label: 'Users', path: '/admin/users', icon: Users, adminOnly: true },
+  { label: 'Analytics', path: '/admin/analytics', icon: BarChart3, adminOnly: true },
+  { label: 'Audit Log', path: '/admin/audit-log', icon: ClipboardList, adminOnly: true },
+  { label: 'Collections', path: '/admin/collections', icon: FolderOpen, adminOnly: true },
   { label: 'API Catalog', path: '/api-catalog', icon: BookOpen, adminOnly: true },
-  { label: 'Admin', path: '/admin', icon: Shield, adminOnly: true },
 ];
 
 // ─── Glow particles ─────────────────────────────────────────────────────────
@@ -143,6 +153,7 @@ function NavItemLink({ item, active, collapsed, onClick }: { item: NavItem; acti
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function Layout() {
   const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -157,7 +168,13 @@ export default function Layout() {
     if (path === '/workspaces') return location.pathname === '/workspaces' || location.pathname.startsWith('/workspaces/');
     if (path === '/settings') return location.pathname === '/settings';
     if (path === '/api-catalog') return location.pathname === '/api-catalog';
-    if (path === '/admin') return location.pathname === '/admin' || location.pathname.startsWith('/admin/');
+    if (path === '/admin') return location.pathname === '/admin';
+    if (path === '/admin/documents') return location.pathname === '/admin/documents' || location.pathname.startsWith('/admin/documents/') && !location.pathname.startsWith('/admin/documents/upload');
+    if (path === '/admin/documents/upload') return location.pathname === '/admin/documents/upload';
+    if (path === '/admin/users') return location.pathname === '/admin/users' || location.pathname.startsWith('/admin/users/');
+    if (path === '/admin/analytics') return location.pathname === '/admin/analytics';
+    if (path === '/admin/audit-log') return location.pathname === '/admin/audit-log';
+    if (path === '/admin/collections') return location.pathname === '/admin/collections';
     return location.pathname.startsWith(path);
   };
 
@@ -257,76 +274,77 @@ export default function Layout() {
           </div>
         </nav>
 
-        {/* User info */}
+        {/* User info — with glow */}
         {user && (
           <div className="relative z-10 border-t border-white/[0.06] p-4">
-            <div className="rounded-xl bg-white/[0.03] p-3 transition-transform duration-150 hover:scale-[1.02]">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-accent/30 border border-white/[0.08] text-text-muted transition-transform duration-150 hover:scale-110">
-                  <User size={16} />
-                </div>
+            <div className="relative rounded-xl p-3 transition-transform duration-150 hover:scale-[1.02] overflow-hidden">
+              {/* Floating glow particles */}
+              <span className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <motion.span
+                    key={i}
+                    className="absolute w-1 h-1 rounded-full bg-primary-soft"
+                    style={{ left: `${30 + i * 20}%`, top: '40%' }}
+                    initial={{ y: 0, opacity: 0 }}
+                    animate={{
+                      y: [0, -12 - Math.random() * 8],
+                      opacity: [0, 0.5, 0],
+                    }}
+                    transition={{ duration: 1.5, delay: i * 0.4, repeat: Infinity, ease: 'easeOut' }}
+                  />
+                ))}
+              </span>
+              <div className="relative z-10 flex items-center gap-3">
+                <motion.div
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-accent/30 border border-white/[0.08] transition-transform duration-150"
+                  animate={{
+                    boxShadow: [
+                      '0 0 6px 2px rgba(139,92,246,0.15)',
+                      '0 0 12px 5px rgba(139,92,246,0.25)',
+                      '0 0 6px 2px rgba(139,92,246,0.15)',
+                    ],
+                  }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                  whileHover={{ scale: 1.1 }}
+                >
+                  <motion.span
+                    animate={{ filter: ['drop-shadow(0 0 3px rgba(139,92,246,0.3))', 'drop-shadow(0 0 8px rgba(139,92,246,0.5))', 'drop-shadow(0 0 3px rgba(139,92,246,0.3))'] }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <User size={16} className="text-text-muted" />
+                  </motion.span>
+                </motion.div>
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-sm font-medium text-text">{user.username}</p>
                   <p className="truncate text-xs text-text-dim">{user.email}</p>
                 </div>
                 {user.role === 'admin' && (
-                  <span className="rounded-md bg-primary/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-soft border border-primary/20">
+                  <motion.span
+                    className="rounded-md bg-primary/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-soft border border-primary/20"
+                    animate={{ opacity: [0.7, 1, 0.7] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  >
                     Admin
-                  </span>
+                  </motion.span>
                 )}
               </div>
-              <Link
-                to="/settings"
-                onClick={closeSidebar}
-                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-text active:scale-[0.98]"
-              >
-                <Settings size={15} />
-                <span>Settings</span>
-              </Link>
-              <button
-                type="button"
-                onClick={logout}
-                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-150 hover:scale-[1.02] hover:bg-white/[0.05] hover:text-red active:scale-[0.98]"
-              >
-                <LogOut size={15} />
-                <span>Sign out</span>
-              </button>
             </div>
+            <button
+              onClick={() => { logout(); navigate('/login'); }}
+              className="relative z-10 mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+            >
+              <LogOut size={16} />
+              <span>Sign out</span>
+            </button>
           </div>
         )}
         </motion.aside>
 
       {/* ─── Main area ────────────────────────────────────────────────── */}
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
-        {/* Header */}
-        <header className="flex h-16 items-center gap-4 border-b border-white/[0.06] bg-[#0a0e17]/60 backdrop-blur-xl px-4 lg:px-6">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen((prev) => !prev)}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-text-muted transition-all duration-150 hover:scale-110 hover:bg-white/[0.06] hover:text-text active:scale-90 lg:hidden"
-            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-          >
-            {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
-
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-text-dim">/</span>
-            <span className="text-text-muted">{location.pathname.split('/').filter(Boolean).join(' / ')}</span>
-          </div>
-
-          <div className="ml-auto flex items-center gap-3">
-            <span className="hidden sm:block text-xs text-text-dim">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </span>
-          </div>
-        </header>
-
         {/* Content */}
-        <main className="relative flex-1 overflow-y-auto">
-          <div className="p-4 lg:p-6">
-            <Outlet />
-          </div>
+        <main className="relative flex-1 overflow-y-auto p-4 lg:p-6">
+          <Outlet />
         </main>
       </div>
     </div>

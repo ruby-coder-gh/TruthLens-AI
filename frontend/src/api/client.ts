@@ -1,4 +1,5 @@
 import type {
+  ActivityEntry,
   AuthResponse,
   LoginRequest,
   RegisterRequest,
@@ -284,6 +285,9 @@ export const workspaceApi = {
 
   removeMember: (workspaceId: string, userId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
+
+  activity: (id: string): Promise<ListResponse<ActivityEntry>> =>
+    request(`/workspaces/${id}/activity`),
 };
 
 // ─── Document API ───────────────────────────────────────────────────────────
@@ -352,7 +356,7 @@ export const adminApi = {
     request('/admin/evaluation'),
 
   runEvaluation: <T = unknown>(): Promise<T> =>
-    request('/admin/evaluation', { method: 'POST' }),
+    request('/admin/evaluation/run', { method: 'POST' }),
 
   // ── User management ──────────────────────────────────────────────────────
   listUsers: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<User>> =>

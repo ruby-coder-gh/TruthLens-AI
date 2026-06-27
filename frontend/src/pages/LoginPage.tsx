@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, LogIn, Sparkles, Shield } from 'lucide-react';
@@ -26,9 +26,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   // Redirect if already logged in
-  if (isAuthenticated) {
-    navigate('/workspaces', { replace: true });
-  }
+  useEffect(() => {
+    if (isAuthenticated) navigate('/workspaces', { replace: true });
+  }, [isAuthenticated, navigate]);
 
   function validate(): boolean {
     const next: { email?: string; password?: string } = {};
@@ -218,73 +218,37 @@ export default function LoginPage() {
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <label
-                      htmlFor="password"
-                      className="block text-sm font-medium text-text-muted"
-                    >
+                    <label htmlFor="password" className="block text-sm font-medium text-text-muted">
                       Password
                     </label>
-                    <motion.button
-                      type="button"
+                    <Link
+                      to="/forgot-password"
                       className="text-xs text-primary-soft/70 hover:text-primary-soft transition-colors"
-                      tabIndex={-1}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => {
-                        /* placeholder — not implemented */
-                      }}
                     >
                       Forgot password?
-                    </motion.button>
+                    </Link>
                   </div>
-                  <div className="relative">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-text-dim">
-                      <Lock size={16} />
-                    </div>
-                    <input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      autoComplete="current-password"
-                      className={
-                        'w-full rounded-xl border bg-bg-soft/60 px-3 py-2.5 pl-10 pr-10 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all ' +
-                        'focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:bg-bg-soft/80 ' +
-                        (errors.password ? 'border-red/50' : 'border-border')
-                      }
-                    />
-                    <motion.button
-                      type="button"
-                      onClick={() => setShowPassword((p) => !p)}
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-text-dim hover:text-text transition-colors"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      tabIndex={-1}
-                      whileHover={{ scale: 1.1 }}
-                      whileTap={{ scale: 0.9 }}
-                    >
-                      <motion.div
-                        key={showPassword ? 'eye-off' : 'eye'}
-                        initial={{ rotateY: 90, opacity: 0.99 }}
-                        animate={{ rotateY: 0, opacity: 1 }}
-                        transition={{ duration: 0.2 }}
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    error={errors.password}
+                    icon={<Lock size={16} />}
+                    autoComplete="current-password"
+                    suffix={
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((p) => !p)}
+                        className="flex items-center justify-center w-8 h-8 text-text-dim hover:text-text transition-colors rounded-lg hover:bg-white/[0.06]"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        tabIndex={-1}
                       >
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </motion.div>
-                    </motion.button>
-                  </div>
-                  <AnimatePresence>
-                    {errors.password && (
-                      <motion.p
-                        initial={{ opacity: 0.99, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        className="flex items-center gap-1 text-xs text-red"
-                      >
-                        {errors.password}
-                      </motion.p>
-                    )}
-                  </AnimatePresence>
+                      </button>
+                    }
+                  />
                 </motion.div>
               </motion.div>
 

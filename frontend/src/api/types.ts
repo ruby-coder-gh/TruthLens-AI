@@ -273,3 +273,12 @@ export interface UpdateUserRequest {
   email?: string;
   username?: string;
 }
+
+export interface ActivityEntry {
+  id: string;
+  type: 'query' | 'document_upload' | 'member_joined' | 'workspace_created';
+  description: string;
+  user_name: string | null;
+  timestamp: string;
+  metadata: Record<string, unknown> | null;
+}

@@ -1,10 +1,33 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { MessageSquare, FileText, Settings, Search, Plus, Sparkles, Clock, Shield, TrendingUp, ArrowRight } from 'lucide-react';
+import { motion, useInView } from 'framer-motion';
+import { MessageSquare, FileText, Settings, Plus, Sparkles, Clock, Shield, ArrowRight, TrendingUp, Zap } from 'lucide-react';
 import { Button, Card, Badge, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import type { QuerySummary } from '../api/types';
+
+// ─── Animated Counter ──────────────────────────────────────────────────────────
+
+function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
+  const [count, setCount] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true });
+
+  useEffect(() => {
+    if (!inView) return;
+    let start = 0;
+    const duration = 800;
+    const step = Math.ceil(value / (duration / 16));
+    const timer = setInterval(() => {
+      start += step;
+      if (start >= value) { setCount(value); clearInterval(timer); }
+      else setCount(start);
+    }, 16);
+    return () => clearInterval(timer);
+  }, [inView, value]);
+
+  return <span ref={ref} className="tabular-nums">{count}{suffix}</span>;
+}
 
 // ─── Mock Data ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +48,7 @@ const MOCK_RECENT_CHATS: QuerySummary[] = [
 const QUICK_ACTIONS = [
   { label: 'New Chat', path: '/workspaces', icon: MessageSquare, color: 'from-primary to-primary-soft' },
   { label: 'Browse Documents', path: '/documents', icon: FileText, color: 'from-accent to-accent' },
-  { label: 'View History', path: '/chat-history', icon: Clock, color: 'from-accent-2 to-accent-2' },
+  { label: 'View History', path: '/chats', icon: Clock, color: 'from-accent-2 to-accent-2' },
   { label: 'Settings', path: '/settings', icon: Settings, color: 'from-gold to-gold' },
 ];
 
@@ -87,19 +110,48 @@ export default function UserDashboard() {
       animate="animate"
     >
       {/* Welcome Section */}
-      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+      <motion.div
+        variants={staggerItem}
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+      >
+        <motion.div
+          initial={{ x: -30, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 120, damping: 15, delay: 0.05 }}
+        >
           <h1 className="text-2xl font-bold text-text">
-            {getGreeting()}, {user?.username || 'User'} <Sparkles size={20} className="inline text-accent" />
+            {getGreeting()}, {user?.username || 'User'}{' '}
+            <motion.span
+              className="inline-block"
+              animate={{ rotate: [0, 0, -15, 10, -10, 5, 0] }}
+              transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 4 }}
+            >
+              <Sparkles size={20} className="inline text-accent" />
+            </motion.span>
           </h1>
-          <p className="text-sm text-text-muted mt-1">Here&apos;s what&apos;s happening with your workspace.</p>
-        </div>
-        <Link to="/workspaces">
-          <Button size="md" className="whitespace-nowrap">
-            <Plus size={16} />
-            New Chat
-          </Button>
-        </Link>
+          <motion.p
+            className="text-sm text-text-muted mt-1"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15, duration: 0.4 }}
+          >
+            Here&apos;s what&apos;s happening with your workspace.
+          </motion.p>
+        </motion.div>
+        <motion.div
+          initial={{ x: 30, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 120, damping: 15, delay: 0.1 }}
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          <Link to="/workspaces">
+            <Button size="md" className="whitespace-nowrap">
+              <Plus size={16} />
+              New Chat
+            </Button>
+          </Link>
+        </motion.div>
       </motion.div>
 
       {/* Quick Stats */}
@@ -110,70 +162,142 @@ export default function UserDashboard() {
         animate="animate"
       >
         <motion.div variants={staggerItem}>
-          <Card>
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
-                <FileText size={20} />
-              </div>
-              <div>
-                <p className="text-sm text-text-muted">Documents Available</p>
-                <p className="text-xl font-bold text-text tabular-nums">{MOCK_STATS.totalDocs}</p>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-        <motion.div variants={staggerItem}>
-          <Card>
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-accent">
-                <MessageSquare size={20} />
-              </div>
-              <div>
-                <p className="text-sm text-text-muted">Recent Queries</p>
-                <p className="text-xl font-bold text-text tabular-nums">{MOCK_STATS.recentQueries}</p>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-        <motion.div variants={staggerItem}>
-          <Card>
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-accent-2">
-                <Shield size={20} />
-              </div>
-              <div>
-                <p className="text-sm text-text-muted">Avg Trust Score</p>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xl font-bold tabular-nums ${trustScoreColor(MOCK_STATS.avgTrustScore)}`}>
-                    {MOCK_STATS.avgTrustScore.toFixed(2)}
-                  </span>
-                  <Badge color={trustScoreBadgeColor(MOCK_STATS.avgTrustScore)}>Good</Badge>
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
+          >
+            <Card>
+              <div className="flex items-center gap-4">
+                <motion.div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft"
+                  animate={{ rotate: [0, 5, 0, -5, 0] }}
+                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 5 }}
+                >
+                  <FileText size={20} />
+                </motion.div>
+                <div>
+                  <p className="text-sm text-text-muted">Documents Available</p>
+                  <p className="text-xl font-bold text-text">
+                    <AnimatedCounter value={MOCK_STATS.totalDocs} />
+                  </p>
                 </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </motion.div>
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
+          >
+            <Card>
+              <div className="flex items-center gap-4">
+                <motion.div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-accent"
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 4 }}
+                >
+                  <MessageSquare size={20} />
+                </motion.div>
+                <div>
+                  <p className="text-sm text-text-muted">Recent Queries</p>
+                  <p className="text-xl font-bold text-text">
+                    <AnimatedCounter value={MOCK_STATS.recentQueries} />
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        </motion.div>
+        <motion.div variants={staggerItem}>
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.3 }}
+          >
+            <Card>
+              <div className="flex items-center gap-4">
+                <motion.div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-accent-2"
+                  animate={{ rotate: [0, 360] }}
+                  transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+                >
+                  <Shield size={20} />
+                </motion.div>
+                <div>
+                  <p className="text-sm text-text-muted">Avg Trust Score</p>
+                  <div className="flex items-center gap-2">
+                    <motion.span
+                      className={`text-xl font-bold tabular-nums ${trustScoreColor(MOCK_STATS.avgTrustScore)}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.5, type: 'spring' }}
+                    >
+                      {MOCK_STATS.avgTrustScore.toFixed(2)}
+                    </motion.span>
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.7, type: 'spring', stiffness: 300 }}
+                    >
+                      <Badge color={trustScoreBadgeColor(MOCK_STATS.avgTrustScore)}>Good</Badge>
+                    </motion.div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
         </motion.div>
       </motion.div>
 
       {/* Quick Actions */}
       <motion.div variants={staggerItem}>
-        <h2 className="text-base font-semibold text-text mb-3">Quick Actions</h2>
+        <motion.h2
+          className="text-base font-semibold text-text mb-3"
+          initial={{ x: -20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: 0.2, type: 'spring', stiffness: 150 }}
+        >
+          Quick Actions
+        </motion.h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {QUICK_ACTIONS.map((action) => {
+          {QUICK_ACTIONS.map((action, i) => {
             const Icon = action.icon;
             return (
               <Link key={action.label} to={action.path}>
                 <motion.div
-                  whileHover={{ y: -4, scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="glass rounded-2xl p-5 transition-all duration-200 hover:shadow-lg hover:shadow-primary/5 cursor-pointer group"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 + i * 0.1, type: 'spring', stiffness: 200, damping: 18 }}
+                  whileHover={{ y: -6, scale: 1.03, boxShadow: '0 20px 40px rgba(0,0,0,0.12)' }}
+                  whileTap={{ scale: 0.95 }}
+                  className="glass rounded-2xl p-5 transition-colors duration-200 hover:shadow-lg hover:shadow-primary/10 cursor-pointer group relative overflow-hidden"
                 >
-                  <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${action.color}/20 text-${action.color === 'from-gold' ? 'gold' : action.color === 'from-accent' ? 'accent' : action.color === 'from-accent-2' ? 'accent-2' : 'primary-soft'}`}>
-                    <Icon size={18} />
-                  </div>
-                  <div className="flex items-center gap-1">
+                  {/* Hover shine effect */}
+                  <motion.div
+                    className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none"
+                    initial={{ opacity: 0 }}
+                    whileHover={{ opacity: 1 }}
+                    transition={{ duration: 0.3 }}
+                  />
+                  <motion.div
+                    className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${action.color}/20`}
+                    whileHover={{ rotate: [0, -10, 10, -5, 0] }}
+                    transition={{ duration: 0.5 }}
+                  >
+                    <Icon size={18} className={action.color.includes('primary') ? 'text-primary-soft' : action.color.includes('accent-2') ? 'text-accent-2' : action.color.includes('gold') ? 'text-gold' : 'text-accent'} />
+                  </motion.div>
+                  <div className="flex items-center gap-1 relative z-10">
                     <span className="text-sm font-medium text-text">{action.label}</span>
-                    <ArrowRight size={14} className="text-text-muted group-hover:text-primary-soft transition-colors" />
+                    <motion.div
+                      initial={{ x: 0 }}
+                      whileHover={{ x: 4 }}
+                      transition={{ type: 'spring', stiffness: 300 }}
+                    >
+                      <ArrowRight size={14} className="text-text-muted group-hover:text-primary-soft transition-colors" />
+                    </motion.div>
                   </div>
                 </motion.div>
               </Link>
@@ -184,12 +308,17 @@ export default function UserDashboard() {
 
       {/* Recent Chats */}
       <motion.div variants={staggerItem}>
-        <div className="flex items-center justify-between mb-3">
+        <motion.div
+          className="flex items-center justify-between mb-3"
+          initial={{ x: -20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: 0.4, type: 'spring', stiffness: 150 }}
+        >
           <h2 className="text-base font-semibold text-text">Recent Chats</h2>
-          <Link to="/chat-history" className="text-xs text-primary-soft hover:text-primary transition-colors">
+          <Link to="/chats" className="text-xs text-primary-soft hover:text-primary transition-colors">
             View all
           </Link>
-        </div>
+        </motion.div>
 
         {loading ? (
           <LoadingSpinner text="Loading recent chats..." />
@@ -212,9 +341,10 @@ export default function UserDashboard() {
             {chats.map((chat, i) => (
               <motion.div
                 key={chat.id}
-                initial={{ opacity: 0.99, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.04, duration: 0.3 }}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 + i * 0.06, type: 'spring', stiffness: 180, damping: 20 }}
+                whileHover={{ x: 4, transition: { type: 'spring', stiffness: 300 } }}
               >
                 <Link to={`/chat/${chat.id}`}>
                   <Card hover className="p-4">
@@ -222,10 +352,15 @@ export default function UserDashboard() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-text truncate">{chat.query_text}</p>
                         <div className="flex items-center gap-3 mt-1.5">
-                          <span className="flex items-center gap-1 text-xs text-text-dim">
+                          <motion.span
+                            className="flex items-center gap-1 text-xs text-text-dim"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.5 + i * 0.06 + 0.15 }}
+                          >
                             <Clock size={11} />
                             {formatTimestamp(chat.created_at)}
-                          </span>
+                          </motion.span>
                           {chat.model_used && (
                             <span className="text-xs text-text-dim">{chat.model_used}</span>
                           )}
@@ -233,9 +368,15 @@ export default function UserDashboard() {
                       </div>
                       <div className="shrink-0">
                         {chat.trust_score !== undefined && (
-                          <Badge color={trustScoreBadgeColor(chat.trust_score)}>
-                            {chat.trust_score.toFixed(2)}
-                          </Badge>
+                          <motion.div
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.5 + i * 0.06 + 0.2, type: 'spring', stiffness: 300 }}
+                          >
+                            <Badge color={trustScoreBadgeColor(chat.trust_score)}>
+                              {chat.trust_score.toFixed(2)}
+                            </Badge>
+                          </motion.div>
                         )}
                       </div>
                     </div>

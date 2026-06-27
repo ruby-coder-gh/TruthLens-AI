@@ -132,10 +132,11 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
   icon?: ReactNode;
+  suffix?: ReactNode;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, icon, className, id, ...props }, ref) => {
+  ({ label, error, icon, suffix, className, id, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
     return (
       <div className="space-y-1.5">
@@ -154,10 +155,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               'focus:outline-none',
               error ? 'border-red/50' : '',
               icon && 'pl-10',
+              suffix && 'pr-10',
               className,
             )}
             {...props}
           />
+          {suffix && (
+            <div className="absolute inset-y-0 right-0 flex items-center pr-2">{suffix}</div>
+          )}
         </div>
         <AnimatePresence>
           {error && (
