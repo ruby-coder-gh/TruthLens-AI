@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, File, FileSpreadsheet, FileImage, Search, Filter, Download, Clock } from 'lucide-react';
-import { Card, Badge, Input, LoadingSpinner, EmptyState, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { FileText, File, FileSpreadsheet, FileImage, Search, Filter, Download, Clock, Upload, Plus } from 'lucide-react';
+import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import AnimatedInput from '../components/premium/AnimatedInput';
 import { documentApi } from '../api/client';
 import type { Document } from '../api/types';
 
@@ -48,6 +49,7 @@ export default function DocumentsBrowsePage() {
   const [typeFilter, setTypeFilter] = useState<string>('All');
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -76,15 +78,48 @@ export default function DocumentsBrowsePage() {
       animate="animate"
     >
       {/* Header */}
-      <motion.div variants={staggerItem}>
-        <h1 className="text-2xl font-bold text-text">Documents</h1>
-        <p className="text-sm text-text-muted mt-1">Browse all indexed documents.</p>
+      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-text">Documents</h1>
+          <p className="text-sm text-text-muted mt-1">Browse all indexed documents.</p>
+        </div>
+        <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+          <Button onClick={() => setUploadModalOpen(true)} size="md">
+            <Upload size={16} />
+            Upload Document
+          </Button>
+        </motion.div>
+      </motion.div>
+
+      {/* Upload Area — dashed border with glowing hover */}
+      <motion.div
+        variants={staggerItem}
+        onClick={() => setUploadModalOpen(true)}
+        className="relative cursor-pointer group"
+        whileHover={{ scale: 1.01 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <div className="rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] p-8 text-center transition-all duration-300 group-hover:border-primary/40 group-hover:bg-primary/[0.04] group-hover:shadow-lg group-hover:shadow-primary/10">
+          <motion.div
+            className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary-soft"
+            animate={{ y: [0, -4, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Upload size={24} />
+          </motion.div>
+          <h3 className="text-base font-semibold text-text group-hover:text-primary-soft transition-colors">
+            Upload new document
+          </h3>
+          <p className="mt-1 text-sm text-text-muted">
+            Drop files here or click to browse. Supports PDF, DOCX, TXT.
+          </p>
+        </div>
       </motion.div>
 
       {/* Search & Filters */}
       <motion.div variants={staggerItem} className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 max-w-md">
-          <Input
+          <AnimatedInput
             placeholder="Search documents..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -111,7 +146,7 @@ export default function DocumentsBrowsePage() {
 
       {/* Document Grid */}
       <motion.div
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         variants={staggerContainer}
         initial="initial"
         animate="animate"
@@ -124,6 +159,12 @@ export default function DocumentsBrowsePage() {
               icon={<FileText size={24} />}
               title={search ? 'No documents match your search' : 'No documents available'}
               description={search ? 'Try modifying your search or filters.' : 'Documents will appear here once uploaded by an administrator.'}
+              action={
+                <Button onClick={() => setUploadModalOpen(true)} size="sm">
+                  <Upload size={14} />
+                  Upload Document
+                </Button>
+              }
             />
           </div>
         ) : (
@@ -155,6 +196,30 @@ export default function DocumentsBrowsePage() {
           ))
         )}
       </motion.div>
+
+      {/* Upload Modal */}
+      <Modal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        title="Upload Document"
+      >
+        <div className="space-y-4 text-center">
+          <div className="rounded-2xl border-2 border-dashed border-white/10 p-8 hover:border-primary/30 transition-colors">
+            <Upload size={32} className="mx-auto text-text-dim mb-3" />
+            <p className="text-sm text-text-muted">Drag & drop or click to browse</p>
+            <p className="text-xs text-text-dim mt-1">PDF, DOCX, TXT up to 50MB</p>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setUploadModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button>
+              <Upload size={14} />
+              Select File
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </motion.div>
   );
 }

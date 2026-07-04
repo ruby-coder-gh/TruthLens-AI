@@ -30,6 +30,7 @@ class User(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     queries = relationship("Query", back_populates="user", lazy="selectin")
     feedback_given = relationship("Feedback", back_populates="user", lazy="selectin")
     audit_logs = relationship("AuditLog", back_populates="user", lazy="selectin")
+    comparisons = relationship("Comparison", back_populates="user", lazy="selectin")
 
     __table_args__ = (
         Index("idx_users_email", "email"),

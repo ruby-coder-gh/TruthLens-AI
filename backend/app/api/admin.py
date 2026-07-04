@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import case, cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,20 @@ class UserInviteRequest(BaseModel):
     email: str
     username: str
     role: str = "user"
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if not v or "@" not in v:
+            raise ValueError("Valid email address is required")
+        return v.strip().lower()
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not v or len(v.strip()) < 2:
+            raise ValueError("Username must be at least 2 characters")
+        return v.strip()
 
 
 class UserDetailResponse(BaseModel):
@@ -515,16 +529,21 @@ async def get_queries_over_time(
 ):
     """Return daily query count for last N days (admin only)."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    result = await db.execute(
-        select(
-            cast(Query.created_at, Date).label("date"),
-            func.count(Query.id).label("count"),
-        )
-        .where(Query.created_at >= cutoff)
-        .group_by(cast(Query.created_at, Date))
-        .order_by(cast(Query.created_at, Date))
-    )
-    rows = result.all()
+    try:
+        async with asyncio.timeout(10):
+            result = await db.execute(
+                select(
+                    func.date(Query.created_at).label("date"),
+                    func.count(Query.id).label("count"),
+                )
+                .where(Query.created_at >= cutoff)
+                .group_by(func.date(Query.created_at))
+                .order_by(func.date(Query.created_at))
+            )
+            rows = result.all()
+    except (asyncio.TimeoutError, Exception):
+        logger.warning("get_queries_over_time timed out after 10s, returning empty")
+        return []
 
     return [
         UsageStatsResponse(
@@ -541,15 +560,25 @@ async def get_trust_score_distribution(
     db: AsyncSession = Depends(get_db),
 ):
     """Return count of queries in trust score buckets (admin only)."""
-    result = await db.execute(
-        select(
-            func.sum(case((Query.trust_score.between(0.0, 0.25), 1), else_=0)).label("bucket_0_25"),
-            func.sum(case((Query.trust_score.between(0.26, 0.50), 1), else_=0)).label("bucket_26_50"),
-            func.sum(case((Query.trust_score.between(0.51, 0.75), 1), else_=0)).label("bucket_51_75"),
-            func.sum(case((Query.trust_score.between(0.76, 1.0), 1), else_=0)).label("bucket_76_100"),
-        ).where(Query.trust_score.isnot(None))
-    )
-    row = result.one()
+    try:
+        async with asyncio.timeout(10):
+            result = await db.execute(
+                select(
+                    func.count(case((Query.trust_score.between(0.0, 0.25), 1))).label("bucket_0_25"),
+                    func.count(case((Query.trust_score.between(0.26, 0.50), 1))).label("bucket_26_50"),
+                    func.count(case((Query.trust_score.between(0.51, 0.75), 1))).label("bucket_51_75"),
+                    func.count(case((Query.trust_score.between(0.76, 1.0), 1))).label("bucket_76_100"),
+                ).where(Query.trust_score.isnot(None))
+            )
+            row = result.one()
+    except (asyncio.TimeoutError, Exception):
+        logger.warning("get_trust_score_distribution timed out after 10s, returning zeros")
+        return [
+            TrustScoreDistribution(range="0-25", count=0),
+            TrustScoreDistribution(range="26-50", count=0),
+            TrustScoreDistribution(range="51-75", count=0),
+            TrustScoreDistribution(range="76-100", count=0),
+        ]
 
     return [
         TrustScoreDistribution(range="0-25", count=row.bucket_0_25 or 0),

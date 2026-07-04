@@ -3,17 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Search, UserPlus, User, Ban, ChevronRight, Clock } from 'lucide-react';
-import { Button, Badge, Input, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Button, Badge, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import AnimatedInput from '../components/premium/AnimatedInput';
 import { adminApi } from '../api/client';
 import type { User as AdminUserType } from '../api/types';
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface AdminUser extends AdminUserType {
   last_login: string;
 }
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -21,8 +18,6 @@ function formatDate(iso: string): string {
     hour: '2-digit', minute: '2-digit',
   });
 }
-
-// ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function AdminUsersPage() {
   const navigate = useNavigate();
@@ -106,7 +101,7 @@ export default function AdminUsersPage() {
       {/* Header */}
       <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-text">Users</h1>
+          <h1 className="text-2xl font-bold gradient-text">Users</h1>
           <p className="text-sm text-text-muted mt-1">Manage user accounts and permissions.</p>
         </div>
         <Link to="/admin/users/invite">
@@ -119,7 +114,7 @@ export default function AdminUsersPage() {
 
       {/* Search */}
       <motion.div variants={staggerItem} className="max-w-md">
-        <Input
+        <AnimatedInput
           placeholder="Search users..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -160,7 +155,8 @@ export default function AdminUsersPage() {
                 <motion.tr
                   key={user.id}
                   variants={staggerItem}
-                  className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
+                  className="border-b border-border last:border-b-0 transition-colors hover:bg-white/[0.03] cursor-pointer"
+                  onClick={() => navigate(`/admin/users/${user.id}`)}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -174,6 +170,7 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3">
                     <select
                       value={user.role}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={(e) => roleMutation.mutate({ userId: user.id, role: e.target.value })}
                       className={`rounded-lg border px-2 py-1 text-xs font-medium transition-all ${
                         user.role === 'admin'
@@ -198,7 +195,7 @@ export default function AdminUsersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={() => statusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
@@ -215,14 +212,16 @@ export default function AdminUsersPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <button
+                    <motion.button
                       type="button"
-                      onClick={() => navigate(`/admin/users/${user.id}`)}
+                      onClick={(e) => { e.stopPropagation(); navigate(`/admin/users/${user.id}`); }}
                       className="flex h-7 w-7 items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-white/[0.06] transition-all"
                       aria-label="View user details"
+                      whileHover={{ scale: 1.1, x: 2 }}
+                      whileTap={{ scale: 0.9 }}
                     >
                       <ChevronRight size={14} />
-                    </button>
+                    </motion.button>
                   </td>
                 </motion.tr>
               ))

@@ -23,6 +23,10 @@ import type {
   AddMemberRequest,
   SubmitFeedbackRequest,
   UpdateUserRequest,
+  ComparisonSummary,
+  ComparisonDetail,
+  ComparisonCreateRequest,
+  ComparisonCreateResponse,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -335,6 +339,30 @@ export const queryApi = {
     request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
 };
 
+// ─── Comparison API ─────────────────────────────────────────────────────────
+export const comparisonApi = {
+  create: (
+    workspaceId: string,
+    data: ComparisonCreateRequest,
+  ): Promise<ComparisonCreateResponse> =>
+    request(`/workspaces/${workspaceId}/comparisons`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  list: (
+    workspaceId: string,
+    params?: { page?: number; page_size?: number },
+  ): Promise<PaginatedResponse<ComparisonSummary>> =>
+    request(`/workspaces/${workspaceId}/comparisons${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  get: (workspaceId: string, comparisonId: string): Promise<ComparisonDetail> =>
+    request(`/workspaces/${workspaceId}/comparisons/${comparisonId}`),
+
+  delete: (workspaceId: string, comparisonId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/comparisons/${comparisonId}`, { method: 'DELETE' }),
+};
+
 // ─── Feedback API ───────────────────────────────────────────────────────────
 export const feedbackApi = {
   submit: (queryId: string, data: SubmitFeedbackRequest): Promise<Feedback> =>
@@ -445,4 +473,5 @@ export const api = {
   admin: adminApi,
   investigation: investigationApi,
   collections: collectionApi,
+  comparisons: comparisonApi,
 };

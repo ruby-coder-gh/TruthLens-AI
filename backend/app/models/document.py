@@ -36,6 +36,7 @@ class Document(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     uploader = relationship("User", back_populates="documents_uploaded", lazy="selectin")
     chunks = relationship("Chunk", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
     collection = relationship("Collection", back_populates="documents", lazy="selectin")
+    comparison_results = relationship("ComparisonResult", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_docs_workspace", "workspace_id"),

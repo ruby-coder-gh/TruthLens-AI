@@ -34,6 +34,8 @@ import {
   Zap,
   Layers,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Button,
   Card,
@@ -991,11 +993,11 @@ function ChatMessageBubble({
     >
       <div
         className={clsx(
-          'max-w-[85%] space-y-2',
+          'max-w-[85%]',
           isUser && 'order-1',
         )}
       >
-        {/* User message */}
+        {/* ─── USER MESSAGE ───────────────────────────────────────────── */}
         {isUser && (
           <motion.div
             className="rounded-2xl rounded-br-md bg-gradient-to-br from-primary to-primary-dark px-4 py-2.5 shadow-lg shadow-primary/20"
@@ -1007,15 +1009,10 @@ function ChatMessageBubble({
           </motion.div>
         )}
 
-        {/* Assistant message */}
+        {/* ─── ASSISTANT MESSAGE ─────────────────────────────────────── */}
         {isAssistant && (
-          <motion.div
-            className="glass rounded-2xl p-4 lg:p-5 space-y-3 border border-glass-border"
-            initial={{ opacity: 0.99, scale: 0.95, x: -10 }}
-            animate={{ opacity: 1, scale: 1, x: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
-          >
-            {/* Status: pending */}
+          <div className="glass rounded-2xl bg-card/60 border border-white/10 p-5 flex flex-col gap-4 shadow-xl">
+            {/* Pending state */}
             {message.status === 'pending' && (
               <div className="flex items-center gap-2 py-2">
                 <TypingIndicator />
@@ -1029,10 +1026,12 @@ function ChatMessageBubble({
               </div>
             )}
 
-            {/* Streaming cursor */}
+            {/* Streaming cursor — live markdown */}
             {message.status === 'streaming' && (
               <div className="text-sm leading-relaxed text-text">
-                {message.content}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
                 <motion.span
                   className="ml-0.5 inline-block h-4 w-[3px] rounded-sm bg-primary-soft align-text-bottom"
                   animate={{ opacity: [1, 0.3, 1] }}
@@ -1041,16 +1040,93 @@ function ChatMessageBubble({
               </div>
             )}
 
-            {/* Complete content */}
+            {/* Complete content — full card */}
             {isComplete && message.content && (
-              <motion.div
-                className="text-sm leading-relaxed text-text"
-                initial={{ opacity: 0.99 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.3 }}
-              >
-                {renderMessageWithCitations(message.id, message.content, message.sources, onSourceClick)}
-              </motion.div>
+              <>
+                {/* TOP: Metadata row (guardrail + trust score) */}
+                <div className="flex items-center gap-3 border-b border-white/5 pb-3">
+                  {message.guardrail && (
+                    <GuardrailBadge guardrail={message.guardrail} />
+                  )}
+                  {message.trustScore !== null && (
+                    <div className="flex items-center gap-2">
+                      <TrustScoreRing score={message.trustScore} />
+                      <span
+                        className="text-xs font-medium"
+                        style={{ color: message.trustScore >= 0.75 ? 'var(--color-accent)' : 'var(--color-orange)' }}
+                      >
+                        {trustScoreLabel(message.trustScore)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* MIDDLE: Markdown content with citations */}
+                <div className="text-sm text-text leading-relaxed">
+                  {renderMessageWithCitations(message.id, message.content, message.sources, onSourceClick)}
+                </div>
+
+                {/* BOTTOM: Footer — latency, model, actions */}
+                <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-text-dim">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {message.latencyMs !== null && (
+                      <span className="flex items-center gap-1">
+                        <Clock size={12} />
+                        {formatLatency(message.latencyMs)}
+                      </span>
+                    )}
+                    {message.modelUsed && (
+                      <span className="flex items-center gap-1">
+                        <Brain size={12} />
+                        {message.modelUsed}
+                      </span>
+                    )}
+                    {message.tokenCount !== null && (
+                      <span>{message.tokenCount} tokens</span>
+                    )}
+                    <span>{formatTimestamp(message.timestamp)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <motion.button
+                      type="button"
+                      onClick={() => onCopy(message.content)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                      aria-label="Copy response"
+                      title="Copy response"
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <Copy size={14} />
+                    </motion.button>
+                    {message.queryId && (
+                      <>
+                        <motion.button
+                          type="button"
+                          onClick={() => onFeedback(1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-green"
+                          aria-label="Thumbs up"
+                          title="Helpful"
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                        >
+                          <ThumbsUp size={14} />
+                        </motion.button>
+                        <motion.button
+                          type="button"
+                          onClick={() => onFeedback(-1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-red"
+                          aria-label="Thumbs down"
+                          title="Not helpful"
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                        >
+                          <ThumbsDown size={14} />
+                        </motion.button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Error state */}
@@ -1079,106 +1155,7 @@ function ChatMessageBubble({
                 </div>
               </motion.div>
             )}
-
-            {/* Guardrail badge */}
-            {message.guardrail && (
-              <motion.div
-                initial={{ opacity: 0.99, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-              >
-                <GuardrailBadge guardrail={message.guardrail} />
-              </motion.div>
-            )}
-
-            {/* Trust score */}
-            {message.trustScore !== null && (
-              <motion.div
-                className="flex items-center gap-2"
-                initial={{ opacity: 0.99, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-              >
-                <TrustScoreRing score={message.trustScore} />
-                <div className="flex flex-col">
-                  <span className="text-xs text-text-muted">Trust score</span>
-                  <span className="text-xs font-medium" style={{ color: message.trustScore >= 0.75 ? 'var(--color-accent)' : 'var(--color-orange)' }}>
-                    {trustScoreLabel(message.trustScore)}
-                  </span>
-                </div>
-              </motion.div>
-            )}
-
-
-
-            {/* Footer: latency + model info + actions */}
-            {(isComplete || isError) && (
-              <motion.div
-                className="flex items-center justify-between border-t border-border/50 pt-2"
-                initial={{ opacity: 0.99 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.25 }}
-              >
-                <div className="flex flex-wrap items-center gap-3 text-xs text-text-dim">
-                  {message.latencyMs !== null && (
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} />
-                      {formatLatency(message.latencyMs)}
-                    </span>
-                  )}
-                  {message.modelUsed && (
-                    <span className="flex items-center gap-1">
-                      <Brain size={12} />
-                      {message.modelUsed}
-                    </span>
-                  )}
-                  {message.tokenCount !== null && (
-                    <span>{message.tokenCount} tokens</span>
-                  )}
-                  <span>{formatTimestamp(message.timestamp)}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <motion.button
-                    type="button"
-                    onClick={() => onCopy(message.content)}
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
-                    aria-label="Copy response"
-                    title="Copy response"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <Copy size={14} />
-                  </motion.button>
-                  {message.queryId && (
-                    <>
-                      <motion.button
-                        type="button"
-                        onClick={() => onFeedback(1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-green"
-                        aria-label="Thumbs up"
-                        title="Helpful"
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                      >
-                        <ThumbsUp size={14} />
-                      </motion.button>
-                      <motion.button
-                        type="button"
-                        onClick={() => onFeedback(-1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-red"
-                        aria-label="Thumbs down"
-                        title="Not helpful"
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                      >
-                        <ThumbsDown size={14} />
-                      </motion.button>
-                    </>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
+          </div>
         )}
       </div>
     </motion.div>
@@ -1310,8 +1287,16 @@ function renderMessageWithCitations(
 ): React.ReactNode {
   // Split on citation patterns like [1], [2], etc.
   const parts = content.split(/(\[\d+\])/g);
-  if (parts.length <= 1) return <>{content}</>;
+  // No citations — render full markdown
+  if (parts.length <= 1) {
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    );
+  }
 
+  // Has citations — render text parts as markdown, citation parts as buttons
   return (
     <>
       {parts.map((part, i) => {
@@ -1337,7 +1322,11 @@ function renderMessageWithCitations(
           }
           return <sup key={i} className="text-primary-soft font-medium">{match[0]}</sup>;
         }
-        return <span key={i}>{part}</span>;
+        return (
+          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+            {part}
+          </ReactMarkdown>
+        );
       })}
     </>
   );

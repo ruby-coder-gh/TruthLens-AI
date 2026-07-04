@@ -75,6 +75,7 @@ export default function PremiumButton({
   className,
   disabled,
   onClick,
+  type = 'submit',
   ...props
 }: PremiumButtonProps) {
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
@@ -109,11 +110,11 @@ export default function PremiumButton({
   const isDisabled = disabled || loading || success;
 
   return (
-    <motion.button
-      ref={btnRef}
-      type="button"
-      disabled={isDisabled}
-      onClick={handleClick}
+      <motion.button
+        ref={btnRef}
+        type={type}
+        disabled={isDisabled}
+        onClick={handleClick}
       whileHover={isDisabled ? {} : { scale: 1.02, y: -2 }}
       whileTap={isDisabled ? {} : { scale: 0.98 }}
       className={clsx(

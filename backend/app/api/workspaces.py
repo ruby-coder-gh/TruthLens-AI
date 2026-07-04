@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db
-from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from app.core.exceptions import ConflictException, ForbiddenException, InvalidInputException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.query import Query
@@ -219,17 +219,29 @@ async def add_member(
     db: AsyncSession = Depends(get_db),
 ):
     """Add member to workspace (owner only)."""
+    if not body.user_id and not body.email:
+        raise InvalidInputException("Either user_id or email must be provided")
+
+    # Resolve user_id from email if needed
+    user_id = body.user_id
+    if not user_id and body.email:
+        result = await db.execute(select(User).where(User.email == body.email))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise NotFoundException("User", body.email)
+        user_id = user.id
+
     # Check user exists
-    result = await db.execute(select(User).where(User.id == body.user_id))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise NotFoundException("User", body.user_id)
+        raise NotFoundException("User", user_id)
 
     # Check not already member
     result = await db.execute(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == workspace.id,
-            WorkspaceMember.user_id == body.user_id,
+            WorkspaceMember.user_id == user_id,
         )
     )
     if result.scalar_one_or_none():
@@ -237,7 +249,7 @@ async def add_member(
 
     member = WorkspaceMember(
         workspace_id=workspace.id,
-        user_id=body.user_id,
+        user_id=user_id,
         role=body.role,
     )
     db.add(member)
@@ -249,7 +261,7 @@ async def add_member(
         action="workspace.add_member",
         resource_type="workspace_member",
         resource_id=member.id,
-        details=json.dumps({"added_user_id": body.user_id, "role": body.role}),
+        details=json.dumps({"added_user_id": user_id, "role": body.role}),
     ))
 
     return MemberResponse(

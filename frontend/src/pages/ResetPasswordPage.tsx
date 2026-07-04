@@ -2,7 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, Eye, EyeOff, ArrowLeft, CheckCircle, Shield, RefreshCw } from 'lucide-react';
-import { Button, Input, Card } from '../components/ui';
+import PremiumButton from '../components/premium/PremiumButton';
+import AnimatedInput from '../components/premium/AnimatedInput';
+import { Card } from '../components/ui';
 import { authApi } from '../api/client';
 
 const PASSWORD_REQUIREMENTS = [
@@ -30,10 +32,8 @@ export default function ResetPasswordPage() {
     else if (password.length < 8) next.password = 'Password must be at least 8 characters';
     else if (!/[A-Z]/.test(password)) next.password = 'Must contain an uppercase letter';
     else if (!/\d/.test(password)) next.password = 'Must contain a digit';
-
     if (password !== confirmPassword) next.confirmPassword = 'Passwords do not match';
     if (!token) next.token = 'Reset token is missing';
-
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -42,7 +42,6 @@ export default function ResetPasswordPage() {
     e.preventDefault();
     setApiError('');
     if (!validate()) return;
-
     setLoading(true);
     try {
       await authApi.resetPassword({ token, password });
@@ -63,6 +62,16 @@ export default function ResetPasswordPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
+        <motion.div
+          className="absolute inset-0 opacity-30"
+          style={{
+            background: 'linear-gradient(135deg, rgba(124,92,255,0.15), rgba(45,212,191,0.08), rgba(56,189,248,0.12), rgba(124,92,255,0.15))',
+            backgroundSize: '400% 400%',
+          }}
+          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+          transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+          aria-hidden="true"
+        />
         <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
         <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
         <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
@@ -73,7 +82,7 @@ export default function ResetPasswordPage() {
           <h2 className="text-2xl font-bold text-text">Invalid or missing token</h2>
           <p className="mt-2 text-sm text-text-muted">This password reset link is invalid or has expired.</p>
           <Link to="/forgot-password" className="mt-6 inline-block">
-            <Button variant="secondary">Request new reset link</Button>
+            <PremiumButton variant="secondary">Request new reset link</PremiumButton>
           </Link>
         </div>
       </motion.div>
@@ -87,6 +96,18 @@ export default function ResetPasswordPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
+      {/* Slow pan animated gradient background */}
+      <motion.div
+        className="absolute inset-0 opacity-30"
+        style={{
+          background: 'linear-gradient(135deg, rgba(124,92,255,0.15), rgba(45,212,191,0.08), rgba(56,189,248,0.12), rgba(124,92,255,0.15))',
+          backgroundSize: '400% 400%',
+        }}
+        animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+        aria-hidden="true"
+      />
+
       <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
@@ -109,21 +130,11 @@ export default function ResetPasswordPage() {
             </div>
           </motion.div>
 
-          <motion.h1
-            className="text-3xl font-bold"
-            initial={{ opacity: 0.99, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25, duration: 0.5 }}
-          >
+          <motion.h1 className="text-3xl font-bold" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
             <span className="gradient-text">Set new password</span>
           </motion.h1>
 
-          <motion.p
-            className="mt-2 text-sm text-text-muted"
-            initial={{ opacity: 0.99 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.35, duration: 0.5 }}
-          >
+          <motion.p className="mt-2 text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.35, duration: 0.5 }}>
             {success ? 'Password updated! Redirecting to login...' : 'Enter your new password below'}
           </motion.p>
         </motion.div>
@@ -178,8 +189,8 @@ export default function ResetPasswordPage() {
                   animate="animate"
                 >
                   <motion.div
-                    variants={{ initial: { opacity: 0.99, y: 8 }, animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } } }}
                     className="space-y-1.5"
+                    variants={{ initial: { opacity: 0.99, y: 8 }, animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } } }}
                   >
                     <div className="flex items-center justify-between">
                       <label htmlFor="new-password" className="block text-sm font-medium text-text-muted">New password</label>
@@ -188,26 +199,21 @@ export default function ResetPasswordPage() {
                       </button>
                     </div>
                     <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-text-dim">
-                        <Lock size={16} />
-                      </div>
-                      <input
+                      <AnimatedInput
                         id="new-password"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="Enter new password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
+                        error={errors.password}
+                        icon={<Lock size={16} />}
                         autoComplete="new-password"
-                        className={'w-full rounded-xl border bg-bg-soft/60 px-3 py-2.5 pl-10 pr-10 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:bg-bg-soft/80 ' + (errors.password ? 'border-red/50' : 'border-border')}
                       />
                     </div>
-                    {errors.password && <p className="flex items-center gap-1 text-xs text-red">{errors.password}</p>}
                   </motion.div>
 
-                  <motion.div
-                    variants={{ initial: { opacity: 0.99, y: 8 }, animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } } }}
-                  >
-                    <Input
+                  <motion.div variants={{ initial: { opacity: 0.99, y: 8 }, animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } } }}>
+                    <AnimatedInput
                       label="Confirm new password"
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Re-enter new password"
@@ -225,22 +231,17 @@ export default function ResetPasswordPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.45, duration: 0.4 }}
                 >
-                  <Button type="submit" loading={loading} className="w-full" size="lg">
+                  <PremiumButton type="submit" loading={loading} className="w-full" size="lg">
                     <RefreshCw size={18} />
                     Reset password
-                  </Button>
+                  </PremiumButton>
                 </motion.div>
               </form>
             )}
           </Card>
         </motion.div>
 
-        <motion.p
-          className="mt-6 text-center text-sm text-text-muted"
-          initial={{ opacity: 0.99 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5, duration: 0.5 }}
-        >
+        <motion.p className="mt-6 text-center text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }}>
           <Link to="/login" className="relative font-medium text-primary-soft hover:text-primary transition-colors inline-flex items-center gap-1.5">
             <ArrowLeft size={14} />
             Back to login

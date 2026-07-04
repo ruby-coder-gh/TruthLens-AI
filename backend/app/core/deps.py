@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import AsyncGenerator
 
-from fastapi import Depends, Header, WebSocket
+from uuid import UUID
+
+from fastapi import Depends, Header, HTTPException, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,14 @@ from app.core.exceptions import ForbiddenException, NotFoundException, Unauthori
 from app.database import async_session_factory
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
+
+
+def _validate_uuid(uuid_str: str) -> None:
+    """Raise 422 if uuid_str is not a valid UUID."""
+    try:
+        UUID(uuid_str)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Invalid UUID format: {uuid_str}")
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -99,6 +109,7 @@ async def check_workspace_access(
     db: AsyncSession = Depends(get_db),
 ) -> Workspace:
     """Check user has access to workspace (owner or member). Returns workspace."""
+    _validate_uuid(workspace_id)
     result = await db.execute(
         select(Workspace).where(Workspace.id == workspace_id)
     )
@@ -130,6 +141,7 @@ async def check_workspace_owner(
     db: AsyncSession = Depends(get_db),
 ) -> Workspace:
     """Ensure current user is the workspace owner."""
+    _validate_uuid(workspace_id)
     result = await db.execute(
         select(Workspace).where(Workspace.id == workspace_id)
     )

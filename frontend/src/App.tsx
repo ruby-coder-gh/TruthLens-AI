@@ -33,6 +33,10 @@ const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'))
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'))
 const InvestigationPage = lazy(() => import('./pages/InvestigationPage'))
 const ApiCatalogPage = lazy(() => import('./pages/ApiCatalogPage'))
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'))
+const TermsPage = lazy(() => import('./pages/TermsPage'))
+const ContactPage = lazy(() => import('./pages/ContactPage'))
 
 // ─── HOC helpers ────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -118,8 +122,13 @@ function AppRoutes() {
         <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
       </Route>
 
+      {/* ── STATIC PAGES ────────────────────────────────────────────────── */}
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/contact" element={<ContactPage />} />
+
       {/* ── FALLBACK ─────────────────────────────────────────────────────── */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
     </Suspense>
   )

@@ -25,6 +25,7 @@ class Workspace(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     documents = relationship("Document", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     queries = relationship("Query", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     collections = relationship("Collection", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    comparisons = relationship("Comparison", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name={self.name})>"

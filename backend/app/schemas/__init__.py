@@ -48,6 +48,13 @@ from app.schemas.query import (
     SourceResponse,
 )
 from app.schemas.feedback import FeedbackCreate, FeedbackResponse
+from app.schemas.comparison import (
+    ComparisonResponse,
+    ComparisonSummary,
+    ComparisonResultResponse,
+    ComparisonCreateRequest,
+    ComparisonCreateResponse,
+)
 from app.schemas.common import (
     ErrorResponse,
     PaginatedResponse,
@@ -131,4 +138,9 @@ __all__ = [
     "AdminSettingsResponse",
     "AdminSettingsUpdate",
     "EvalRunResponse",
+    "ComparisonResponse",
+    "ComparisonSummary",
+    "ComparisonResultResponse",
+    "ComparisonCreateRequest",
+    "ComparisonCreateResponse",
 ]

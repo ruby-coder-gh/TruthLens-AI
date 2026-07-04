@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class WorkspaceCreate(BaseModel):
@@ -47,8 +47,15 @@ class WorkspaceResponse(BaseModel):
 
 
 class MemberAdd(BaseModel):
-    user_id: str
+    user_id: str | None = None
+    email: str | None = None
     role: str = "viewer"
+
+    @model_validator(mode='after')
+    def validate_one_of(self):
+        if not self.user_id and not self.email:
+            raise ValueError('Either user_id or email must be provided')
+        return self
 
     @field_validator("role")
     @classmethod

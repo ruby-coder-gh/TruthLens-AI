@@ -86,6 +86,47 @@ class WSStreamEndPayload(BaseModel):
     query_id: str
 
 
+# ─── Comparison WebSocket Schemas ────────────────────────────────────────────
+
+
+class WSComparisonPayload(BaseModel):
+    """Payload for starting a comparison."""
+    workspace_id: str
+    question: str
+    document_ids: list[str]
+    top_k: int = 5
+    filters: dict[str, Any] | None = None
+
+
+class WSComparisonDocResultPayload(BaseModel):
+    """Per-document result in a comparison (streamed as each doc completes)."""
+    comparison_id: str
+    document_id: str
+    document_name: str
+    answer_text: str
+    sources: list[WSSourceItem]
+    trust_score: float | None
+    guardrail_passed: bool
+    guardrail_score: float
+
+
+class WSComparisonSynthesisPayload(BaseModel):
+    """Final synthesis result for a comparison."""
+    comparison_id: str
+    synthesis_text: str
+    agreement_score: float
+    trust_score: float
+    per_doc_stances: dict[str, str]  # document_id -> "supports" | "contradicts" | "silent"
+
+
+class WSComparisonProgressPayload(BaseModel):
+    comparison_id: str
+    phase: Literal["retrieval", "generation", "synthesis", "evaluation"]
+    progress: float
+    completed_docs: int
+    total_docs: int
+
+
 class WSMessage(BaseModel):
     type: str
     payload: dict[str, Any]

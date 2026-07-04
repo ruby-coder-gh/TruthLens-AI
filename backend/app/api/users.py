@@ -1,4 +1,9 @@
-"""Admin user management routes: /api/users/*"""
+"""Admin-only user management routes.
+
+All /api/users endpoints require admin role.
+These are NOT public user-facing endpoints — they are internal admin tools
+for managing accounts. Non-admin callers receive 403 Forbidden.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,8 @@ from app.models.user import User
 from app.schemas.common import PaginatedResponse
 from app.schemas.user import UserResponse
 
+# Warning: All /api/users routes are admin-only via get_current_admin dependency.
+# Non-admin callers get 403 "Admin access required".
 router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(get_current_admin)])
 
 

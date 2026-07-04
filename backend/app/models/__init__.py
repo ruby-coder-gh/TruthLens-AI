@@ -8,6 +8,7 @@ from app.models.feedback import Feedback
 from app.models.audit_log import AuditLog
 from app.models.collection import Collection, CollectionAccess
 from app.models.eval_run import EvalRun
+from app.models.comparison import Comparison, ComparisonResult
 
 __all__ = [
     "DeclarativeBase",
@@ -24,4 +25,6 @@ __all__ = [
     "Collection",
     "CollectionAccess",
     "EvalRun",
+    "Comparison",
+    "ComparisonResult",
 ]

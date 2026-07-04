@@ -1,7 +1,7 @@
 """Collection schemas."""
 from __future__ import annotations
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 class CollectionCreate(BaseModel):
     name: str
@@ -22,7 +22,14 @@ class CollectionResponse(BaseModel):
     updated_at: datetime | None = None
 
 class CollectionAccessGrant(BaseModel):
-    user_id: str
+    user_id: str | None = None
+    email: str | None = None
+
+    @model_validator(mode='after')
+    def validate_one_of(self):
+        if not self.user_id and not self.email:
+            raise ValueError('Either user_id or email must be provided')
+        return self
 
 class CollectionAccessResponse(BaseModel):
     id: str

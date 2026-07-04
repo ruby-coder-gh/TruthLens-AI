@@ -45,13 +45,15 @@ TruthLens AI/
 │   │   │   ├── collections.py   # /workspaces/{id}/collections/* (CRUD + access)
 │   │   │   ├── admin.py         # /api/admin/* (stats, logs, users, analytics)
 │   │   │   ├── investigations.py# /workspaces/{id}/investigate (multi-step agent)
-│   │   │   └── ws.py            # /ws/query (WebSocket streaming queries)
+│   │   │   ├── comparisons.py   # /workspaces/{id}/comparisons/* (multi-doc compare)
+│   │   │   └── ws.py            # /ws/query + /ws/compare (WebSocket streaming)
 │   │   │
 │   │   ├── core/                # Cross-cutting concerns
 │   │   │   ├── auth.py          # JWT encode/decode, bcrypt hashing
-│   │   │   ├── deps.py          # FastAPI DI (get_db, get_current_user, workspace access)
+│   │   │   ├── deps.py          # FastAPI DI (get_db, get_current_user, workspace access, UUID validation)
 │   │   │   ├── exceptions.py    # Custom exceptions + error handlers
-│   │   │   └── security.py      # Rate limiter, security headers, PII redaction
+│   │   │   ├── security.py      # Rate limiter, security headers, PII redaction
+│   │   │   └── validators.py    # UUID format validator (returns 422 on invalid input)
 │   │   │
 │   │   ├── models/              # SQLAlchemy ORM models
 │   │   │   ├── base.py          # DeclarativeBase, TimestampMixin, UUIDPkMixin
@@ -190,6 +192,10 @@ TruthLens AI/
             ├── RegisterPage.tsx
             ├── ForgotPasswordPage.tsx
             ├── ResetPasswordPage.tsx
+            ├── NotFoundPage.tsx              # 404 catch-all (dark theme, gradient heading)
+            ├── PrivacyPage.tsx               # Privacy policy (static)
+            ├── TermsPage.tsx                 # Terms of service (static)
+            ├── ContactPage.tsx               # Contact page (static)
             ├── UserDashboard.tsx
             ├── ChatPage.tsx, ChatNewPage.tsx, ChatDetailPage.tsx, ChatHistoryPage.tsx
             ├── DocumentsBrowsePage.tsx
@@ -214,7 +220,7 @@ TruthLens AI/
 |---|---|---|
 | **FastAPI server** | `backend/app/main.py` | App factory: lifespan, CORS, middleware, health check, includes API router |
 | **Frontend app** | `frontend/src/main.tsx` | React DOM render with error boundary |
-| **Frontend router** | `frontend/src/App.tsx` | BrowserRouter + QueryClient + AuthProvider; lazy-loaded public/protected/admin routes |
+| **Frontend router** | `frontend/src/App.tsx` | BrowserRouter + QueryClient + AuthProvider; lazy-loaded public/protected/admin routes, 404 catch-all, static pages (privacy, terms, contact) |
 | **Local dev launcher** | `run.sh` | Starts backend (uvicorn --reload) + frontend (vite dev) concurrently |
 | **CLI evaluation** | `backend/evaluation/evaluate.py` | Run RAGAS evaluation on golden dataset from terminal |
 | **Alembic migrations** | `backend/migrations/` | `alembic upgrade head` for DB schema migrations |
@@ -229,11 +235,11 @@ TruthLens AI/
 |---|---|---|
 | **API Router** | `api/router.py` | Aggregates all sub-routers under `/api` |
 | **Auth API** | `api/auth.py` | Register, login, refresh, forgot/reset/change password, logout, profile CRUD |
-| **Workspace API** | `api/workspaces.py` | Workspace CRUD, member management (add/remove/role) |
+| **Workspace API** | `api/workspaces.py` | Workspace CRUD, member management (add by id or email, remove, role change) |
 | **Document API** | `api/documents.py` | Upload, list, detail, status polling, delete, reindex; background ingestion |
 | **Query API** | `api/queries.py` | List query history, detail with sources, delete |
 | **Feedback API** | `api/feedback.py` | Submit and list user ratings/comments per query |
-| **Collections API** | `api/collections.py` | Collection CRUD, access grants/revocations |
+| **Collections API** | `api/collections.py` | Collection CRUD, access grants/revocations (by id or email) |
 | **Admin API** | `api/admin.py` | Stats, audit logs, user mgmt, flagged answers, analytics, eval history, settings |
 | **Investigation API** | `api/investigations.py` | Multi-step agentic research endpoint |
 | **WebSocket** | `api/ws.py` | Real-time streaming: auth -> query -> retrieval -> sources -> generate -> guardrail -> trust -> complete |
@@ -241,7 +247,7 @@ TruthLens AI/
 | **Database** | `database.py` | SQLAlchemy async engine (SQLite + aiosqlite) + session factory |
 | **ChromaDB Client** | `chroma_client.py` | Singleton PersistentClient, workspace collection management |
 | **JWT Auth** | `core/auth.py` | JWT encode/decode, bcrypt password hashing |
-| **Dependencies** | `core/deps.py` | FastAPI DI: `get_db`, `get_current_user`, `check_workspace_access` |
+| **Dependencies** | `core/deps.py` | FastAPI DI: `get_db`, `get_current_user`, `check_workspace_access`, `check_workspace_owner` (with UUID validation), `get_current_admin` |
 | **Exceptions** | `core/exceptions.py` | AppException hierarchy (NotFound, Unauthorized, Conflict, etc.) + handlers |
 | **Security** | `core/security.py` | In-memory rate limiter, RequestID/SecurityHeaders middleware, PII patterns |
 | **Document Loader** | `ingestion/loader.py` | Parse PDF (PyMuPDF), DOCX, TXT, MD, CSV into page dicts |
@@ -263,6 +269,7 @@ TruthLens AI/
 | **Query Graph** | `graph/query_graph.py` | LangGraph pipeline: rewrite -> search -> rerank -> generate -> guardrail -> trust |
 | **CRAG Graph** | `graph/crag_graph.py` | Self-correcting RAG: retry generation on low guardrail score |
 | **Investigation Graph** | `graph/investigation.py` | Agentic decompose -> research sub-questions -> synthesize report |
+| **Comparison Graph** | `graph/comparison_graph.py` | Multi-doc parallel RAG -> synthesis -> agreement detection |
 | **Trust Score** | `evaluation/trust_score.py` | Composite score from retrieval quality, faithfulness, relevance, source authority |
 | **RAGAS Eval** | `evaluation/ragas_eval.py` | RAGAS metrics integration (faithfulness, answer_relevancy, context_precision, context_recall) |
 | **Feedback Loop** | `evaluation/feedback_loop.py` | Feedback CRUD + workspace stats aggregation |
@@ -285,7 +292,7 @@ TruthLens AI/
 | **Evidence Sidebar** | `components/EvidenceSidebar.tsx` | Citation/excerpt panel for query responses |
 | **API Catalog** | `components/api-catalog/` | Interactive API documentation viewer |
 | **Premium** | `components/premium/` | Animated input, particle field, glowing icon, premium button |
-| **Pages** | `pages/*.tsx` | 27 lazy-loaded page components covering all routes |
+| **Pages** | `pages/*.tsx` | 31 lazy-loaded page components covering all routes (incl. 404, Privacy, Terms, Contact) |
 
 ---
 
@@ -306,6 +313,8 @@ TruthLens AI/
 | **CollectionAccess** | `collection_access` | id (UUID PK), collection_id (FK), user_id (FK) | Per-user collection access grants |
 | **AuditLog** | `audit_logs` | id (UUID PK), user_id (FK), action, resource_type, resource_id, details (JSON), ip_address, created_at | Immutable action audit trail |
 | **EvalRun** | `eval_runs` | id (UUID PK), run_at, faithfulness, context_precision, context_recall, answer_relevance, answer_correctness, refusal_accuracy, golden_set_version, notes | RAGAS evaluation run history |
+| **Comparison** | `comparisons` | id (UUID PK), workspace_id (FK), user_id (FK), question (Text), document_ids (JSONB), synthesis_text, agreement_score, trust_score | Multi-document comparison session |
+| **ComparisonResult** | `comparison_results` | id (UUID PK), comparison_id (FK), document_id (FK), answer_text, sources (JSON), trust_score, stance (supports/contradicts/silent) | Per-document result within a comparison |
 
 ### Pydantic Schemas (`backend/app/schemas/`)
 
@@ -313,15 +322,16 @@ TruthLens AI/
 |---|---|---|
 | **Auth** | `auth.py` | `LoginRequest`, `RegisterRequest`, `AuthResponse`, `TokenResponse`, `RefreshRequest`, `ChangePasswordRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest`, `LogoutRequest`, `UserInfo` |
 | **User** | `user.py` | `UserResponse`, `UserUpdate` |
-| **Workspace** | `workspace.py` | `WorkspaceCreate`, `WorkspaceUpdate`, `WorkspaceResponse`, `WorkspaceSummary`, `MemberAdd`, `MemberUpdate`, `MemberResponse` |
+| **Workspace** | `workspace.py` | `WorkspaceCreate`, `WorkspaceUpdate`, `WorkspaceResponse`, `WorkspaceSummary`, `MemberAdd` (user_id or email), `MemberUpdate`, `MemberResponse` |
 | **Document** | `document.py` | `DocumentResponse`, `DocumentDetailResponse`, `DocumentStatusResponse`, `ChunkInfo` |
 | **Query** | `query.py` | `QuerySummary`, `QueryDetailResponse`, `SourceResponse` |
 | **Feedback** | `feedback.py` | `FeedbackCreate`, `FeedbackResponse` |
 | **Collection** | `collection.py` | `CollectionCreate`, `CollectionUpdate`, `CollectionResponse`, `CollectionAccessGrant`, `CollectionAccessResponse` |
 | **Investigation** | `investigation.py` | `InvestigationRequest`, `InvestigationResponse` |
+| **Comparison** | `comparison.py` + `common.py` | `ComparisonSummary`, `ComparisonDetail`, `ComparisonResult`, `ComparisonSource`, `ComparisonCreateRequest`, `ComparisonCreateResponse` |
 | **Analytics** | `analytics.py` | `AdminSettingsResponse`, `AdminSettingsUpdate`, `EvalRunResponse`, `FlaggedAnswerResponse`, `TrustScoreDistribution`, `UsageStatsResponse`, `UserActivityResponse` |
 | **Common** | `common.py` | `PaginatedResponse[T]`, `ListResponse[T]`, `MessageResponse`, `AdminStatsResponse`, `AuditLogResponse`, `EvaluationResponse` |
-| **WebSocket** | `ws.py` | `WSQueryRequest`, `WSQueryResponse`, `WSError` |
+| **WebSocket** | `ws.py` | `WSQuery/comparison messages, `WSQueryRequest`, `WSQueryResponse`, `WSError` |
 
 ### Frontend Types (`frontend/src/api/types.ts`)
 
@@ -340,6 +350,7 @@ TruthLens AI/
 | `AdminStats` | System-wide metrics |
 | `AuditLogEntry` | Action audit trail entry |
 | `InvestigationRequest` / `InvestigationResponse` | Multi-step research I/O |
+| `ComparisonSummary` / `ComparisonDetail` / `ComparisonResult` / `ComparisonSource` / `ComparisonCreateRequest` / `ComparisonCreateResponse` | Multi-document comparison I/O |
 | `WSMessage` / `WSToken` / `WSSource` / ... | WebSocket streaming message types |
 | `PaginatedResponse<T>` / `ListResponse<T>` | Generic API response wrappers |
 
@@ -373,7 +384,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | GET | `/api/workspaces/{id}` | `get_workspace` | Workspace detail with counts |
 | PUT | `/api/workspaces/{id}` | `update_workspace` | Update workspace (owner only) |
 | DELETE | `/api/workspaces/{id}` | `delete_workspace` | Delete workspace + cascade (owner only) |
-| POST | `/api/workspaces/{id}/members` | `add_member` | Add workspace member (owner only) |
+| POST | `/api/workspaces/{id}/members` | `add_member` | Add workspace member by user_id or email (owner only) |
 | PUT | `/api/workspaces/{id}/members/{uid}` | `update_member_role` | Change member role (owner only) |
 | DELETE | `/api/workspaces/{id}/members/{uid}` | `remove_member` | Remove member (owner only) |
 | GET | `/api/workspaces/{id}/members` | `list_members` | List workspace members |
@@ -417,7 +428,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | GET | `/api/workspaces/{wid}/collections/{cid}` | `get_collection` | Collection detail |
 | PUT | `/api/workspaces/{wid}/collections/{cid}` | `update_collection` | Update collection (owner/creator only) |
 | DELETE | `/api/workspaces/{wid}/collections/{cid}` | `delete_collection` | Delete collection (owner/creator only) |
-| POST | `/api/workspaces/{wid}/collections/{cid}/access` | `grant_collection_access` | Grant user access |
+| POST | `/api/workspaces/{wid}/collections/{cid}/access` | `grant_collection_access` | Grant user access by user_id or email |
 | DELETE | `/api/workspaces/{wid}/collections/{cid}/access/{uid}` | `revoke_collection_access` | Revoke user access |
 | GET | `/api/workspaces/{wid}/collections/{cid}/access` | `list_collection_access` | List access entries |
 
@@ -426,6 +437,15 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | Method | Route | Handler | Description |
 |---|---|---|---|
 | POST | `/api/workspaces/{wid}/investigate` | `investigate` | Multi-step research: decompose -> retrieve -> synthesize -> report |
+
+### Comparisons — `api/comparisons.py`
+
+| Method | Route | Handler | Description |
+|---|---|---|---|
+| POST | `/api/workspaces/{wid}/comparisons` | `create_comparison` | Create multi-doc comparison (2-5 docs) -> 202 accepted |
+| GET | `/api/workspaces/{wid}/comparisons` | `list_comparisons` | List comparison history (paginated) |
+| GET | `/api/workspaces/{wid}/comparisons/{cid}` | `get_comparison` | Full comparison with per-doc answers + synthesis |
+| DELETE | `/api/workspaces/{wid}/comparisons/{cid}` | `delete_comparison` | Delete a comparison |
 
 ### Admin — `api/admin.py` (all admin-only)
 
@@ -437,15 +457,15 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | POST | `/api/admin/evaluation/run` | `run_evaluation` | Trigger RAGAS evaluation on recent queries |
 | GET | `/api/admin/evaluation/history` | `get_evaluation_history` | Past eval run history |
 | GET | `/api/admin/users` | `list_users` | List all users (paginated) |
-| POST | `/api/admin/users/invite` | `invite_user` | Invite user with temp password |
+| POST | `/api/admin/users/invite` | `invite_user` | Invite user with temp password (requires email + username; validated) |
 | GET | `/api/admin/users/{uid}` | `get_user_detail` | Full user detail with query count |
 | PUT | `/api/admin/users/{uid}/role` | `update_user_role` | Change user role |
 | PUT | `/api/admin/users/{uid}/status` | `update_user_status` | Activate/deactivate user |
 | DELETE | `/api/admin/users/{uid}` | `delete_user` | Soft-delete (deactivate) user |
 | GET | `/api/admin/users/{uid}/activity` | `get_user_activity` | User query history |
 | GET | `/api/admin/analytics/flagged-answers` | `get_flagged_answers` | Queries with low trust scores (< 0.4) |
-| GET | `/api/admin/analytics/queries-over-time` | `get_queries_over_time` | Daily query count (last N days) |
-| GET | `/api/admin/analytics/trust-score-distribution` | `get_trust_score_distribution` | Trust score bucket distribution |
+| GET | `/api/admin/analytics/queries-over-time` | `get_queries_over_time` | Daily query count (last N days); wrapped with 10s timeout, returns `[]` on timeout |
+| GET | `/api/admin/analytics/trust-score-distribution` | `get_trust_score_distribution` | Trust score bucket distribution; wrapped with 10s timeout, returns zero buckets on timeout |
 | GET | `/api/admin/settings` | `get_admin_settings` | Current runtime settings |
 | PUT | `/api/admin/settings` | `update_admin_settings` | Update settings in-memory |
 
@@ -454,6 +474,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | Type | Route | Handler | Description |
 |---|---|---|---|
 | WS | `/ws/query` | `websocket_query` | Auth -> query -> stream tokens/sources/guardrail/trust/complete |
+| WS | `/ws/compare` | `websocket_compare` | Auth -> compare -> stream doc_results/synthesis/trust/complete |
 
 ### Health
 

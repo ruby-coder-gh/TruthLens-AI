@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
 from app.core.deps import check_workspace_access, get_current_user, get_db
-from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from app.core.exceptions import ConflictException, ForbiddenException, InvalidInputException, NotFoundException
 from app.models.collection import Collection, CollectionAccess
 from app.models.document import Document
 from app.models.user import User
@@ -237,6 +237,9 @@ async def grant_collection_access(
     db: AsyncSession = Depends(get_db),
 ):
     """Grant user access to collection (workspace owner or collection creator)."""
+    if not body.user_id and not body.email:
+        raise InvalidInputException("Either user_id or email must be provided")
+
     result = await db.execute(
         select(Collection).where(Collection.id == collection_id, Collection.workspace_id == workspace_id)
     )
@@ -247,16 +250,25 @@ async def grant_collection_access(
     if workspace.owner_id != current_user.id and collection.created_by != current_user.id:
         raise ForbiddenException("Only workspace owner or collection creator can grant access")
 
+    # Resolve user_id from email if needed
+    user_id = body.user_id
+    if not user_id and body.email:
+        user_result = await db.execute(select(User).where(User.email == body.email))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise NotFoundException("User", body.email)
+        user_id = user.id
+
     # Check target user exists
-    user_result = await db.execute(select(User).where(User.id == body.user_id))
+    user_result = await db.execute(select(User).where(User.id == user_id))
     if not user_result.scalar_one_or_none():
-        raise NotFoundException("User", body.user_id)
+        raise NotFoundException("User", user_id)
 
     # Check not already granted
     existing = await db.execute(
         select(CollectionAccess).where(
             CollectionAccess.collection_id == collection_id,
-            CollectionAccess.user_id == body.user_id,
+            CollectionAccess.user_id == user_id,
         )
     )
     if existing.scalar_one_or_none():
@@ -264,7 +276,7 @@ async def grant_collection_access(
 
     access = CollectionAccess(
         collection_id=collection_id,
-        user_id=body.user_id,
+        user_id=user_id,
     )
     db.add(access)
     await db.flush()

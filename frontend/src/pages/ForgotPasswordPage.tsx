@@ -2,7 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, ArrowLeft, CheckCircle, Shield, Sparkles } from 'lucide-react';
-import { Button, Input, Card } from '../components/ui';
+import PremiumButton from '../components/premium/PremiumButton';
+import AnimatedInput from '../components/premium/AnimatedInput';
+import { Card } from '../components/ui';
 import { authApi } from '../api/client';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,7 +25,6 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setError('');
     if (!validate()) return;
-
     setLoading(true);
     try {
       await authApi.forgotPassword({ email });
@@ -42,6 +43,18 @@ export default function ForgotPasswordPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
+      {/* Slow pan animated gradient background */}
+      <motion.div
+        className="absolute inset-0 opacity-30"
+        style={{
+          background: 'linear-gradient(135deg, rgba(124,92,255,0.15), rgba(45,212,191,0.08), rgba(56,189,248,0.12), rgba(124,92,255,0.15))',
+          backgroundSize: '400% 400%',
+        }}
+        animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+        aria-hidden="true"
+      />
+
       {/* Ambient blobs */}
       <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
@@ -66,22 +79,12 @@ export default function ForgotPasswordPage() {
             </div>
           </motion.div>
 
-          <motion.h1
-            className="text-3xl font-bold"
-            initial={{ opacity: 0.99, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25, duration: 0.5 }}
-          >
+          <motion.h1 className="text-3xl font-bold" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
             <span className="gradient-text">Reset password</span>
           </motion.h1>
 
-          <motion.p
-            className="mt-2 text-sm text-text-muted"
-            initial={{ opacity: 0.99 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.35, duration: 0.5 }}
-          >
-            {sent ? 'Check your email for the reset link' : 'Enter your email and we\'ll send you a reset link'}
+          <motion.p className="mt-2 text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.35, duration: 0.5 }}>
+            {sent ? 'Check your email for the reset link' : "Enter your email and we'll send you a reset link"}
           </motion.p>
         </motion.div>
 
@@ -95,7 +98,6 @@ export default function ForgotPasswordPage() {
             <div className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(124,92,255,0.15), transparent)' }} aria-hidden="true" />
 
             {sent ? (
-              /* ─── Success State ───────────────────────────────────────── */
               <motion.div
                 initial={{ opacity: 0.99, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -117,14 +119,13 @@ export default function ForgotPasswordPage() {
                   </p>
                 </div>
                 <Link to="/login">
-                  <Button variant="secondary" className="w-full">
+                  <PremiumButton className="w-full" variant="secondary">
                     <ArrowLeft size={16} />
                     Back to login
-                  </Button>
+                  </PremiumButton>
                 </Link>
               </motion.div>
             ) : (
-              /* ─── Form State ──────────────────────────────────────────── */
               <form onSubmit={handleSubmit} noValidate className="relative space-y-5">
                 <AnimatePresence>
                   {error && (
@@ -149,7 +150,7 @@ export default function ForgotPasswordPage() {
                   <motion.div
                     variants={{ initial: { opacity: 0.99, y: 8 }, animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const } } }}
                   >
-                    <Input
+                    <AnimatedInput
                       label="Email"
                       type="email"
                       placeholder="you@example.com"
@@ -167,10 +168,10 @@ export default function ForgotPasswordPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.45, duration: 0.4 }}
                 >
-                  <Button type="submit" loading={loading} className="w-full" size="lg">
+                  <PremiumButton type="submit" loading={loading} className="w-full" size="lg">
                     <Mail size={18} />
                     Send reset link
-                  </Button>
+                  </PremiumButton>
                 </motion.div>
               </form>
             )}
@@ -178,12 +179,7 @@ export default function ForgotPasswordPage() {
         </motion.div>
 
         {/* Footer */}
-        <motion.p
-          className="mt-6 text-center text-sm text-text-muted"
-          initial={{ opacity: 0.99 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5, duration: 0.5 }}
-        >
+        <motion.p className="mt-6 text-center text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }}>
           <Link to="/login" className="relative font-medium text-primary-soft hover:text-primary transition-colors inline-flex items-center gap-1.5">
             <ArrowLeft size={14} />
             Back to login

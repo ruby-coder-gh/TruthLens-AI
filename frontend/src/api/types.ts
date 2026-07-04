@@ -175,6 +175,62 @@ export interface InvestigationResponse {
   error?: string;
 }
 
+// ─── Comparison ──────────────────────────────────────────────────────────────
+export interface ComparisonSource {
+  chunk_id: string;
+  document_id: string;
+  document_name: string;
+  excerpt: string;
+  relevance_score: number;
+  rerank_score?: number;
+  confidence?: number;
+  matched_chunks?: number;
+}
+
+export interface ComparisonResult {
+  id: string;
+  document_id: string;
+  document_name: string;
+  answer_text: string;
+  sources: ComparisonSource[];
+  trust_score?: number;
+  stance: 'supports' | 'contradicts' | 'silent';
+  created_at: string;
+}
+
+export interface ComparisonSummary {
+  id: string;
+  workspace_id: string;
+  question: string;
+  document_count: number;
+  agreement_score?: number;
+  trust_score?: number;
+  created_at: string;
+}
+
+export interface ComparisonDetail {
+  id: string;
+  workspace_id: string;
+  question: string;
+  document_ids: string[];
+  synthesis_text?: string;
+  agreement_score?: number;
+  trust_score?: number;
+  results: ComparisonResult[];
+  created_at: string;
+}
+
+export interface ComparisonCreateRequest {
+  question: string;
+  document_ids: string[];
+}
+
+export interface ComparisonCreateResponse {
+  comparison_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  message: string;
+}
+
 // ─── WebSocket ──────────────────────────────────────────────────────────────
 export interface WSMessage {
   type: string;
