@@ -1,140 +1,361 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
 } from 'recharts';
 import {
-  BarChart3, Activity, Shield, AlertTriangle, Users, MessageSquare, TrendingUp, Star,
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Clock3,
+  MessageSquare,
+  Shield,
+  TrendingUp,
 } from 'lucide-react';
-import { Button, Card, Badge, Tabs, LoadingSpinner, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  LoadingSpinner,
+  Tabs,
+  pageTransition,
+  staggerContainer,
+  staggerItem,
+} from '../components/ui';
 import { adminApi } from '../api/client';
 
-function evalScoreColor(value: number): string {
-  if (value >= 0.8) return 'var(--color-green)';
-  if (value >= 0.6) return 'var(--color-orange)';
-  return 'var(--color-red)';
+type FlaggedAnswer = {
+  id: string;
+  query: string;
+  score: number;
+  date: string;
+  workspace?: string;
+  user?: string;
+};
+
+type QueriesOverTimePoint = {
+  label: string;
+  queries: number;
+};
+
+type TrustDistributionPoint = {
+  range: string;
+  count: number;
+  fill: string;
+};
+
+type QualityMetric = {
+  label: string;
+  value: number;
+  color: string;
+};
+
+const DISTRIBUTION_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#2dd4bf', '#34d399'];
+const QUALITY_COLORS = ['#34d399', '#2dd4bf', '#38bdf8', '#2d6bff'];
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
+function clampUnit(value: unknown): number {
+  const num = toFiniteNumber(value, 0);
+  if (num < 0) return 0;
+  if (num > 1) return 1;
+  return num;
+}
+
+function formatDateTime(value: unknown): string {
+  if (value === null || value === undefined) return '—';
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function formatDayLabel(value: unknown, index: number): string {
+  if (value === null || value === undefined) return `#${index + 1}`;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function extractData<T>(resp: unknown): T[] {
+  if (Array.isArray(resp)) return resp as T[];
+  if (resp && typeof resp === 'object' && 'data' in resp) {
+    return ((resp as { data?: unknown }).data as T[]) || [];
+  }
+  return [];
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null) return '—';
+  return `${Math.round(value * 100)}%`;
+}
+
+function isLowTrustBucket(range: string): boolean {
+  const parts = range.split('-');
+  if (parts.length !== 2) return false;
+  const upper = toFiniteNumber(parts[1], NaN);
+  return Number.isFinite(upper) && upper <= 50;
+}
+
+function getRiskMeta(score: number): { label: string; badgeColor: 'red' | 'orange' | 'gray'; barColor: string } {
+  if (score < 0.25) {
+    return { label: 'Critical', badgeColor: 'red', barColor: '#f87171' };
+  }
+  if (score < 0.4) {
+    return { label: 'Elevated', badgeColor: 'orange', barColor: '#fb923c' };
+  }
+  return { label: 'Review', badgeColor: 'gray', barColor: '#9db0d4' };
+}
+
+function getQualityBand(value: number): { label: string; badgeColor: 'green' | 'blue' | 'orange' | 'red' } {
+  if (value >= 0.85) return { label: 'Excellent', badgeColor: 'green' };
+  if (value >= 0.7) return { label: 'Healthy', badgeColor: 'blue' };
+  if (value >= 0.5) return { label: 'Needs Work', badgeColor: 'orange' };
+  return { label: 'Critical', badgeColor: 'red' };
+}
 
 export default function AdminAnalyticsPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
-  const [lowTrustAnswers, setLowTrustAnswers] = useState<Array<{ id: string; query: string; score: number; date: string }>>([]);
-  const [queriesOverTimeData, setQueriesOverTimeData] = useState<Array<{ month: string; queries: number }>>([]);
-  const [trustScoreDistributionData, setTrustScoreDistributionData] = useState<Array<{ range: string; count: number; fill: string }>>([]);
-  const [metrics, setMetrics] = useState<Array<{ label: string; value: number; color: string }>>([]);
-  const [usageStats, setUsageStats] = useState<Array<{ label: string; value: string; color: string }>>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [flaggedAnswers, setFlaggedAnswers] = useState<FlaggedAnswer[]>([]);
+  const [queriesOverTimeData, setQueriesOverTimeData] = useState<QueriesOverTimePoint[]>([]);
+  const [trustScoreDistributionData, setTrustScoreDistributionData] = useState<TrustDistributionPoint[]>([]);
+  const [metrics, setMetrics] = useState<QualityMetric[]>([]);
+  const [latestEvalAt, setLatestEvalAt] = useState('—');
+
+  const loadAnalytics = useCallback(async (silentRefresh: boolean) => {
+    if (silentRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setError(null);
+
+    try {
+      const [flaggedData, queriesData, trustData, evalData] = await Promise.all([
+        adminApi.getFlaggedAnswers(),
+        adminApi.getQueriesOverTime(),
+        adminApi.getTrustScoreDistribution(),
+        adminApi.getEvalHistory(),
+      ]) as [unknown, unknown, unknown, unknown];
+
+      const flaggedRaw = extractData<Record<string, unknown>>(flaggedData);
+      const normalizedFlagged = flaggedRaw.map((item, idx) => ({
+        id: String(item.id ?? `flagged-${idx}`),
+        query: String(item.query ?? item.query_text ?? 'Untitled query'),
+        score: toFiniteNumber(item.score ?? item.trust_score, 0),
+        date: formatDateTime(item.date ?? item.created_at),
+        workspace: item.workspace_name ? String(item.workspace_name) : undefined,
+        user: item.user_name ? String(item.user_name) : undefined,
+      }));
+      setFlaggedAnswers(normalizedFlagged);
+
+      const queriesRaw = extractData<Record<string, unknown>>(queriesData);
+      const normalizedQueries = queriesRaw.map((item, idx) => ({
+        label: formatDayLabel(item.label ?? item.month ?? item.date, idx),
+        queries: Math.max(0, toFiniteNumber(item.queries ?? item.query_count, 0)),
+      }));
+      setQueriesOverTimeData(normalizedQueries);
+
+      const trustRaw = extractData<Record<string, unknown>>(trustData);
+      const normalizedTrust = trustRaw.map((item, idx) => ({
+        range: String(item.range ?? item.bucket ?? `Bucket ${idx + 1}`),
+        count: Math.max(0, toFiniteNumber(item.count, 0)),
+        fill: DISTRIBUTION_COLORS[idx] || DISTRIBUTION_COLORS[DISTRIBUTION_COLORS.length - 1],
+      }));
+      setTrustScoreDistributionData(normalizedTrust);
+
+      const evalRaw = extractData<Record<string, unknown>>(evalData);
+      let normalizedMetrics: QualityMetric[] = [];
+      let latestRun = '—';
+
+      if (evalRaw.length > 0) {
+        const latest = evalRaw[0];
+        latestRun = formatDateTime(latest.run_at);
+
+        if (
+          'faithfulness' in latest ||
+          'context_precision' in latest ||
+          'context_recall' in latest ||
+          'answer_relevance' in latest
+        ) {
+          normalizedMetrics = [
+            { label: 'Faithfulness', value: clampUnit(latest.faithfulness), color: '#34d399' },
+            { label: 'Context Precision', value: clampUnit(latest.context_precision), color: '#2dd4bf' },
+            { label: 'Context Recall', value: clampUnit(latest.context_recall), color: '#38bdf8' },
+            { label: 'Answer Relevance', value: clampUnit(latest.answer_relevance), color: '#2d6bff' },
+          ];
+        } else {
+          normalizedMetrics = evalRaw
+            .map((item, idx) => ({
+              label: String(item.label ?? `Metric ${idx + 1}`),
+              value: clampUnit(item.value),
+              color: QUALITY_COLORS[idx] || QUALITY_COLORS[QUALITY_COLORS.length - 1],
+            }))
+            .slice(0, 4);
+        }
+      }
+
+      setMetrics(normalizedMetrics);
+      setLatestEvalAt(latestRun);
+    } catch {
+      setError('Unable to load analytics right now.');
+      setFlaggedAnswers([]);
+      setQueriesOverTimeData([]);
+      setTrustScoreDistributionData([]);
+      setMetrics([]);
+      setLatestEvalAt('—');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    setLoading(true);
-    (async () => {
-      try {
-        const [flaggedData, queriesData, trustData, evalData] = await Promise.all([
-          adminApi.getFlaggedAnswers(),
-          adminApi.getQueriesOverTime(),
-          adminApi.getTrustScoreDistribution(),
-          adminApi.getEvalHistory(),
-        ]) as [unknown, unknown, unknown, unknown];
+    void loadAnalytics(false);
+  }, [loadAnalytics]);
 
-        // Normalize responses that may be { data: [...] } or just [...]
-        const extractData = <T,>(resp: unknown): T[] => {
-          if (Array.isArray(resp)) return resp as T[];
-          if (resp && typeof resp === 'object' && 'data' in resp) return (resp as { data: T[] }).data;
-          return [];
-        };
-
-        const flaggedArr = extractData<{ id: string; query: string; score: number; date: string }>(flaggedData);
-        setLowTrustAnswers(flaggedArr);
-
-        const queriesArr = extractData<{ month: string; queries: number }>(queriesData);
-        setQueriesOverTimeData(queriesArr);
-
-        const trustArr = extractData<{ range: string; count: number }>(trustData);
-        setTrustScoreDistributionData(
-          trustArr.map((item, i) => ({
-            ...item,
-            fill: ['#f87171', '#fb923c', '#fbbf24', '#2dd4bf', '#34d399'][i] || '#34d399',
-          })),
-        );
-
-        const evalArr = extractData<{ label: string; value: number }>(evalData);
-        setMetrics(
-          evalArr.map((item, i) => ({
-            ...item,
-            color: ['#34d399', '#2dd4bf', '#38bdf8', '#7c5cff'][i] || '#7c5cff',
-          })),
-        );
-
-        setUsageStats([
-          { label: 'Total Queries (30d)', value: queriesArr.length.toString(), color: 'text-primary-soft' },
-          { label: 'Active Users (30d)', value: '—', color: 'text-accent' },
-          { label: 'Avg Latency', value: '—', color: 'text-accent-2' },
-          { label: 'Avg Trust Score', value: '—', color: 'text-green' },
-        ]);
-      } catch {
-        setLowTrustAnswers([]);
-        setQueriesOverTimeData([]);
-        setTrustScoreDistributionData([]);
-        setMetrics([]);
-        setUsageStats([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const totalQueries = useMemo(
+    () => queriesOverTimeData.reduce((sum, point) => sum + point.queries, 0),
+    [queriesOverTimeData],
+  );
+  const averageQuality = useMemo(() => {
+    if (metrics.length === 0) return null;
+    const total = metrics.reduce((sum, metric) => sum + metric.value, 0);
+    return total / metrics.length;
+  }, [metrics]);
+  const peakQueryPoint = useMemo(() => {
+    if (queriesOverTimeData.length === 0) return null;
+    return queriesOverTimeData.reduce((max, current) => (current.queries > max.queries ? current : max));
+  }, [queriesOverTimeData]);
+  const trustSampleSize = useMemo(
+    () => trustScoreDistributionData.reduce((sum, bucket) => sum + bucket.count, 0),
+    [trustScoreDistributionData],
+  );
+  const lowTrustCount = useMemo(
+    () => trustScoreDistributionData.reduce((sum, bucket) => (isLowTrustBucket(bucket.range) ? sum + bucket.count : sum), 0),
+    [trustScoreDistributionData],
+  );
+  const lowTrustRatio = trustSampleSize > 0 ? lowTrustCount / trustSampleSize : null;
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <BarChart3 size={14} /> },
     { id: 'ragas', label: 'RAGAS Metrics', icon: <Shield size={14} /> },
   ];
+  const overviewCards = [
+    {
+      label: 'Total Queries (30d)',
+      value: totalQueries.toLocaleString(),
+      icon: MessageSquare,
+      tone: 'text-primary-soft',
+      detail: peakQueryPoint ? `Peak: ${peakQueryPoint.queries} on ${peakQueryPoint.label}` : 'Trend data is still loading.',
+    },
+    {
+      label: 'Flagged Answers',
+      value: flaggedAnswers.length.toString(),
+      icon: AlertTriangle,
+      tone: 'text-red',
+      detail: lowTrustRatio !== null ? `Low-trust share: ${formatPercent(lowTrustRatio)}` : 'No trust distribution yet.',
+    },
+    {
+      label: 'Avg Quality Score',
+      value: formatPercent(averageQuality),
+      icon: Shield,
+      tone: 'text-green',
+      detail: averageQuality !== null ? getQualityBand(averageQuality).label : 'Run an evaluation to populate this score.',
+    },
+    {
+      label: 'Latest Eval Run',
+      value: latestEvalAt,
+      icon: Clock3,
+      tone: 'text-accent',
+      detail: metrics.length > 0 ? `${metrics.length} quality metrics captured` : 'No evaluation history recorded.',
+    },
+  ] as const;
 
   if (loading) {
     return (
-      <motion.div
-        className="space-y-6"
-        variants={pageTransition}
-        initial="initial"
-        animate="animate"
-      >
+      <motion.div className="space-y-6" variants={pageTransition} initial="initial" animate="animate">
         <LoadingSpinner text="Loading analytics..." />
       </motion.div>
     );
   }
 
   return (
-    <motion.div
-      className="space-y-6"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
-      {/* Header */}
-      <motion.div variants={staggerItem}>
-        <h1 className="text-2xl font-bold text-text">Analytics</h1>
-        <p className="text-sm text-text-muted mt-1">System performance and quality metrics.</p>
+    <motion.div className="space-y-6" variants={pageTransition} initial="initial" animate="animate">
+      <motion.div
+        variants={staggerItem}
+        className="relative overflow-hidden rounded-3xl border border-primary/25 bg-gradient-to-br from-primary/14 via-bg-soft/70 to-bg/85 p-5 sm:p-6"
+      >
+        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-primary/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 left-1/3 h-40 w-40 rounded-full bg-accent/16 blur-3xl" />
+
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <Badge color="purple" className="w-fit">Admin Analytics</Badge>
+            <h1 className="text-2xl font-bold text-text sm:text-3xl">Analytics Command Center</h1>
+            <p className="max-w-2xl text-sm text-text-muted sm:text-base">
+              Monitor demand, trust risk, and answer quality from a single control surface.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Badge color="gray">30-day query window</Badge>
+              <Badge color={lowTrustRatio !== null && lowTrustRatio > 0.2 ? 'orange' : 'green'}>
+                Low-trust share: {formatPercent(lowTrustRatio)}
+              </Badge>
+              <Badge color={metrics.length > 0 ? 'green' : 'gray'}>
+                {metrics.length > 0 ? 'Evaluation data synced' : 'Evaluation pending'}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {error && <Badge color="red">{error}</Badge>}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { void loadAnalytics(true); }}
+              loading={refreshing}
+            >
+              Refresh Data
+            </Button>
+          </div>
+        </div>
       </motion.div>
 
-      {/* Usage Stats Row */}
       <motion.div
-        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
         variants={staggerContainer}
         initial="initial"
         animate="animate"
       >
-        {usageStats.map((stat, idx) => {
-          const icons = [MessageSquare, Users, Activity, Shield];
-          const Icon = icons[idx] || MessageSquare;
+        {overviewCards.map((card) => {
+          const Icon = card.icon;
           return (
-            <motion.div key={stat.label} variants={staggerItem}>
-              <Card className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg glass ${stat.color}`}>
+            <motion.div key={card.label} variants={staggerItem}>
+              <Card className="relative h-full overflow-hidden p-4">
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.04] to-transparent" />
+                <div className="relative flex items-start gap-3">
+                  <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl glass ${card.tone}`}>
                     <Icon size={18} />
                   </div>
-                  <div>
-                    <p className="text-xs text-text-muted">{stat.label}</p>
-                    <p className="text-lg font-bold text-text tabular-nums">{stat.value}</p>
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-[0.08em] text-text-muted">{card.label}</p>
+                    <p className="truncate text-lg font-bold text-text tabular-nums">{card.value}</p>
+                    <p className="mt-1 text-xs text-text-dim">{card.detail}</p>
                   </div>
                 </div>
               </Card>
@@ -143,125 +364,214 @@ export default function AdminAnalyticsPage() {
         })}
       </motion.div>
 
-      {/* Charts Row */}
       <motion.div
-        className="grid gap-4 lg:grid-cols-2"
+        className="grid gap-4 xl:grid-cols-2"
         variants={staggerContainer}
         initial="initial"
         animate="animate"
       >
-        {/* Queries Over Time */}
-        <motion.div variants={staggerItem}>
-          <Card className="p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <Activity size={16} className="text-primary-soft" />
-              <h3 className="text-sm font-semibold text-text">Queries Over Time</h3>
+        <motion.div variants={staggerItem} className="min-w-0">
+          <Card className="h-full p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Activity size={16} className="text-primary-soft" />
+                <h3 className="text-sm font-semibold text-text">Queries Over Time</h3>
+              </div>
+              <span className="text-xs text-text-dim">Last 30 days</span>
             </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={queriesOverTimeData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                  <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
-                  <YAxis stroke="#6b7888" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(100, 120, 170, 0.15)',
-                      borderRadius: '8px',
-                      color: '#e6edf3',
-                    }}
-                  />
-                  <Line type="monotone" dataKey="queries" stroke="#7c5cff" strokeWidth={2} dot={{ fill: '#7c5cff', r: 4 }} activeDot={{ r: 6 }} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="h-64 min-w-0">
+              {queriesOverTimeData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-text-dim">No query trend data yet.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                  <LineChart data={queriesOverTimeData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="queriesLineGradient" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#4f8dff" />
+                        <stop offset="100%" stopColor="#2d6bff" />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(108, 131, 175, 0.24)" />
+                    <XAxis dataKey="label" stroke="#7f96bf" fontSize={12} tickMargin={8} />
+                    <YAxis stroke="#7f96bf" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(value: number | string) => [Number(value).toLocaleString(), 'Queries']}
+                      contentStyle={{
+                        backgroundColor: 'rgba(19, 26, 39, 0.96)',
+                        backdropFilter: 'blur(8px)',
+                        border: '1px solid rgba(117, 150, 207, 0.22)',
+                        borderRadius: '12px',
+                        color: '#eaf0ff',
+                      }}
+                      labelStyle={{ color: '#9db0d4' }}
+                      itemStyle={{ color: '#eaf0ff' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="queries"
+                      stroke="url(#queriesLineGradient)"
+                      strokeWidth={3}
+                      dot={{ fill: '#2d6bff', r: 3.5, strokeWidth: 0 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
+            <p className="mt-3 text-xs text-text-dim">
+              {peakQueryPoint ? `Highest daily volume was ${peakQueryPoint.queries} queries on ${peakQueryPoint.label}.` : 'No trend insight yet.'}
+            </p>
           </Card>
         </motion.div>
 
-        {/* Trust Score Distribution */}
-        <motion.div variants={staggerItem}>
-          <Card className="p-5">
-            <div className="mb-4 flex items-center gap-2">
-              <BarChart3 size={16} className="text-accent" />
-              <h3 className="text-sm font-semibold text-text">Trust Score Distribution</h3>
+        <motion.div variants={staggerItem} className="min-w-0">
+          <Card className="h-full p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 size={16} className="text-accent" />
+                <h3 className="text-sm font-semibold text-text">Trust Score Distribution</h3>
+              </div>
+              <span className="text-xs text-text-dim">Bucketed</span>
             </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trustScoreDistributionData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                  <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
-                  <YAxis stroke="#6b7888" fontSize={12} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(100, 120, 170, 0.15)',
-                      borderRadius: '8px',
-                      color: '#e6edf3',
-                    }}
-                  />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {trustScoreDistributionData.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-64 min-w-0">
+              {trustScoreDistributionData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-text-dim">No distribution data yet.</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                  <BarChart data={trustScoreDistributionData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(108, 131, 175, 0.24)" />
+                    <XAxis dataKey="range" stroke="#7f96bf" fontSize={12} tickMargin={8} />
+                    <YAxis stroke="#7f96bf" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    <Tooltip
+                      formatter={(value: number | string) => [Number(value).toLocaleString(), 'Queries']}
+                      contentStyle={{
+                        backgroundColor: 'rgba(19, 26, 39, 0.96)',
+                        backdropFilter: 'blur(8px)',
+                        border: '1px solid rgba(117, 150, 207, 0.22)',
+                        borderRadius: '12px',
+                        color: '#eaf0ff',
+                      }}
+                      labelStyle={{ color: '#9db0d4' }}
+                      itemStyle={{ color: '#eaf0ff' }}
+                    />
+                    <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={56}>
+                      {trustScoreDistributionData.map((entry) => (
+                        <Cell key={`${entry.range}-${entry.fill}`} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
+            <p className="mt-3 text-xs text-text-dim">
+              {lowTrustRatio !== null ? `${formatPercent(lowTrustRatio)} of scored answers currently fall below 50 trust.` : 'No trust breakdown available yet.'}
+            </p>
           </Card>
         </motion.div>
       </motion.div>
 
-      {/* Tabs: Overview / RAGAS */}
       <motion.div variants={staggerItem}>
-        <Card className="p-0 overflow-hidden">
+        <Card className="overflow-hidden p-0">
           <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} className="px-4 pt-2" />
           <div className="p-5 lg:p-6">
             {activeTab === 'ragas' ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                {metrics.map((metric) => {
-                  const pct = Math.round(metric.value * 100);
-                  return (
-                    <Card key={metric.label} className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-text">{metric.label}</span>
-                        <span className="text-lg font-bold tabular-nums" style={{ color: metric.color }}>
-                          {pct}%
-                        </span>
-                      </div>
-                      <div className="h-2.5 w-full overflow-hidden rounded-full bg-card-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${metric.label}: ${pct}%`}>
+                {metrics.length === 0 ? (
+                  <div className="col-span-full rounded-2xl border border-border/60 bg-card-2/40 p-6 text-center">
+                    <p className="text-sm font-semibold text-text">No evaluation history available yet.</p>
+                    <p className="mt-1 text-xs text-text-dim">
+                      Run an evaluation from the admin panel to populate RAGAS metrics and quality trend tracking.
+                    </p>
+                    <div className="mt-4">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { void loadAnalytics(true); }}
+                        loading={refreshing}
+                      >
+                        Check Again
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  metrics.map((metric) => {
+                    const percent = Math.round(metric.value * 100);
+                    const qualityBand = getQualityBand(metric.value);
+                    return (
+                      <Card key={metric.label} className="relative overflow-hidden p-4">
+                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
+                        <div className="relative mb-3 flex items-center justify-between gap-3">
+                          <span className="text-sm font-medium text-text">{metric.label}</span>
+                          <Badge color={qualityBand.badgeColor}>{qualityBand.label}</Badge>
+                        </div>
+                        <div className="relative mb-2 flex items-baseline justify-between">
+                          <span className="text-2xl font-bold tabular-nums" style={{ color: metric.color }}>{percent}%</span>
+                          <span className="text-xs text-text-dim">target: 85%+</span>
+                        </div>
                         <div
-                          className="h-full rounded-full transition-all duration-700 ease-out"
-                          style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${metric.color}, ${metric.color}88)` }}
-                        />
-                      </div>
-                    </Card>
-                  );
-                })}
+                          className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
+                          role="progressbar"
+                          aria-valuenow={percent}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label={`${metric.label}: ${percent}%`}
+                        >
+                          <div
+                            className="h-full rounded-full transition-all duration-700 ease-out"
+                            style={{ width: `${percent}%`, background: `linear-gradient(90deg, ${metric.color}, ${metric.color}88)` }}
+                          />
+                        </div>
+                      </Card>
+                    );
+                  })
+                )}
               </div>
             ) : (
-              /* Overview tab content: Low trust answers */
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-text flex items-center gap-2">
-                  <AlertTriangle size={14} className="text-red" />
-                  Low Trust Score Answers
-                </h3>
-                {lowTrustAnswers.length === 0 ? (
-                  <p className="text-sm text-text-muted text-center py-4">No low trust answers flagged.</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold text-text">
+                    <AlertTriangle size={14} className="text-red" />
+                    Low Trust Answers
+                  </h3>
+                  <Badge color={flaggedAnswers.length > 0 ? 'orange' : 'green'}>
+                    {flaggedAnswers.length} flagged
+                  </Badge>
+                </div>
+                {flaggedAnswers.length === 0 ? (
+                  <p className="rounded-xl border border-border/60 bg-card-2/35 py-4 text-center text-sm text-text-dim">
+                    No low-trust answers currently flagged.
+                  </p>
                 ) : (
                   <div className="space-y-2">
-                    {lowTrustAnswers.map((item) => (
-                      <div key={item.id} className="flex items-start justify-between gap-3 rounded-xl glass p-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-text truncate">&ldquo;{item.query}&rdquo;</p>
-                          <p className="text-xs text-text-dim mt-0.5">{item.date}</p>
+                    {flaggedAnswers.map((item) => {
+                      const risk = getRiskMeta(item.score);
+                      return (
+                        <div key={item.id} className="rounded-xl border border-border/60 bg-card-2/45 p-3.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge color={risk.badgeColor}>{risk.label}</Badge>
+                            <span className="text-xs text-text-dim">{item.date}</span>
+                            {item.workspace && <Badge color="gray">{item.workspace}</Badge>}
+                            {item.user && <Badge color="gray">{item.user}</Badge>}
+                          </div>
+                          <p className="mt-2 text-sm leading-relaxed text-text break-words">&ldquo;{item.query}&rdquo;</p>
+                          <div className="mt-3 flex items-center gap-2">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-card/70">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${Math.round(item.score * 100)}%`, backgroundColor: risk.barColor }}
+                              />
+                            </div>
+                            <span className="text-sm font-semibold tabular-nums" style={{ color: risk.barColor }}>
+                              {Math.round(item.score * 100)}%
+                            </span>
+                          </div>
+                          <div className="mt-1 flex items-center gap-1 text-xs text-text-dim">
+                            <TrendingUp size={12} />
+                            Trust score
+                          </div>
                         </div>
-                        <Badge color="red">
-                          {item.score.toFixed(2)}
-                        </Badge>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
