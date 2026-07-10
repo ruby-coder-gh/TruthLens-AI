@@ -127,3 +127,4 @@ class ComparisonCreateResponse(BaseModel):
 
     comparison_id: str
     status: str  # "processing" | "completed" | "failed"
+    message: str | None = None

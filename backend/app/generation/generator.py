@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from app.config import settings
 from app.generation.citer import CitedSpan, cite
 from app.generation.provider import get_chat_llm
 from app.utils.logger import logger
+
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
 
 
 class GenerationInput:
@@ -90,7 +93,7 @@ async def generate(input: GenerationInput) -> GenerationResult:
 
     query_text = input.rewritten_query or input.query
 
-    messages = [
+    messages: list[BaseMessage] = [
         SystemMessage(content=f"{system_prompt}\n\nContext:\n{context_text}"),
     ]
 

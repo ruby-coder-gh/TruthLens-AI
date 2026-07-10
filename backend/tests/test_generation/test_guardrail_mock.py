@@ -192,7 +192,6 @@ class TestGuardrailCheckMockedNLI:
     @pytest.mark.asyncio
     async def test_empty_context_text(self):
         """Contexts with empty text returns early (after NLI model load)."""
-        from app.generation.guardrail import _load_nli_model
         # _load_nli_model downloads a real model, so we mock it
         mock_model = MagicMock()
         with patch("app.generation.guardrail._load_nli_model", return_value=mock_model):

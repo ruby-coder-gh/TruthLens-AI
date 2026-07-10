@@ -92,7 +92,10 @@ class LLMUnavailableException(AppException):
         super().__init__("LLM_UNAVAILABLE", message, status_code=503)
 
 
-async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+async def app_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Registered only for AppException; the broad signature matches Starlette's
+    # add_exception_handler contract. Narrow before touching AppException fields.
+    assert isinstance(exc, AppException)
     logger.warning(
         "app_exception",
         code=exc.code,
@@ -134,7 +137,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     )
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Registered only for RequestValidationError; the broad signature matches
+    # Starlette's add_exception_handler contract. Narrow before reading errors().
+    assert isinstance(exc, RequestValidationError)
     errors = exc.errors()
     detail = {}
     for err in errors:

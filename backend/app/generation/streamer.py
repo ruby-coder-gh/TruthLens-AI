@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Any, AsyncIterator
+from typing import Any
 
 from app.generation.generator import GenerationInput
 from app.utils.logger import logger

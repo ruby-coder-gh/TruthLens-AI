@@ -1,7 +1,6 @@
 def test_comparison_model_creation():
     from app.models.comparison import Comparison, ComparisonResult
     from uuid import uuid4
-    from datetime import datetime
 
     # Test basic instantiation
     comp = Comparison(

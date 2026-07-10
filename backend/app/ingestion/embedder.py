@@ -84,13 +84,11 @@ async def embed(chunks: list[ChunkResult], document_name: str = "") -> list[Embe
     return results
 
 
-@property
 def dimension() -> int:
     """Return embedding dimension."""
     return settings.EMBED_DIMENSION
 
 
-@property
 def model_name() -> str:
     """Return embedding model name."""
     return settings.EMBED_MODEL_NAME

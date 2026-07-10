@@ -8,7 +8,6 @@ from fastapi import Cookie, Depends, Header, HTTPException, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.auth import decode_token
 from app.core.exceptions import ForbiddenException, NotFoundException, UnauthorizedException
 from app.database import get_db
@@ -59,7 +58,7 @@ async def get_current_user(
     if not user_id:
         raise UnauthorizedException(message="Invalid token payload")
 
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException(message="User not found or inactive")
@@ -84,7 +83,7 @@ async def get_current_user_ws(
     if not user_id:
         raise UnauthorizedException(message="Invalid token payload")
 
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException(message="User not found or inactive")

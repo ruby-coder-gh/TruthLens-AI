@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import numpy as np
 
 from app.chroma_client import get_workspace_collection
 from app.config import settings
 from app.ingestion.embedder import _load_model  # Reuse embedder model
-from app.retrieval.bm25_utils import _bm25_tokenizer, _get_bm25_path, _load_bm25_index
+from app.retrieval.bm25_utils import _bm25_tokenizer, _load_bm25_index
 from app.utils.logger import logger
 
 
@@ -158,7 +157,9 @@ async def vector_search(
     try:
         results = await asyncio.to_thread(
             collection.query,
-            query_embeddings=[query_embedding.tolist()],
+            # chromadb's stub types query_embeddings as ndarray/Sequence; a plain
+            # list-of-lists is accepted at runtime.
+            query_embeddings=[query_embedding.tolist()],  # type: ignore[arg-type]
             n_results=k,
             where=where_filter,
             include=["metadatas", "documents", "distances"],
@@ -172,7 +173,8 @@ async def vector_search(
         return retrieval_results
 
     for i, chunk_id in enumerate(results["ids"][0]):
-        metadata = results["metadatas"][0][i] if results["metadatas"] and results["metadatas"][0] else {}
+        raw_metadata = results["metadatas"][0][i] if results["metadatas"] and results["metadatas"][0] else {}
+        metadata: dict[str, Any] = dict(raw_metadata) if raw_metadata else {}
         content = results["documents"][0][i] if results["documents"] and results["documents"][0] else ""
         distance = results["distances"][0][i] if results["distances"] and results["distances"][0] else 0.0
         # Convert cosine distance to similarity score
@@ -180,7 +182,7 @@ async def vector_search(
 
         retrieval_results.append(RetrievalResult(
             chunk_id=chunk_id,
-            document_id=metadata.get("document_id", ""),
+            document_id=str(metadata.get("document_id", "")),
             workspace_id=workspace_id,
             content=content,
             score=similarity,

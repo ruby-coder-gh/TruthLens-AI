@@ -23,7 +23,7 @@ from app.schemas.collection import (
     CollectionAccessGrant,
     CollectionAccessResponse,
 )
-from app.schemas.common import ListResponse, MessageResponse
+from app.schemas.common import ListResponse
 
 router = APIRouter(tags=["collections"])
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.generation.generator import GenerationInput, _build_context_text, DEFAULT_SYSTEM_PROMPT
+from app.generation.generator import GenerationInput, _build_context_text
 
 
 def test_build_context_text_empty():

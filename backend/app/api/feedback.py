@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
 from app.core.deps import check_workspace_access, get_current_user, get_db
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import NotFoundException
 from app.models.feedback import Feedback
 from app.models.query import Query
 from app.models.user import User
@@ -27,8 +27,8 @@ async def submit_feedback(
 ):
     """Submit feedback/rating for a query."""
     # Check query exists
-    result = await db.execute(select(Query).where(Query.id == query_id))
-    query = result.scalar_one_or_none()
+    query_result = await db.execute(select(Query).where(Query.id == query_id))
+    query = query_result.scalar_one_or_none()
     if not query:
         raise NotFoundException("Query", query_id)
 
@@ -36,13 +36,13 @@ async def submit_feedback(
     await check_workspace_access(query.workspace_id, current_user, db)
 
     # Check if user already gave feedback
-    result = await db.execute(
+    feedback_result = await db.execute(
         select(Feedback).where(
             Feedback.query_id == query_id,
             Feedback.user_id == current_user.id,
         )
     )
-    existing = result.scalar_one_or_none()
+    existing = feedback_result.scalar_one_or_none()
     if existing:
         # Update existing
         existing.rating = body.rating
@@ -80,16 +80,16 @@ async def list_feedback(
 ):
     """List feedback for a query."""
     # Check query exists + workspace access
-    result = await db.execute(select(Query).where(Query.id == query_id))
-    query = result.scalar_one_or_none()
+    query_result = await db.execute(select(Query).where(Query.id == query_id))
+    query = query_result.scalar_one_or_none()
     if not query:
         raise NotFoundException("Query", query_id)
     await check_workspace_access(query.workspace_id, current_user, db)
 
-    result = await db.execute(
+    feedback_result = await db.execute(
         select(Feedback).where(Feedback.query_id == query_id).order_by(Feedback.created_at.desc())
     )
-    feedbacks = result.scalars().all()
+    feedbacks = feedback_result.scalars().all()
 
     return ListResponse(
         data=[

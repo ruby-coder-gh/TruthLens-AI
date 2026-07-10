@@ -7,16 +7,12 @@ import json
 from typing import Any
 
 from rank_bm25 import BM25Okapi
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chroma_client import get_workspace_collection
-from app.config import settings
 from app.database import async_session_factory
 from app.ingestion.chunker import ChunkResult
 from app.ingestion.embedder import EmbeddingResult
 from app.models.chunk import Chunk
-from app.models.document import Document
 from app.retrieval.bm25_utils import _bm25_tokenizer, _get_bm25_path, _load_bm25_index
 from app.utils.logger import logger
 
@@ -70,7 +66,9 @@ async def store(
         collection.upsert(
             ids=ids[i:end],
             embeddings=embeddings_list[i:end],
-            metadatas=metadatas[i:end],
+            # chromadb's stub expects its Metadata mapping type; plain dicts work
+            # at runtime.
+            metadatas=metadatas[i:end],  # type: ignore[arg-type]
             documents=documents[i:end],
         )
 

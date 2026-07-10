@@ -68,7 +68,9 @@ async def rerank(
 
     # Score with cross-encoder
     try:
-        scores = await asyncio.to_thread(model.predict, pairs)
+        # CrossEncoder.predict is an overloaded method; mypy can't match the
+        # overload through asyncio.to_thread's Callable signature.
+        scores = await asyncio.to_thread(model.predict, pairs)  # type: ignore[arg-type]
     except Exception as e:
         logger.error("reranker_prediction_failed", error=str(e))
         # Fallback to original ordering

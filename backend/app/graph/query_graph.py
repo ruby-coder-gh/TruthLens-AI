@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any, Literal
+from typing import Literal
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
-from app.generation.citer import cite
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
-from app.retrieval.hybrid_search import RetrievalResult, hybrid_search
+from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
-from app.retrieval.reranker import RerankedResult, rerank
-from app.utils.logger import logger
+from app.retrieval.reranker import rerank
 
 
 class GraphState(TypedDict):
@@ -127,8 +125,8 @@ def _guardrail_node(state: GraphState) -> dict:
 
     loop = asyncio.get_event_loop()
 
-    answer = state.get("response_text", "")
-    contexts = state.get("contexts", [])
+    answer = state.get("response_text") or ""
+    contexts = state.get("contexts") or []
 
     guardrail_result: GuardrailResult = loop.run_until_complete(
         guardrail_check(answer, contexts)
@@ -189,7 +187,7 @@ def _should_continue(state: GraphState) -> Literal["generate", "rewrite"]:
     return "rewrite"
 
 
-def build_query_graph() -> StateGraph:
+def build_query_graph() -> CompiledStateGraph:
     """Build the standard RAG query graph.
 
     Flow: rewrite → retrieve → rerank → generate → guardrail → trust_score

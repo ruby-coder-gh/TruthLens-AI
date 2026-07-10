@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.evaluation.feedback_loop import ingest_feedback, get_feedback_stats

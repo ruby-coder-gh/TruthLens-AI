@@ -8,12 +8,10 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import decode_token
-from app.core.exceptions import UnauthorizedException
 from app.database import async_session_factory
 from app.models.query import Query
 from app.models.user import User
@@ -44,7 +42,7 @@ async def _resolve_ws_user_id(token: str) -> str | None:
         return None
 
     async with async_session_factory() as db:
-        result = await db.execute(select(User.id).where(User.id == user_id, User.is_active == True))
+        result = await db.execute(select(User.id).where(User.id == user_id, User.is_active.is_(True)))
         active_user_id = result.scalar_one_or_none()
         return active_user_id
 
@@ -640,6 +638,10 @@ async def _save_comparison(
         # Add per-document results
         for dr in doc_results:
             doc_id = dr.get("document_id")
+            if not doc_id:
+                # document_id is NOT NULL on ComparisonResult; skip malformed rows.
+                continue
+            doc_id = str(doc_id)
             doc_result = ComparisonResult(
                 id=str(uuid.uuid4()),
                 comparison_id=comparison_id,

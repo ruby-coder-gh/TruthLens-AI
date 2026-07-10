@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import asdict
 
-import pytest
 
 from app.graph.investigation import (
     SubQuestion,
@@ -159,9 +157,10 @@ class TestTryParseJson:
 
     def test_malformed_array(self):
         result = _try_parse_json("Not a [json] array")
-        # Should not find 'json' alone as valid bracket content
-        # Actually it would try parsing "[json]" which fails
-        # Let's verify it returns None for truly malformed
+        # Should not find 'json' alone as valid bracket content —
+        # it would try parsing "[json]" which fails, so returns None.
+        assert result is None
+        # And a truly malformed / unterminated bracket is also None.
         assert _try_parse_json("[invalid") is None
 
 
@@ -211,8 +210,12 @@ class TestBuildGraph:
         graph = build_investigation_graph()
         # Check nodes exist by inspecting the graph's internal structure
         nodes = graph.get_graph().nodes if hasattr(graph, "get_graph") else {}
-        # LangGraph compiled graph has a different API
-        # Just verify it's callable and has the right shape
+        # LangGraph compiled graph exposes node names via get_graph().nodes.
+        assert "decompose" in nodes
+        assert "investigate" in nodes
+        assert "synthesize" in nodes
+        assert "compute_trust" in nodes
+        # And it's still a callable graph with the right shape.
         assert hasattr(graph, "stream") or hasattr(graph, "invoke")
 
     def test_graph_runs_with_minimal_state(self):

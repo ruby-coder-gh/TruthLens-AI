@@ -14,20 +14,20 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import Any, Literal
+from typing import Any
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
-from app.generation.citer import CitedSpan, cite
+from app.generation.citer import cite
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.provider import get_chat_llm
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
-from app.retrieval.hybrid_search import RetrievalResult, hybrid_search
-from app.retrieval.query_rewrite import expand, rewrite
-from app.retrieval.reranker import RerankedResult, rerank
+from app.retrieval.hybrid_search import hybrid_search
+from app.retrieval.reranker import rerank
 from app.utils.logger import logger
 
 
@@ -228,6 +228,7 @@ def _decompose_node(state: InvestigationState) -> dict:
         )
 
         elapsed = int((time.time() - start_time) * 1000)
+        trace_step.details["latency_ms"] = elapsed
         return {
             "sub_questions": sub_questions,
             "reasoning_trace": [asdict(trace_step)],
@@ -473,6 +474,7 @@ def _synthesize_node(state: InvestigationState) -> dict:
         )
 
         elapsed = int((time.time() - start_time) * 1000)
+        trace_step.details["latency_ms"] = elapsed
         existing_trace = state.get("reasoning_trace", [])
         return {
             "final_report": report,
@@ -521,9 +523,9 @@ def _trust_score_node(state: InvestigationState) -> dict:
             all_retrieval_results.append(chunk)
         if sq.get("guardrail_passed", False):
             guardrail_passed_count += 1
-        trust = sq.get("trust_score")
-        if trust is not None:
-            guardrail_scores.append(trust)
+        sq_trust = sq.get("trust_score")
+        if sq_trust is not None:
+            guardrail_scores.append(sq_trust)
 
     # Build aggregate guardrail result
     avg_guardrail_score = sum(guardrail_scores) / len(guardrail_scores) if guardrail_scores else 0.5
@@ -550,6 +552,7 @@ def _trust_score_node(state: InvestigationState) -> dict:
         "source_authority": trust.source_authority,
         "sub_question_count": len(sub_questions),
         "guardrail_pass_rate": f"{guardrail_passed_count}/{len(sub_questions)}" if sub_questions else "N/A",
+        "latency_ms": int((time.time() - start_time) * 1000),
     }
 
     existing_trace = state.get("reasoning_trace", [])
@@ -567,7 +570,7 @@ def _trust_score_node(state: InvestigationState) -> dict:
 
 # ─── Graph Builder ────────────────────────────────────────────────────────────
 
-def build_investigation_graph() -> StateGraph:
+def build_investigation_graph() -> CompiledStateGraph:
     """Build the agentic investigation graph.
 
     Flow:

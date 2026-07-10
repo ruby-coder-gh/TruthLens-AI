@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 
-from app.config import settings
 
 
 class TestQueryGraph:
@@ -287,7 +286,6 @@ class TestIngestionGraph:
     async def test_ingestion_success_path(self, tmp_path):
         """Test ingestion with a valid text file."""
         from app.graph.ingestion_graph import run_ingestion_pipeline
-        from app.config import settings
 
         # Create a temp text file
         test_file = tmp_path / "test.txt"

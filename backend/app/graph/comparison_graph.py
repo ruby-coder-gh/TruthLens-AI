@@ -14,19 +14,20 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
-from app.generation.citer import CitedSpan, cite
+from app.generation.citer import cite
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
-from app.retrieval.hybrid_search import RetrievalResult, hybrid_search
+from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
-from app.retrieval.reranker import RerankedResult, rerank
+from app.retrieval.reranker import rerank
 from app.utils.logger import logger
 
 
@@ -224,7 +225,7 @@ async def _query_single_doc(
             for r in reranked
         ]
 
-        doc_name = contexts[0].get("document_name", "") if contexts else ""
+        doc_name = str(contexts[0].get("document_name", "")) if contexts else ""
 
         # 3. Generate answer
         gen_input = GenerationInput(
@@ -277,7 +278,6 @@ async def _query_single_doc(
 
 def _rewrite_node(state: ComparisonState) -> dict:
     """Rewrite the query for better retrieval."""
-    import asyncio
 
     loop = asyncio.get_event_loop()
     rewritten = loop.run_until_complete(rewrite_query(state["query"]))
@@ -295,7 +295,6 @@ def _rewrite_node(state: ComparisonState) -> dict:
 
 def _parallel_docs_node(state: ComparisonState) -> dict:
     """Run RAG pipeline for each document in parallel."""
-    import asyncio
 
     loop = asyncio.get_event_loop()
 
@@ -413,7 +412,7 @@ def _trust_score_node(state: ComparisonState) -> dict:
     )
 
     # Aggregate retrieval results and guardrail scores
-    all_retrieval_results = []
+    all_retrieval_results: list[dict[str, Any]] = []
     guardrail_scores = []
     guardrail_passed_count = 0
 
@@ -431,7 +430,6 @@ def _trust_score_node(state: ComparisonState) -> dict:
         details=f"Aggregate across {len(doc_results)} documents: {guardrail_passed_count}/{len(doc_results)} passed",
     )
 
-    import asyncio
     loop = asyncio.get_event_loop()
 
     trust: TrustScoreComponents = loop.run_until_complete(
@@ -466,7 +464,7 @@ def _trust_score_node(state: ComparisonState) -> dict:
 
 # ─── Graph Builder ────────────────────────────────────────────────────────────
 
-def build_comparison_graph() -> StateGraph:
+def build_comparison_graph() -> CompiledStateGraph:
     """Build the multi-document comparison graph.
 
     Flow:

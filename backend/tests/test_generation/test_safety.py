@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from app.generation.safety import (
     INJECTION_PATTERNS,

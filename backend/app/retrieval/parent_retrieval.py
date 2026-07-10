@@ -6,7 +6,6 @@ around it (the "parent document context") so the LLM has more context.
 
 from __future__ import annotations
 
-from typing import Any
 
 from sqlalchemy import select
 

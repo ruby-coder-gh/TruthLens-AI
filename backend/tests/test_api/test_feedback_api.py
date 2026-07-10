@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import create_access_token
 from app.models.query import Query
 from app.models.user import User
-from app.models.workspace import Workspace
 
 
 @pytest.fixture

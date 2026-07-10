@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase as SQLAlchemyDeclarativeBase
+from sqlalchemy.orm import Mapped, mapped_column
 
 
-class DeclarativeBase(DeclarativeBase):
+class DeclarativeBase(SQLAlchemyDeclarativeBase):
     pass
 
 

@@ -152,11 +152,13 @@ def _build_ollama_llm(
 
     actual_model = model or (settings.OLLAMA_FALLBACK_MODEL if fallback else settings.OLLAMA_PRIMARY_MODEL)
 
+    # langchain_ollama's ChatOllama accepts `timeout` at runtime but its stub
+    # doesn't declare the kwarg.
     return ChatOllama(
         model=actual_model,
         base_url=settings.OLLAMA_BASE_URL,
         temperature=temperature if temperature is not None else settings.OLLAMA_TEMPERATURE,
         num_predict=max_tokens if max_tokens is not None else settings.OLLAMA_MAX_TOKENS,
-        timeout=timeout if timeout is not None else settings.OLLAMA_TIMEOUT,
+        timeout=timeout if timeout is not None else settings.OLLAMA_TIMEOUT,  # type: ignore[call-arg]
         **kwargs,
     )

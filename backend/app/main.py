@@ -9,14 +9,12 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.router import api_router
 from app.config import settings
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
-    http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )

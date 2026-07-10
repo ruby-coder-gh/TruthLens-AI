@@ -224,7 +224,7 @@ async def refresh(
         raise UnauthorizedException("Invalid token type")
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException("User not found")
@@ -342,7 +342,7 @@ async def reset_password(
         raise UnauthorizedException("Invalid token type")
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
     user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException("User not found")

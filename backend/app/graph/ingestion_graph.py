@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from app.config import settings
 from app.ingestion.chunker import ChunkResult, chunk
 from app.ingestion.embedder import EmbeddingResult, embed
 from app.ingestion.indexer import store

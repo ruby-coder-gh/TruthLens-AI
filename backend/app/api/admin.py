@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, field_validator
-from sqlalchemy import case, cast, Date, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
@@ -34,7 +34,7 @@ from app.schemas.analytics import (
     UsageStatsResponse,
     UserActivityResponse,
 )
-from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, MessageResponse, PaginatedResponse
+from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
 from app.schemas.user import UserResponse
 from app.utils.logger import logger
 
@@ -173,7 +173,6 @@ async def get_audit_logs(
 @router.get("/evaluation", response_model=EvaluationResponse)
 async def get_evaluation(db: AsyncSession = Depends(get_db)):
     """Get RAGAS evaluation scores (admin only)."""
-    from app.evaluation.ragas_eval import RagasScores
 
     try:
         with open("data/evaluation_results.json") as f:
@@ -544,7 +543,7 @@ async def get_queries_over_time(
     result = await db.execute(
         select(
             func.date(Query.created_at).label("date"),
-            func.count(Query.id).label("count"),
+            func.count(Query.id).label("query_count"),
         )
         .where(Query.created_at >= cutoff)
         .group_by(func.date(Query.created_at))
@@ -555,7 +554,7 @@ async def get_queries_over_time(
     return [
         UsageStatsResponse(
             date=str(row.date),
-            query_count=row.count,
+            query_count=row.query_count,
             user_count=0,
         )
         for row in rows

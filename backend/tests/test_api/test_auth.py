@@ -140,6 +140,7 @@ async def test_refresh_token(client: AsyncClient):
         "username": "refreshuser",
         "password": "SecureP@ss1",
     })
+    assert reg.status_code == 201
     response = await client.post("/api/auth/refresh", json={})
     assert response.status_code == 200
     set_cookies = response.headers.get_list("set-cookie")

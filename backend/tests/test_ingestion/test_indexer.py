@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-import numpy as np
 import pytest
 
-from app.ingestion.chunker import ChunkResult
-from app.ingestion.embedder import EmbeddingResult
 
 
 @pytest.mark.asyncio

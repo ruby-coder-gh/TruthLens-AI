@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any
 
 from sqlalchemy import select, func
@@ -16,9 +15,11 @@ from app.core.exceptions import NotFoundException
 from app.models.comparison import Comparison, ComparisonResult
 from app.models.document import Document
 from app.models.user import User
-from app.models.workspace import Workspace, WorkspaceMember
+from app.models.workspace import Workspace
 from app.schemas.common import (
     ComparisonResponse,
+    ComparisonResultResponse,
+    ComparisonSource,
     ComparisonSummary,
     ComparisonCreateRequest,
     ComparisonCreateResponse,
@@ -30,6 +31,35 @@ router = APIRouter(tags=["comparisons"])
 
 MIN_PAGE_SIZE = 1
 MAX_PAGE_SIZE = 100
+
+
+def _to_comparison_source(raw: dict[str, Any], document_id: str, document_name: str) -> ComparisonSource:
+    """Map a stored source dict to a ComparisonSource, tolerating partial payloads.
+
+    Persisted comparison sources may use different keys (e.g. ``text`` for the
+    excerpt) depending on which pipeline produced them, so resolve fields
+    defensively rather than assuming an exact schema match.
+    """
+    excerpt = raw.get("excerpt")
+    if excerpt is None:
+        excerpt = raw.get("text", "")
+
+    def _as_float(value: Any) -> float | None:
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return ComparisonSource(
+        chunk_id=str(raw.get("chunk_id", "")),
+        document_id=str(raw.get("document_id", document_id)),
+        document_name=str(raw.get("document_name", document_name)),
+        excerpt=str(excerpt),
+        relevance_score=_as_float(raw.get("relevance_score")) or 0.0,
+        rerank_score=_as_float(raw.get("rerank_score")),
+        confidence=_as_float(raw.get("confidence")),
+        matched_chunks=raw.get("matched_chunks") if isinstance(raw.get("matched_chunks"), int) else None,
+    )
 
 
 async def _run_comparison(*, query: str, workspace_id: str, document_ids: list[str], user_id: str, query_id: str):
@@ -148,12 +178,6 @@ async def _run_and_save_comparison(
                 doc_id = dr["document_id"]
                 stance = per_doc_stances.get(doc_id, "silent")
 
-                # Get document name
-                doc_result = await db.execute(
-                    select(Document.original_filename).where(Document.id == doc_id)
-                )
-                doc_name = doc_result.scalar() or ""
-
                 # Save sources
                 sources_json = json.dumps(dr.get("sources", []))
 
@@ -256,25 +280,32 @@ async def get_comparison(
         doc_names = {row[0]: row[1] for row in doc_result.fetchall()}
 
     # Build response
-    results = []
+    results: list[ComparisonResultResponse] = []
     for cr in comp_results:
-        sources = []
+        raw_sources: list[dict[str, Any]] = []
         try:
             if cr.sources:
-                sources = json.loads(cr.sources)
+                loaded = json.loads(cr.sources)
+                if isinstance(loaded, list):
+                    raw_sources = [s for s in loaded if isinstance(s, dict)]
         except (json.JSONDecodeError, TypeError):
-            sources = []
+            raw_sources = []
 
-        results.append({
-            "id": cr.id,
-            "document_id": cr.document_id,
-            "document_name": doc_names.get(cr.document_id, ""),
-            "answer_text": cr.answer_text,
-            "sources": sources,
-            "trust_score": cr.trust_score,
-            "stance": cr.stance,
-            "created_at": cr.created_at,
-        })
+        doc_name = doc_names.get(cr.document_id, "")
+        sources = [_to_comparison_source(s, cr.document_id, doc_name) for s in raw_sources]
+
+        results.append(
+            ComparisonResultResponse(
+                id=cr.id,
+                document_id=cr.document_id,
+                document_name=doc_name,
+                answer_text=cr.answer_text,
+                sources=sources,
+                trust_score=cr.trust_score,
+                stance=cr.stance,
+                created_at=cr.created_at,
+            )
+        )
 
     return ComparisonResponse(
         id=comparison.id,

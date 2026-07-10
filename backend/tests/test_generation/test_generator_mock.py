@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.generation.generator import GenerationInput, generate, stream, _build_context_text
+from app.generation.generator import GenerationInput, generate, stream
 
 
 class MockResponse:

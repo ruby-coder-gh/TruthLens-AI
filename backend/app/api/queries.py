@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,6 @@ from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.common import ListResponse, PaginatedResponse
 from app.schemas.query import (
     QueryDetailResponse,
-    QueryResponse,
     QuerySummary,
     SourceResponse,
 )

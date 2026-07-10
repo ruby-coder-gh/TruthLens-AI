@@ -6,15 +6,14 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, UploadFile, File
 
 from app.config import settings
-from app.core.deps import check_workspace_access, get_current_admin, get_current_user, get_db
+from app.core.deps import check_workspace_access, get_current_user, get_db
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
@@ -476,7 +475,7 @@ async def process_document_background(
             await session.commit()
 
     # Run ingestion pipeline
-    result = await run_ingestion_pipeline(
+    ingest_result = await run_ingestion_pipeline(
         document_id=document_id,
         workspace_id=workspace_id,
         file_path=file_path,
@@ -489,17 +488,17 @@ async def process_document_background(
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
         if doc:
-            if result["status"] == "success":
+            if ingest_result["status"] == "success":
                 doc.status = "ready"
-                doc.chunk_count = result["chunk_count"]
+                doc.chunk_count = ingest_result["chunk_count"]
             else:
                 doc.status = "failed"
-                doc.error_message = result.get("error", "Unknown error")
+                doc.error_message = ingest_result.get("error", "Unknown error")
             await session.commit()
 
     logger.info(
         "background_ingestion_complete",
         document_id=document_id,
-        status=result["status"],
-        chunk_count=result["chunk_count"],
+        status=ingest_result["status"],
+        chunk_count=ingest_result["chunk_count"],
     )

@@ -8,8 +8,6 @@ can be indexed and searched alongside regular document text.
 from __future__ import annotations
 
 import base64
-import io
-import time
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +140,7 @@ def _describe_with_llava(
 
     b64_image = _encode_image(image_bytes)
 
-    payload = {
+    payload: dict[str, Any] = {
         "model": model_name,
         "prompt": prompt,
         "images": [b64_image],

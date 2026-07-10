@@ -47,13 +47,18 @@ async def compute_trust(
     # 1. Retrieval quality: average of top retrieval scores
     retrieval_quality = 0.0
     if retrieval_results:
-        scores = []
+        scores: list[float] = []
         for r in retrieval_results:
             if isinstance(r, dict):
-                scores.append(r.get("final_score", r.get("score", 0)))
+                raw_score = r.get("final_score", r.get("score", 0))
             else:
-                scores.append(getattr(r, "final_score", getattr(r, "score", 0)))
-        scores = [s for s in scores if s > 0]
+                raw_score = getattr(r, "final_score", getattr(r, "score", 0))
+            try:
+                score_value = float(raw_score) if raw_score is not None else 0.0
+            except (TypeError, ValueError):
+                score_value = 0.0
+            if score_value > 0:
+                scores.append(score_value)
         if scores:
             retrieval_quality = sum(scores[:3]) / min(len(scores[:3]), 3)
 

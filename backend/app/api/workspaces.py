@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
@@ -16,7 +16,7 @@ from app.models.document import Document
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
-from app.schemas.common import ListResponse, MessageResponse
+from app.schemas.common import ListResponse
 from app.schemas.workspace import (
     ActivityEntry,
     MemberAdd,
@@ -27,7 +27,6 @@ from app.schemas.workspace import (
     WorkspaceSummary,
     WorkspaceUpdate,
 )
-from app.utils.logger import logger
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 

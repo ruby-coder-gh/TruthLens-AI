@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -116,7 +116,7 @@ async def client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 @pytest_asyncio.fixture
 async def auth_headers(client: AsyncClient, test_db: AsyncSession) -> dict[str, str]:
     """Get JWT auth headers for test user."""
-    from app.core.auth import create_access_token, create_refresh_token
+    from app.core.auth import create_access_token
 
     user = User(
         email="authtest@example.com",

@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any, Literal
+from typing import Literal
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
-from app.retrieval.hybrid_search import RetrievalResult, hybrid_search
+from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query, expand
-from app.retrieval.reranker import RerankedResult, rerank
-from app.utils.logger import logger
+from app.retrieval.reranker import rerank
 
 
 class CRAGState(TypedDict):
@@ -168,14 +167,10 @@ def _generate_primary_node(state: CRAGState) -> dict:
 
 def _generate_fallback_node(state: CRAGState) -> dict:
     """Generate answer using fallback LLM with relaxed constraints."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-
     from langchain_core.messages import HumanMessage, SystemMessage
     from app.generation.provider import get_chat_llm
 
-    contexts = state.get("contexts", [])
+    contexts = state.get("contexts") or []
     context_text = "\n".join(ctx.get("content", "") for ctx in contexts)
 
     system_prompt = (
@@ -212,8 +207,8 @@ def _guardrail_node(state: CRAGState) -> dict:
 
     loop = asyncio.get_event_loop()
 
-    answer = state.get("response_text", "")
-    contexts = state.get("contexts", [])
+    answer = state.get("response_text") or ""
+    contexts = state.get("contexts") or []
 
     guardrail_result: GuardrailResult = loop.run_until_complete(
         guardrail_check(answer, contexts)
@@ -232,7 +227,7 @@ def _guardrail_node(state: CRAGState) -> dict:
 
 def _guardrail_decision(state: CRAGState) -> Literal["trust_score", "expand_query", "fallback"]:
     """Decide next step based on guardrail result."""
-    guardrail = state.get("guardrail_result", {})
+    guardrail = state.get("guardrail_result") or {}
     passed = guardrail.get("passed", False)
     retry_count = state.get("guardrail_retry_count", 0)
     max_retries = state.get("guardrail_max_retries", settings.GUARDRAIL_MAX_RETRIES)
@@ -283,7 +278,7 @@ def _trust_score_node(state: CRAGState) -> dict:
     }
 
 
-def build_crag_graph() -> StateGraph:
+def build_crag_graph() -> CompiledStateGraph:
     """Build the CRAG self-correction graph.
 
     Flow: rewrite → retrieve → relevance_check

@@ -163,4 +163,6 @@ class Settings(BaseSettings):
         return value
 
 
-settings = Settings()
+# pydantic-settings populates required fields (e.g. APP_SECRET_KEY) from the
+# environment / .env at runtime; BaseSettings' __init__ stub can't model that.
+settings = Settings()  # type: ignore[call-arg]
