@@ -6,7 +6,7 @@ import time
 from typing import Any, AsyncIterator
 
 from app.config import settings
-from app.generation.citer import cite
+from app.generation.citer import CitedSpan, cite
 from app.generation.provider import get_chat_llm
 from app.utils.logger import logger
 
@@ -27,16 +27,6 @@ class GenerationInput:
         self.contexts = contexts or []
         self.conversation_history = conversation_history or []
         self.system_prompt = system_prompt
-
-
-class CitedSpan:
-    """A span of text with its source chunk."""
-
-    def __init__(self, text: str, chunk_id: str, start_index: int, end_index: int) -> None:
-        self.text = text
-        self.chunk_id = chunk_id
-        self.start_index = start_index
-        self.end_index = end_index
 
 
 class GenerationResult:

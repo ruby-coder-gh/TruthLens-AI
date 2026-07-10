@@ -173,6 +173,7 @@ def _try_parse_json(text: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
+    logger.debug("json_object_parse_failed", text_preview=text[:200])
     return None
 
 

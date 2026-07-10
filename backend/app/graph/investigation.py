@@ -175,6 +175,7 @@ def _try_parse_json(text: str) -> list[dict[str, str]] | None:
         except json.JSONDecodeError:
             pass
 
+    logger.debug("json_array_parse_failed", text_preview=text[:200])
     return None
 
 

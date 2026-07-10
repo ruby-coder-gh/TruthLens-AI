@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from pathlib import Path
 from typing import Any
 
 import numpy as np
-from rank_bm25 import BM25Okapi
 
 from app.chroma_client import get_workspace_collection
 from app.config import settings
 from app.ingestion.embedder import _load_model  # Reuse embedder model
+from app.retrieval.bm25_utils import _bm25_tokenizer, _get_bm25_path, _load_bm25_index
 from app.utils.logger import logger
 
 
@@ -38,30 +36,6 @@ class RetrievalResult:
         self.vector_score = vector_score
         self.bm25_score = bm25_score
         self.metadata = metadata or {}
-
-
-def _bm25_tokenizer(text: str) -> list[str]:
-    return text.lower().split()
-
-
-def _get_bm25_path(workspace_id: str) -> Path:
-    return settings.bm25_path / workspace_id / "index.json"
-
-
-def _load_bm25_index(workspace_id: str) -> tuple[BM25Okapi | None, list[str], list[dict[str, Any]]]:
-    index_path = _get_bm25_path(workspace_id)
-    if index_path.exists():
-        try:
-            with open(index_path, "r") as f:
-                data = json.load(f)
-            corpus = data.get("corpus", [])
-            metadatas = data.get("metadatas", [])
-            if corpus:
-                index = BM25Okapi([_bm25_tokenizer(doc) for doc in corpus])
-                return index, corpus, metadatas
-        except Exception as e:
-            logger.warning("bm25_load_failed", error=str(e), path=str(index_path))
-    return None, [], []
 
 
 def _reciprocal_rank_fusion(

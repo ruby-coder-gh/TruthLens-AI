@@ -50,8 +50,7 @@ def _extract_claims(answer: str) -> list[str]:
         claims = re.split(r"(?<=[.!?]) ", text)
     if len(claims) <= 1:
         # Fallback to splitting on all sentence-ending punctuation
-        import re as _re
-        claims = _re.split(r"[.!?]+", text)
+        claims = re.split(r"[.!?]+", text)
         claims = [c.strip() + "." for c in claims if c.strip()]
     # Filter out very short fragments and source markers
     filtered = []

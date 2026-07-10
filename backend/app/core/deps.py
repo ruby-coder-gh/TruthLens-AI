@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import AsyncGenerator
-
 from uuid import UUID
 
 from fastapi import Cookie, Depends, Header, HTTPException, WebSocket
@@ -13,9 +11,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.auth import decode_token
 from app.core.exceptions import ForbiddenException, NotFoundException, UnauthorizedException
-from app.database import async_session_factory
+from app.database import get_db
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
+
+__all__ = [
+    "get_db",
+    "get_current_user",
+    "get_current_user_ws",
+    "get_current_admin",
+    "check_workspace_access",
+    "check_workspace_owner",
+]
 
 
 def _validate_uuid(uuid_str: str) -> None:
@@ -24,19 +31,6 @@ def _validate_uuid(uuid_str: str) -> None:
         UUID(uuid_str)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Invalid UUID format: {uuid_str}")
-
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Yield DB session with commit/rollback handling."""
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
 
 
 async def get_current_user(

@@ -8,6 +8,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from app.config import settings
+from app.utils.logger import logger
 
 
 @lru_cache(maxsize=1)
@@ -38,8 +39,8 @@ def delete_workspace_collection(workspace_id: str) -> None:
     collection_name = f"{settings.CHROMA_COLLECTION_PREFIX}{workspace_id}_chunks"
     try:
         client.delete_collection(collection_name)
-    except ValueError:
-        pass
+    except ValueError as e:
+        logger.debug("chroma_collection_delete_noop", collection=collection_name, error=str(e))
 
 
 def delete_document_from_collection(

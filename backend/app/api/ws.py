@@ -32,7 +32,8 @@ async def _resolve_ws_user_id(token: str) -> str | None:
     """Validate access token and ensure user is active."""
     try:
         payload = decode_token(token)
-    except Exception:
+    except Exception as e:
+        logger.warning("ws_token_decode_failed", error=str(e))
         return None
 
     if payload.get("type") != "access":
@@ -62,7 +63,8 @@ async def _authenticate_websocket(websocket: WebSocket) -> str | None:
     try:
         raw = await websocket.receive_text()
         auth_msg = json.loads(raw)
-    except Exception:
+    except Exception as e:
+        logger.info("ws_auth_handshake_failed", error=str(e))
         return None
 
     if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
@@ -443,13 +445,13 @@ async def websocket_query(websocket: WebSocket):
                 "type": "error",
                 "payload": {"code": "INTERNAL_ERROR", "message": str(e)},
             })
-        except Exception:
-            pass
+        except Exception as send_err:
+            logger.debug("ws_error_send_failed", error=str(send_err), user_id=user_id)
         finally:
             try:
                 await websocket.close(code=1011)
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug("ws_close_failed", error=str(close_err), user_id=user_id)
 
 
 # ─── Comparison WebSocket Handler ──────────────────────────────────────────────
@@ -792,10 +794,10 @@ async def websocket_compare(websocket: WebSocket):
                 "type": "error",
                 "payload": {"code": "INTERNAL_ERROR", "message": str(e)},
             })
-        except Exception:
-            pass
+        except Exception as send_err:
+            logger.debug("ws_compare_error_send_failed", error=str(send_err), user_id=user_id)
         finally:
             try:
                 await websocket.close(code=1011)
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug("ws_compare_close_failed", error=str(close_err), user_id=user_id)

@@ -62,8 +62,8 @@ async def upload_document(
         try:
             if int(content_length) > MAX_FILE_SIZE:
                 raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
-        except ValueError:
-            pass
+        except ValueError as e:
+            logger.debug("invalid_content_length_header", content_length=content_length, error=str(e))
 
     file_size_hint = getattr(file, "size", None)
     if file_size_hint is not None and file_size_hint > MAX_FILE_SIZE:
