@@ -47,7 +47,12 @@ class DocumentDetailResponse(BaseModel):
     page_count: int | None = None
     chunk_count: int
     status: str
+    created_at: datetime
+    updated_at: datetime
     chunks: list[ChunkInfo] = []
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
 
 
 class DocumentStatusResponse(BaseModel):

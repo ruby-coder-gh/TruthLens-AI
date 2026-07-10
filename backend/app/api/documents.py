@@ -251,6 +251,8 @@ async def get_document(
         page_count=doc.page_count,
         chunk_count=doc.chunk_count,
         status=doc.status,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
         chunks=[
             ChunkInfo(
                 id=c.id,
