@@ -50,7 +50,20 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str) -> dict:
-    """Decode and validate JWT token. Returns payload dict."""
+    """Decode and validate a JWT (signature, exp, issuer). Returns the payload.
+
+    Session model — STATELESS by design: no server-side token store, denylist,
+    jti, or token_version. A token is valid until its ``exp`` (access =
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES, refresh = JWT_REFRESH_TOKEN_EXPIRE_DAYS).
+    Accepted trade-off (kept simple given the short 30-min access TTL):
+      - Logout clears the HttpOnly cookies client-side but does NOT revoke an
+        already-issued token — a captured token stays valid until it expires.
+      - Password reset/change does not invalidate live sessions.
+      - Account deactivation IS enforced on the next request (get_current_user
+        re-checks User.is_active against the DB).
+    For true revocation, embed a ``token_version`` in the payload and compare it
+    to a ``User.token_version`` column, bumping it on logout/password-change.
+    """
     try:
         payload = jwt.decode(
             token,

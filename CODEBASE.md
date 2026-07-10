@@ -381,6 +381,8 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | POST | `/api/auth/change-password` | `change_password` | Change password (authenticated) |
 | POST | `/api/auth/logout` | `logout` | Logout with audit log |
 
+**Session model — stateless JWT (accepted trade-off).** Access/refresh tokens are signed JWTs with no server-side store, denylist, or `token_version`; validity ends only at `exp` (30 min access / 7 day refresh). Logout and password reset clear the HttpOnly cookies but do **not** revoke a token that was already captured — it stays valid until expiry. Account deactivation *is* enforced immediately (per-request `is_active` DB check). Cookie flags are hardened: `HttpOnly`, `SameSite=Lax`, `Secure` in production, matched `delete_cookie` on logout, CORS allow-list + credentials, HSTS. To add true revocation ("logout everywhere" / "reset kills sessions"), embed a `User.token_version` in the JWT and bump it on logout/password-change.
+
 ### Workspaces — `api/workspaces.py`
 
 | Method | Route | Handler | Description |
