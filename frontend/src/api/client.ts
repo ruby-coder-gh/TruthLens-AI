@@ -143,6 +143,19 @@ async function attemptTokenRefresh(): Promise<boolean> {
   return refreshPromise;
 }
 
+// Public/unauthenticated auth endpoints — these never carry a session to
+// refresh, so a 401 from any of them is always the backend's real, specific
+// error (invalid credentials, invalid/expired reset token, etc.), not an
+// expired session. Attempting a refresh + generic "Session expired" message
+// here would mask that real error (e.g. reset-password showing "Session
+// expired. Please log in again." instead of "Invalid or expired reset token").
+const PUBLIC_AUTH_PATHS = new Set([
+  '/auth/login',
+  '/auth/register',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+]);
+
 // ─── Core request function (JSON) ───────────────────────────────────────────
 async function request<T>(
   path: string,
@@ -157,8 +170,8 @@ async function request<T>(
   });
 
   // Auto-refresh on 401 for authenticated flows only.
-  // Keep backend 401 message for explicit login failures.
-  if (res.status === 401 && path !== '/auth/login') {
+  // Keep the backend's real 401 message for public/unauthenticated auth endpoints.
+  if (res.status === 401 && !PUBLIC_AUTH_PATHS.has(path)) {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
       res = await fetch(`${API_BASE}${path}`, {

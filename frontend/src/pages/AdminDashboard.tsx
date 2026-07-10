@@ -70,15 +70,30 @@ interface TrustScoreBucket {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Backend audit-log actions are exact-match dotted strings like `user.login`,
+// `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
+// anything the API records, so every filter previously returned 0 rows.
 const ACTION_FILTERS: ActionFilterOption[] = [
   { value: '', label: 'All actions' },
-  { value: 'create', label: 'Create' },
-  { value: 'read', label: 'Read' },
-  { value: 'update', label: 'Update' },
-  { value: 'delete', label: 'Delete' },
-  { value: 'login', label: 'Login' },
-  { value: 'logout', label: 'Logout' },
-  { value: 'export', label: 'Export' },
+  { value: 'user.login', label: 'User login' },
+  { value: 'user.logout', label: 'User logout' },
+  { value: 'user.register', label: 'User register' },
+  { value: 'user.invite', label: 'User invite' },
+  { value: 'user.role_update', label: 'User role update' },
+  { value: 'user.status_update', label: 'User status update' },
+  { value: 'user.deactivate', label: 'User deactivate' },
+  { value: 'user.delete', label: 'User delete' },
+  { value: 'user.password_change', label: 'Password change' },
+  { value: 'user.password_reset', label: 'Password reset' },
+  { value: 'workspace.create', label: 'Workspace create' },
+  { value: 'workspace.delete', label: 'Workspace delete' },
+  { value: 'workspace.add_member', label: 'Workspace add member' },
+  { value: 'workspace.remove_member', label: 'Workspace remove member' },
+  { value: 'document.upload', label: 'Document upload' },
+  { value: 'document.delete', label: 'Document delete' },
+  { value: 'document.reindex', label: 'Document reindex' },
+  { value: 'collection.create', label: 'Collection create' },
+  { value: 'collection.delete', label: 'Collection delete' },
 ];
 
 function formatTimestamp(iso: string): string {
@@ -93,10 +108,58 @@ function formatTimestamp(iso: string): string {
   });
 }
 
+// ─── Chart data normalization ───────────────────────────────────────────────
+// The API returns `{ date, query_count, user_count }` for queries-over-time,
+// not the chart's internal `{ month, queries }` shape — normalize defensively
+// (same pattern as AdminAnalyticsPage) so the chart renders regardless of
+// which field names the backend actually sends.
+
+function extractRows(resp: unknown): Record<string, unknown>[] {
+  if (Array.isArray(resp)) return resp as Record<string, unknown>[];
+  if (resp && typeof resp === 'object' && 'data' in resp) {
+    return ((resp as { data?: unknown }).data as Record<string, unknown>[]) || [];
+  }
+  return [];
+}
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function formatDayLabel(value: unknown, index: number): string {
+  if (value === null || value === undefined) return `#${index + 1}`;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function normalizeQueriesOverTime(resp: unknown): QueriesOverTimePoint[] {
+  return extractRows(resp).map((item, idx) => ({
+    month: formatDayLabel(item.month ?? item.date ?? item.label, idx),
+    queries: Math.max(0, toFiniteNumber(item.queries ?? item.query_count, 0)),
+  }));
+}
+
+function normalizeTrustDistribution(resp: unknown): TrustScoreBucket[] {
+  return extractRows(resp).map((item, idx) => ({
+    range: String(item.range ?? item.bucket ?? `Bucket ${idx + 1}`),
+    count: Math.max(0, toFiniteNumber(item.count, 0)),
+  }));
+}
+
 function evalScoreColor(value: number): string {
   if (value >= 0.8) return 'var(--color-green)';
   if (value >= 0.6) return 'var(--color-orange)';
   return 'var(--color-red)';
+}
+
+function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
+  if (action.endsWith('.delete') || action.endsWith('.deactivate')) return 'red';
+  if (action.endsWith('.create') || action.endsWith('.upload') || action.endsWith('.register') || action.endsWith('.invite')) return 'green';
+  if (action.endsWith('.update') || action.endsWith('.reindex') || action.endsWith('.add_member') || action.endsWith('.remove_member')) return 'orange';
+  if (action.endsWith('.login') || action.endsWith('.logout')) return 'blue';
+  return 'gray';
 }
 
 function useCountUp(end: number, duration = 1200): number {
@@ -599,17 +662,7 @@ function AuditLogsTab({
                       : entry.user_id}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge
-                      color={
-                        entry.action === 'delete'
-                          ? 'red'
-                          : entry.action === 'create'
-                            ? 'green'
-                            : entry.action === 'update'
-                              ? 'orange'
-                              : 'blue'
-                      }
-                    >
+                    <Badge color={actionBadgeColor(entry.action)}>
                       {entry.action}
                     </Badge>
                   </td>
@@ -977,8 +1030,11 @@ export default function AdminDashboard() {
   const totalLogs = logsData?.meta?.total ?? 0;
   const totalLogPages = Math.max(1, Math.ceil(totalLogs / PAGE_SIZE));
 
-  const queriesData = queriesOverTimeQuery.data as QueriesOverTimePoint[] | undefined;
-  const trustData = trustDistributionQuery.data as TrustScoreBucket[] | undefined;
+  // Normalize defensively — the API returns `{ date, query_count, user_count }`,
+  // not the chart's `{ month, queries }` shape, so map field names before handing
+  // data to Recharts (otherwise `dataKey="month"`/`dataKey="queries"` find nothing).
+  const queriesData = normalizeQueriesOverTime(queriesOverTimeQuery.data);
+  const trustData = normalizeTrustDistribution(trustDistributionQuery.data);
 
   return (
     <>

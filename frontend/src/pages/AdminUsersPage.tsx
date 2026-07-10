@@ -11,11 +11,16 @@ import { adminApi } from '../api/client';
 import type { User as AdminUserType } from '../api/types';
 
 interface AdminUser extends AdminUserType {
-  last_login: string;
+  last_login_at: string | null;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
+// Handles null (never logged in) and invalid/unparseable values gracefully —
+// never renders the native "Invalid Date" string.
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return 'Never';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Never';
+  return d.toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -194,7 +199,7 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-text-dim text-xs whitespace-nowrap">
                     <span className="flex items-center gap-1">
                       <Clock size={11} />
-                      {formatDate(user.last_login)}
+                      {formatDate(user.last_login_at)}
                     </span>
                   </td>
                   <td className="px-4 py-3">

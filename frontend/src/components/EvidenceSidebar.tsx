@@ -54,6 +54,8 @@ interface EvidenceSidebarProps {
   trustComponents: Record<string, number>;
   isLoading: boolean;
   isStreaming?: boolean;
+  /** The message this evidence belongs to failed — render an error state, never "verified". */
+  hasError?: boolean;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   pipelinePhase?: string | null;
@@ -142,7 +144,8 @@ function fileTypeIcon(mime?: string) {
 }
 
 /** Overall status badge at top */
-function StatusBadge({ trustScore, isLoading }: { trustScore: number | null; isLoading: boolean }) {
+function StatusBadge({ trustScore, isLoading, hasError }: { trustScore: number | null; isLoading: boolean; hasError?: boolean }) {
+  if (hasError) return <Badge color="red"><XCircle size={10} className="mr-1" /> GENERATION FAILED</Badge>;
   if (isLoading) return <Badge color="gray"><Loader2 size={10} className="animate-spin mr-1" /> ANALYZING</Badge>;
   if (trustScore === null) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
 
@@ -472,6 +475,7 @@ function AIReasoningTab({
   isLoading,
   isStreaming,
   pipelinePhase,
+  hasError,
 }: {
   guardrail: GuardrailResult | null;
   trustScore: number | null;
@@ -479,6 +483,7 @@ function AIReasoningTab({
   isLoading: boolean;
   isStreaming?: boolean;
   pipelinePhase: string | null;
+  hasError?: boolean;
 }) {
   // Pipeline done once we hit guardrail phase (last phase)
   // Doesn't wait for stream complete — guardrail phase fires before final tokens
@@ -507,6 +512,24 @@ function AIReasoningTab({
             </div>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  // The generation errored — there is no real verification/trust data to show.
+  // Never fall through to the success pipeline (green checks, "Passed", trust
+  // breakdown) for a failed answer, even if partial guardrail/trust data was
+  // captured before the failure.
+  if (hasError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red/10 border border-red/20">
+          <XCircle size={26} className="text-red" />
+        </div>
+        <h3 className="text-sm font-semibold text-text mb-1">Verification unavailable</h3>
+        <p className="text-xs text-text-dim max-w-xs">
+          This answer failed to generate, so no claims were verified and no trust score was computed.
+        </p>
       </div>
     );
   }
@@ -789,6 +812,7 @@ export default function EvidenceSidebar({
   trustComponents,
   isLoading,
   isStreaming,
+  hasError,
   sidebarOpen,
   onToggleSidebar,
   pipelinePhase,
@@ -842,7 +866,7 @@ export default function EvidenceSidebar({
                   <h3 className="text-xs font-semibold text-text">
                     Evidence
                   </h3>
-                  <StatusBadge trustScore={effectiveTrust} isLoading={isLoading} />
+                  <StatusBadge trustScore={effectiveTrust} isLoading={isLoading} hasError={hasError} />
                 </div>
                 <motion.button
                   type="button"
@@ -915,6 +939,7 @@ export default function EvidenceSidebar({
                   isLoading={isLoading && !pipelinePhase}
                   isStreaming={isStreaming ?? isLoading}
                   pipelinePhase={pipelinePhase ?? null}
+                  hasError={hasError}
                 />
               )}
             </div>

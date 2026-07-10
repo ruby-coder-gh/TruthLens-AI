@@ -33,10 +33,12 @@ export default function LoginPage() {
   }, [isAuthenticated, navigate]);
 
   function validate(): boolean {
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
     const next: { email?: string; password?: string } = {};
-    if (!email) next.email = 'Email is required';
-    else if (!EMAIL_RE.test(email)) next.email = 'Invalid email format';
-    if (!password) next.password = 'Password is required';
+    if (!trimmedEmail) next.email = 'Email is required';
+    else if (!EMAIL_RE.test(trimmedEmail)) next.email = 'Invalid email format';
+    if (!trimmedPassword) next.password = 'Password is required';
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -47,7 +49,7 @@ export default function LoginPage() {
     if (!validate()) return;
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password.trim());
       navigate('/workspaces', { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed. Please try again.';

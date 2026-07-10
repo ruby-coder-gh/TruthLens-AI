@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, File, FileSpreadsheet, FileImage, Search, Clock, Upload } from 'lucide-react';
+import { FileText, File, FileSpreadsheet, FileImage, Search, Clock, Upload, Loader2 } from 'lucide-react';
 import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, Input } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
-import { documentApi } from '../api/client';
+import { useToast } from '../components/toast-context';
+import { documentApi, workspaceApi } from '../api/client';
 import type { Document } from '../api/types';
 
 const DOCUMENT_TYPE_FILTERS = ['All', 'PDF', 'DOCX', 'TXT'] as const;
@@ -46,11 +48,19 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
 // ─── Component ─────────────────────────────────────────────────────────────────
 
 export default function DocumentsBrowsePage() {
+  const navigate = useNavigate();
+  const { addToast } = useToast();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('All');
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  // Uploads are workspace-scoped (`documentApi.upload(workspaceId, file)`), and
+  // this page has no workspace context of its own (it lists documents across
+  // every workspace) — so "Select File" resolves the caller's real workspace(s)
+  // and hands off to the workspace's own Documents tab, which already has a
+  // working upload flow, instead of guessing/hardcoding a workspace id.
+  const [resolvingWorkspace, setResolvingWorkspace] = useState(false);
 
   useEffect(() => {
     documentApi.listAll()
@@ -63,6 +73,27 @@ export default function DocumentsBrowsePage() {
         setLoading(false);
       });
   }, []);
+
+  async function handleSelectFile() {
+    setResolvingWorkspace(true);
+    try {
+      const result = await workspaceApi.list();
+      const workspaces = result.data || [];
+      if (workspaces.length === 1) {
+        // Only one workspace — skip the picker and go straight to its Documents
+        // tab (the tab this page's upload flow is mirrored from).
+        navigate(`/workspaces/${workspaces[0].id}`);
+      } else {
+        // Zero or multiple workspaces — let the user pick (or create one).
+        navigate('/workspaces');
+      }
+      setUploadModalOpen(false);
+    } catch {
+      addToast('Failed to load your workspaces. Please try again.', 'error');
+    } finally {
+      setResolvingWorkspace(false);
+    }
+  }
 
   const filtered = documents.filter((doc) => {
     const matchesSearch = doc.original_filename.toLowerCase().includes(search.toLowerCase());
@@ -209,15 +240,21 @@ export default function DocumentsBrowsePage() {
       >
         <div className="space-y-4 text-center">
           <div className="rounded-2xl border-2 border-dashed border-white/10 p-8 hover:border-primary/30 transition-colors">
-            <Upload size={32} className="mx-auto text-text-dim mb-3" />
-            <p className="text-sm text-text-muted">Drag & drop or click to browse</p>
+            {resolvingWorkspace ? (
+              <Loader2 size={32} className="mx-auto text-primary-soft mb-3 animate-spin" />
+            ) : (
+              <Upload size={32} className="mx-auto text-text-dim mb-3" />
+            )}
+            <p className="text-sm text-text-muted">
+              {resolvingWorkspace ? 'Finding your workspace…' : 'Documents are uploaded into a workspace.'}
+            </p>
             <p className="text-xs text-text-dim mt-1">PDF, DOCX, TXT up to 50MB</p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setUploadModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setUploadModalOpen(false)} disabled={resolvingWorkspace}>
               Cancel
             </Button>
-            <Button>
+            <Button onClick={handleSelectFile} loading={resolvingWorkspace}>
               <Upload size={14} />
               Select File
             </Button>

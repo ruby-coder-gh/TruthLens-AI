@@ -460,10 +460,15 @@ export default function ChatPage() {
         (m.status === 'complete' || m.status === 'error' || m.status === 'cancelled'),
     );
 
+  const lastAssistantHasError = lastAssistantMessage?.status === 'error';
+
   const latestSources = lastAssistantMessage?.sources ?? [];
-  const latestGuardrail = lastAssistantMessage?.guardrail ?? null;
-  const latestTrustScore = lastAssistantMessage?.trustScore ?? null;
-  const latestTrustComponents = lastAssistantMessage?.trustComponents ?? {};
+  // An errored generation never has real verification/trust data — even if a
+  // guardrail or trust-score frame happened to land before the failure, it
+  // must not be presented as a "Verified" / passed result.
+  const latestGuardrail = lastAssistantHasError ? null : lastAssistantMessage?.guardrail ?? null;
+  const latestTrustScore = lastAssistantHasError ? null : lastAssistantMessage?.trustScore ?? null;
+  const latestTrustComponents = lastAssistantHasError ? {} : lastAssistantMessage?.trustComponents ?? {};
 
   // ─── Responsive sidebar toggle ────────────────────────────────────────────
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
@@ -488,7 +493,19 @@ export default function ChatPage() {
         {/* ─── Chat Panel ─────────────────────────────────────────────────── */}
         <motion.div
           layout
-          className="flex flex-col flex-1"
+          className={clsx(
+            'flex flex-col flex-1 min-w-0',
+            // The Evidence sidebar renders `position: fixed` (right: 16px, w-72 = 18rem)
+            // so it never participates in this flex layout — at lg+ it visually floats
+            // over whatever sits at that screen position. Without reserving matching
+            // space here, the sidebar's higher z-index (30 vs this panel's 10)
+            // intercepts real clicks on the Send/Stop button underneath it
+            // (~1024–1440px). Reserve the sidebar's full footprint (18rem width + 1rem
+            // right offset) plus a small extra buffer on the content column whenever
+            // the sidebar is open at lg+, so its floating card always sits beside the
+            // input with room to spare, never on top of it.
+            !isMobile && effectiveSidebarOpen && 'lg:mr-[20rem]',
+          )}
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border/60 glass px-4 py-3 lg:px-6 rounded-tl-2xl">
@@ -701,6 +718,7 @@ export default function ChatPage() {
           trustComponents={latestTrustComponents}
           isLoading={isStreaming && !pipelinePhase}
           isStreaming={isStreaming}
+          hasError={lastAssistantHasError}
           sidebarOpen={effectiveSidebarOpen}
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           pipelinePhase={pipelinePhase}
@@ -1108,7 +1126,7 @@ function ChatMessageBubble({
                       <>
                         <motion.button
                           type="button"
-                          onClick={() => onFeedback(1)}
+                          onClick={() => onFeedback(5)}
                           className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-green"
                           aria-label="Thumbs up"
                           title="Helpful"
@@ -1119,7 +1137,7 @@ function ChatMessageBubble({
                         </motion.button>
                         <motion.button
                           type="button"
-                          onClick={() => onFeedback(-1)}
+                          onClick={() => onFeedback(1)}
                           className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-red"
                           aria-label="Thumbs down"
                           title="Not helpful"

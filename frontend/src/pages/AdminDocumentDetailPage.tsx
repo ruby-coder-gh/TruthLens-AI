@@ -55,16 +55,31 @@ export default function AdminDocumentDetailPage() {
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-  const { data: doc, isLoading, isError, error, refetch } = useQuery({
+  // The route only gives us the document id, not its workspace id — and the
+  // detail/delete/reindex endpoints are workspace-scoped. Resolve the real
+  // workspace id via the workspace-agnostic `listAll` lookup first, then use
+  // it for the actual document fetch (previously this hardcoded a literal
+  // 'default' workspace id, which the backend rejected as an invalid UUID).
+  const {
+    data: doc,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['document', docId],
-    queryFn: () => documentApi.get('default', docId!),
+    queryFn: async () => {
+      const found = await documentApi.listAll({ page_size: 100 }).then(
+        (res) => res.data.find((d) => d.id === docId),
+      );
+      if (!found) throw new Error('Document not found.');
+      return documentApi.get(found.workspace_id, docId!);
+    },
     enabled: !!docId,
   });
 
-  const workspaceId = doc?.workspace_id || 'default';
-
   const deleteMutation = useMutation({
-    mutationFn: () => documentApi.delete(workspaceId, docId!),
+    mutationFn: () => documentApi.delete(doc!.workspace_id, docId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
       setDeleteModalOpen(false);
@@ -77,7 +92,7 @@ export default function AdminDocumentDetailPage() {
   });
 
   const reindexMutation = useMutation({
-    mutationFn: () => documentApi.reindex(workspaceId, docId!),
+    mutationFn: () => documentApi.reindex(doc!.workspace_id, docId!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['document', docId] });
       addToast('Document re-indexing started', 'success');

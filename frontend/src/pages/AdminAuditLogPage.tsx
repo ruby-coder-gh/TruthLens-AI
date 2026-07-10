@@ -9,15 +9,30 @@ import { pageTransition, staggerContainer, staggerItem } from '../components/mot
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 
+// Backend audit-log actions are exact-match dotted strings like `user.login`,
+// `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
+// anything the API records, so every filter previously returned 0 rows.
 const ACTION_FILTERS = [
   { value: '', label: 'All actions' },
-  { value: 'create', label: 'Create' },
-  { value: 'read', label: 'Read' },
-  { value: 'update', label: 'Update' },
-  { value: 'delete', label: 'Delete' },
-  { value: 'login', label: 'Login' },
-  { value: 'logout', label: 'Logout' },
-  { value: 'export', label: 'Export' },
+  { value: 'user.login', label: 'User login' },
+  { value: 'user.logout', label: 'User logout' },
+  { value: 'user.register', label: 'User register' },
+  { value: 'user.invite', label: 'User invite' },
+  { value: 'user.role_update', label: 'User role update' },
+  { value: 'user.status_update', label: 'User status update' },
+  { value: 'user.deactivate', label: 'User deactivate' },
+  { value: 'user.delete', label: 'User delete' },
+  { value: 'user.password_change', label: 'Password change' },
+  { value: 'user.password_reset', label: 'Password reset' },
+  { value: 'workspace.create', label: 'Workspace create' },
+  { value: 'workspace.delete', label: 'Workspace delete' },
+  { value: 'workspace.add_member', label: 'Workspace add member' },
+  { value: 'workspace.remove_member', label: 'Workspace remove member' },
+  { value: 'document.upload', label: 'Document upload' },
+  { value: 'document.delete', label: 'Document delete' },
+  { value: 'document.reindex', label: 'Document reindex' },
+  { value: 'collection.create', label: 'Collection create' },
+  { value: 'collection.delete', label: 'Collection delete' },
 ];
 
 const PAGE_SIZE = 10;
@@ -30,13 +45,11 @@ function formatTimestamp(iso: string): string {
 }
 
 function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
-  switch (action) {
-    case 'delete': return 'red';
-    case 'create': return 'green';
-    case 'update': return 'orange';
-    case 'login': case 'logout': return 'blue';
-    default: return 'gray';
-  }
+  if (action.endsWith('.delete') || action.endsWith('.deactivate')) return 'red';
+  if (action.endsWith('.create') || action.endsWith('.upload') || action.endsWith('.register') || action.endsWith('.invite')) return 'green';
+  if (action.endsWith('.update') || action.endsWith('.reindex') || action.endsWith('.add_member') || action.endsWith('.remove_member')) return 'orange';
+  if (action.endsWith('.login') || action.endsWith('.logout')) return 'blue';
+  return 'gray';
 }
 
 export default function AdminAuditLogPage() {

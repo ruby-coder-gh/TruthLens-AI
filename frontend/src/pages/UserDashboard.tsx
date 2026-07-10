@@ -1,25 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Clock, FileText, MessageSquare, Plus, Settings, Shield } from 'lucide-react';
+import { Clock, FileText, MessageSquare, Plus, Settings } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, LoadingSpinner } from '../components/ui';
 import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { useAuth } from '../context/auth-context';
+import { documentApi, queryApi } from '../api/client';
 import type { QuerySummary } from '../api/types';
 import { getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
 
-const MOCK_STATS = {
-  totalDocs: 24,
-  recentQueries: 18,
-  avgTrustScore: 0.87,
-};
-
-const MOCK_RECENT_CHATS: QuerySummary[] = [
-  { id: '1', workspace_id: 'w1', query_text: 'What are the key findings in the Q3 report?', trust_score: 0.92, model_used: 'gpt-4', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: '2', workspace_id: 'w1', query_text: 'Summarize the contractual obligations in section 4.2', trust_score: 0.88, model_used: 'claude-3', created_at: new Date(Date.now() - 7200000).toISOString() },
-  { id: '3', workspace_id: 'w1', query_text: 'Compare revenue projections between 2024 and 2025', trust_score: 0.76, model_used: 'gpt-4', created_at: new Date(Date.now() - 86400000).toISOString() },
-];
+const RECENT_CHATS_LIMIT = 5;
 
 const QUICK_ACTIONS = [
   { label: 'New Chat', path: '/workspaces', icon: MessageSquare },
@@ -50,13 +41,47 @@ export default function UserDashboard() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [chats, setChats] = useState<QuerySummary[]>([]);
+  const [totalQueries, setTotalQueries] = useState(0);
+  const [totalDocs, setTotalDocs] = useState<number | null>(null);
+  const [avgTrustScore, setAvgTrustScore] = useState<number | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setChats(MOCK_RECENT_CHATS);
+    let cancelled = false;
+
+    async function load() {
+      const [queriesResult, documentsResult] = await Promise.allSettled([
+        queryApi.listAll({ page: 1, page_size: RECENT_CHATS_LIMIT }),
+        documentApi.listAll({ page: 1, page_size: 1 }),
+      ]);
+      if (cancelled) return;
+
+      if (queriesResult.status === 'fulfilled') {
+        const recent = queriesResult.value.data || [];
+        setChats(recent);
+        setTotalQueries(queriesResult.value.meta?.total ?? recent.length);
+        const scored = recent.filter((q): q is QuerySummary & { trust_score: number } => q.trust_score !== undefined);
+        setAvgTrustScore(
+          scored.length > 0
+            ? scored.reduce((sum, q) => sum + q.trust_score, 0) / scored.length
+            : null,
+        );
+      } else {
+        setChats([]);
+        setTotalQueries(0);
+        setAvgTrustScore(null);
+      }
+
+      // Documents Available has no dedicated stats endpoint for regular users —
+      // derive it from the real paginated total rather than faking a number.
+      setTotalDocs(documentsResult.status === 'fulfilled' ? (documentsResult.value.meta?.total ?? 0) : null);
+
       setLoading(false);
-    }, 600);
-    return () => clearTimeout(timer);
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -77,31 +102,39 @@ export default function UserDashboard() {
           />
 
           <motion.div className="grid gap-4 sm:grid-cols-3" variants={staggerContainer} initial="initial" animate="animate">
-            <motion.div variants={staggerItem}>
-              <Card>
-                <p className="text-sm text-text-muted">Documents Available</p>
-                <p className="mt-1 text-2xl font-bold text-text">{MOCK_STATS.totalDocs}</p>
-              </Card>
-            </motion.div>
+            {/* No per-user document-count endpoint exists — only render this card
+                once the real paginated total has loaded successfully. */}
+            {totalDocs !== null && (
+              <motion.div variants={staggerItem}>
+                <Card>
+                  <p className="text-sm text-text-muted">Documents Available</p>
+                  <p className="mt-1 text-2xl font-bold text-text">{loading ? '—' : totalDocs}</p>
+                </Card>
+              </motion.div>
+            )}
             <motion.div variants={staggerItem}>
               <Card>
                 <p className="text-sm text-text-muted">Recent Queries</p>
-                <p className="mt-1 text-2xl font-bold text-text">{MOCK_STATS.recentQueries}</p>
+                <p className="mt-1 text-2xl font-bold text-text">{loading ? '—' : totalQueries}</p>
               </Card>
             </motion.div>
-            <motion.div variants={staggerItem}>
-              <Card>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-text-muted">Avg Trust Score</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: getTrustColorVar(MOCK_STATS.avgTrustScore) }}>
-                      {MOCK_STATS.avgTrustScore.toFixed(2)}
-                    </p>
+            {/* Avg Trust Score is derived from real recent-query data — hide it
+                rather than show a fabricated number when nothing has been scored yet. */}
+            {!loading && avgTrustScore !== null && (
+              <motion.div variants={staggerItem}>
+                <Card>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-text-muted">Avg Trust Score</p>
+                      <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: getTrustColorVar(avgTrustScore) }}>
+                        {avgTrustScore.toFixed(2)}
+                      </p>
+                    </div>
+                    <Badge color={getTrustBadgeColor(avgTrustScore)}>{getTrustStatusLabel(avgTrustScore)}</Badge>
                   </div>
-                  <Badge color={getTrustBadgeColor(MOCK_STATS.avgTrustScore)}>{getTrustStatusLabel(MOCK_STATS.avgTrustScore)}</Badge>
-                </div>
-              </Card>
-            </motion.div>
+                </Card>
+              </motion.div>
+            )}
           </motion.div>
 
           <motion.div variants={staggerItem}>
@@ -172,15 +205,6 @@ export default function UserDashboard() {
                 ))}
               </div>
             )}
-          </motion.div>
-
-          <motion.div variants={staggerItem}>
-            <Card className="border-border/50 bg-white/[0.02] p-4">
-              <div className="flex items-center gap-2 text-xs text-text-muted">
-                <Shield size={14} className="text-primary-soft" />
-                Behavior unchanged. UI now aligned with shared page wrappers.
-              </div>
-            </Card>
           </motion.div>
         </PageShell>
       </motion.div>

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import { FolderOpen, Plus, FileText, Clock } from 'lucide-react';
-import { Button, Card, Input, Modal } from '../components/ui';
+import { Button, Card, Input, Modal, Select } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
-import { collectionApi } from '../api/client';
+import { collectionApi, workspaceApi } from '../api/client';
+import type { Workspace } from '../api/types';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -25,6 +26,17 @@ interface CollectionItem {
 
 export default function AdminCollectionsPage() {
   const { addToast } = useToast();
+
+  // Collections are workspace-scoped, so a real workspace id is required
+  // before anything can load — previously this hardcoded the literal string
+  // 'default', which the backend rejected as an invalid UUID. Resolve the
+  // caller's real workspaces first, then let them switch between workspaces
+  // if they belong to more than one.
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(true);
+  const [workspacesError, setWorkspacesError] = useState('');
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [collections, setCollections] = useState<CollectionItem[]>([]);
@@ -33,11 +45,34 @@ export default function AdminCollectionsPage() {
   const [newDesc, setNewDesc] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
 
+  const loadWorkspaces = useCallback(async () => {
+    setWorkspacesLoading(true);
+    setWorkspacesError('');
+    try {
+      const result = await workspaceApi.list();
+      const list = result.data || [];
+      setWorkspaces(list);
+      setWorkspaceId((prev) => prev || list[0]?.id || '');
+    } catch (err) {
+      setWorkspaces([]);
+      setWorkspacesError(err instanceof Error ? err.message : 'Failed to load workspaces.');
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   const loadCollections = useCallback(async () => {
+    if (!workspaceId) return;
     setLoading(true);
     setLoadError('');
     try {
-      const result = await collectionApi.list('default');
+      const result = await collectionApi.list(workspaceId);
       setCollections((result.data || []) as CollectionItem[]);
     } catch (err) {
       setCollections([]);
@@ -45,20 +80,20 @@ export default function AdminCollectionsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspaceId]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    void loadCollections();
-  }, [loadCollections]);
+    if (workspaceId) void loadCollections();
+  }, [workspaceId, loadCollections]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!newName.trim() || !workspaceId) return;
     setCreateLoading(true);
     try {
-      const col = await collectionApi.create('default', {
+      const col = await collectionApi.create(workspaceId, {
         name: newName.trim(),
         description: newDesc.trim(),
       }) as CollectionItem;
@@ -74,6 +109,8 @@ export default function AdminCollectionsPage() {
     }
   }
 
+  const hasWorkspaces = workspaces.length > 0;
+
   return (
     <motion.div variants={pageTransition} initial="initial" animate="animate">
       <PageShell>
@@ -83,13 +120,39 @@ export default function AdminCollectionsPage() {
           title="Collections"
           description="Organize documents into collections."
           actions={(
-            <Button size="sm" onClick={() => setCreateModalOpen(true)}>
+            <Button size="sm" onClick={() => setCreateModalOpen(true)} disabled={!workspaceId}>
               <Plus size={14} />
               New Collection
             </Button>
           )}
         />
       </motion.div>
+
+      {/* Workspace picker — collections are workspace-scoped, so a real workspace
+          must be selected before anything can load or be created. */}
+      {workspacesLoading ? (
+        <StateBlock role="status">Loading workspaces…</StateBlock>
+      ) : workspacesError ? (
+        <StateBlock tone="danger" role="alert" className="space-y-3">
+          <p>{workspacesError}</p>
+          <Button variant="secondary" size="sm" onClick={() => void loadWorkspaces()}>
+            Retry
+          </Button>
+        </StateBlock>
+      ) : !hasWorkspaces ? (
+        <StateBlock role="alert">
+          You don&apos;t belong to any workspace yet. Create a workspace first to organize collections.
+        </StateBlock>
+      ) : workspaces.length > 1 ? (
+        <motion.div variants={staggerItem} className="max-w-xs">
+          <Select
+            label="Workspace"
+            value={workspaceId}
+            onChange={(e) => setWorkspaceId(e.target.value)}
+            options={workspaces.map((ws) => ({ value: ws.id, label: ws.name }))}
+          />
+        </motion.div>
+      ) : null}
 
       {loadError ? (
         <StateBlock tone="danger" role="alert" className="space-y-3">
@@ -107,7 +170,7 @@ export default function AdminCollectionsPage() {
         initial="initial"
         animate="animate"
       >
-        {loading ? (
+        {!hasWorkspaces ? null : loading ? (
           <div className="col-span-full">
             <StateBlock role="status">Loading collections…</StateBlock>
           </div>

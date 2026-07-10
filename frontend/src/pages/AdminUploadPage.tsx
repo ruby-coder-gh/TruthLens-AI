@@ -1,13 +1,14 @@
-import { useState, type DragEvent, type ChangeEvent } from 'react';
+import { useState, useEffect, useCallback, type DragEvent, type ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
-import { Button } from '../components/ui';
+import { Button, Select } from '../components/ui';
 import { pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
-import { PageHeader, PageShell } from '../components/PageWrappers';
-import { documentApi } from '../api/client';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
+import { documentApi, workspaceApi } from '../api/client';
+import type { Workspace } from '../api/types';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -126,7 +127,38 @@ export default function AdminUploadPage() {
   const { addToast } = useToast();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [workspaceId, setWorkspaceId] = useState('default');
+
+  // Uploads are workspace-scoped, so a real workspace id is required before
+  // anything can upload — previously this hardcoded the literal string
+  // 'default', which the backend rejected as an invalid UUID (same bug class
+  // as AdminCollectionsPage). Resolve the caller's real workspaces first, then
+  // let them switch between workspaces if they belong to more than one.
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(true);
+  const [workspacesError, setWorkspacesError] = useState('');
+  const [workspaceId, setWorkspaceId] = useState('');
+
+  const loadWorkspaces = useCallback(async () => {
+    setWorkspacesLoading(true);
+    setWorkspacesError('');
+    try {
+      const result = await workspaceApi.list();
+      const list = result.data || [];
+      setWorkspaces(list);
+      setWorkspaceId((prev) => prev || list[0]?.id || '');
+    } catch (err) {
+      setWorkspaces([]);
+      setWorkspacesError(err instanceof Error ? err.message : 'Failed to load workspaces.');
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const uploadMutation = useMutation({
     mutationFn: ({ workspaceId, file }: { workspaceId: string; file: File }) =>
@@ -177,6 +209,10 @@ export default function AdminUploadPage() {
   }
 
   async function handleUpload() {
+    if (!workspaceId) {
+      addToast('Select a workspace before uploading', 'error');
+      return;
+    }
     const pending = files.filter((f) => f.status === 'pending');
     if (pending.length === 0) {
       addToast('No files to upload', 'info');
@@ -242,21 +278,39 @@ export default function AdminUploadPage() {
         />
       </div>
 
-      {/* Workspace Selector */}
-      <div className="flex items-center gap-3">
-        <label htmlFor="workspace" className="text-sm font-medium text-text whitespace-nowrap">
-          Workspace
-        </label>
-        <select
-          id="workspace"
-          value={workspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
-          disabled={isUploading}
-          className="rounded-lg glass border border-border px-3 py-2 text-sm text-text bg-card focus:outline-none focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
-        >
-          <option value="default">Default</option>
-        </select>
-      </div>
+      {/* Workspace Selector — uploads are workspace-scoped, so a real workspace
+          must be resolved/selected before anything can upload. */}
+      {workspacesLoading ? (
+        <StateBlock role="status">Loading workspaces…</StateBlock>
+      ) : workspacesError ? (
+        <StateBlock tone="danger" role="alert" className="space-y-3">
+          <p>{workspacesError}</p>
+          <Button variant="secondary" size="sm" onClick={() => void loadWorkspaces()}>
+            Retry
+          </Button>
+        </StateBlock>
+      ) : workspaces.length === 0 ? (
+        <StateBlock role="alert">
+          No workspaces available. Create a workspace first to upload documents.
+        </StateBlock>
+      ) : workspaces.length > 1 ? (
+        <div className="max-w-xs">
+          <Select
+            label="Workspace"
+            value={workspaceId}
+            onChange={(e) => setWorkspaceId(e.target.value)}
+            disabled={isUploading}
+            options={workspaces.map((ws) => ({ value: ws.id, label: ws.name }))}
+          />
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-text whitespace-nowrap">Workspace</span>
+          <span className="rounded-lg glass border border-border px-3 py-2 text-sm text-text-muted">
+            {workspaces[0].name}
+          </span>
+        </div>
+      )}
 
       {/* Drop Zone */}
       <motion.div
@@ -316,7 +370,7 @@ export default function AdminUploadPage() {
               <Button
                 onClick={handleUpload}
                 loading={isUploading}
-                disabled={!hasPending}
+                disabled={!hasPending || !workspaceId}
                 size="md"
               >
                 <Upload size={14} />
