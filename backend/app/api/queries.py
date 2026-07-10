@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 
+from typing import Any
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 
 from app.core.deps import check_workspace_access, get_current_user, get_db
 from app.core.exceptions import NotFoundException
@@ -170,6 +173,84 @@ async def get_query_anywhere(
         latency_ms=query.latency_ms,
         token_count=query.token_count,
         created_at=query.created_at,
+    )
+
+
+def _render_query_markdown(query: Query, sources: list[dict[str, Any]]) -> str:
+    """Render a query's question/answer/trust score/sources as a Markdown document."""
+    answer = query.response_text or "_No answer generated._"
+
+    if query.trust_score is None:
+        trust = "_Not scored._"
+    else:
+        trust = f"{round(query.trust_score * 100)}%"
+
+    if not sources:
+        sources_block = "_No sources cited._"
+    else:
+        items = []
+        for i, s in enumerate(sources, start=1):
+            metadata = s.get("metadata", {})
+            document_name = s.get("document_name", metadata.get("document_name", "Untitled")) or "Untitled"
+            excerpt = s.get("excerpt", s.get("content", ""))
+            page_number = s.get("page_number", metadata.get("page_number"))
+            page_suffix = f" (p. {page_number})" if page_number is not None else ""
+            items.append(f"{i}. **{document_name}**{page_suffix}\n   > {excerpt}")
+        sources_block = "\n\n".join(items)
+
+    return (
+        "# TruthLens Export\n\n"
+        "## Question\n"
+        f"{query.query_text}\n\n"
+        "## Answer\n"
+        f"{answer}\n\n"
+        "## Trust Score\n"
+        f"{trust}\n\n"
+        "## Sources\n"
+        f"{sources_block}\n"
+    )
+
+
+@router.get("/queries/{query_id}/export")
+async def export_query_markdown(
+    query_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Export a query's question, answer, trust score, and sources as a Markdown file."""
+    # Find workspace IDs user has access to
+    ws_result = await db.execute(
+        select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user.id)
+    )
+    workspace_ids = [row[0] for row in ws_result.fetchall()]
+    if not workspace_ids:
+        raise NotFoundException("Query", query_id)
+
+    result = await db.execute(
+        select(Query).where(
+            Query.id == query_id,
+            Query.workspace_id.in_(workspace_ids),
+        )
+    )
+    query = result.scalar_one_or_none()
+    if not query:
+        raise NotFoundException("Query", query_id)
+
+    sources = []
+    try:
+        if query.response_sources:
+            sources = json.loads(query.response_sources)
+    except (json.JSONDecodeError, TypeError):
+        sources = []
+
+    md = _render_query_markdown(query, sources)
+
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="truthlens-query-{query.id}.md"'
+        },
     )
 
 

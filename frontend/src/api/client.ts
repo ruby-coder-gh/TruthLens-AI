@@ -316,6 +316,14 @@ export const queryApi = {
 
   listAll: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
     request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  // Bespoke fetch — response is raw markdown (Content-Disposition attachment),
+  // not JSON, so it can't go through the JSON-locked `request()` helper.
+  exportMarkdown: async (queryId: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${API_BASE}/queries/${queryId}/export`, { credentials: 'include' });
+    if (!res.ok) throw new ApiError(`Export failed (${res.status})`, res.status);
+    return { blob: await res.blob(), filename: `truthlens-query-${queryId}.md` };
+  },
 };
 
 // ─── Comparison API ─────────────────────────────────────────────────────────

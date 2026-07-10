@@ -24,6 +24,7 @@ import {
   Layers,
   Square,
   RotateCcw,
+  Download,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -31,7 +32,7 @@ import { Button, Badge } from '../components/ui';
 import { fadeInUp, staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
-import { feedbackApi } from '../api/client';
+import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
 import type { Source } from '../api/types';
@@ -406,6 +407,26 @@ export default function ChatPage() {
     [addToast],
   );
 
+  // ─── Export response as Markdown ──────────────────────────────────────────
+  const handleExport = useCallback(
+    async (queryId: string) => {
+      try {
+        const { blob, filename } = await queryApi.exportMarkdown(queryId);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+        addToast('Failed to export', 'error');
+      }
+    },
+    [addToast],
+  );
+
   // ─── Feedback mutation ────────────────────────────────────────────────────
   const feedbackMutation = useMutation({
     mutationFn: ({ queryId, rating }: { queryId: string; rating: number }) =>
@@ -557,6 +578,9 @@ export default function ChatPage() {
                       key={msg.id}
                       message={msg}
                       onCopy={handleCopy}
+                      onExport={() => {
+                        if (msg.queryId) handleExport(msg.queryId);
+                      }}
                       onFeedback={(rating) => {
                         if (msg.queryId) {
                           feedbackMutation.mutate({ queryId: msg.queryId, rating });
@@ -922,12 +946,14 @@ function EmptyChatState({ onExampleClick }: { onExampleClick: (q: string) => voi
 function ChatMessageBubble({
   message,
   onCopy,
+  onExport,
   onFeedback,
   onRetry,
   onSourceClick,
 }: {
   message: ChatMessage;
   onCopy: (text: string) => void;
+  onExport: () => void;
   onFeedback: (rating: number) => void;
   onRetry: () => void;
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
@@ -1101,6 +1127,17 @@ function ChatMessageBubble({
                           whileTap={{ scale: 0.9 }}
                         >
                           <ThumbsDown size={14} />
+                        </motion.button>
+                        <motion.button
+                          type="button"
+                          onClick={() => onExport()}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                          aria-label="Export as Markdown"
+                          title="Export .md"
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                        >
+                          <Download size={14} />
                         </motion.button>
                       </>
                     )}

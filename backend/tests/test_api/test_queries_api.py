@@ -252,3 +252,85 @@ async def test_delete_query_no_access(
         headers=other_headers,
     )
     assert resp.status_code == 403
+
+
+# ── Export ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_export_query_markdown(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    seeded_query: tuple[str, str],
+):
+    """Export query returns a Markdown attachment with question, answer, trust score, sources."""
+    ws_id, q_id = seeded_query
+    resp = await client.get(
+        f"/api/queries/{q_id}/export",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/markdown")
+
+    disposition = resp.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert f"truthlens-query-{q_id}.md" in disposition
+
+    body = resp.text
+    assert "What is RAG?" in body
+    assert "RAG stands for Retrieval Augmented Generation." in body
+    assert "92%" in body
+    assert "doc1.pdf" in body
+
+
+@pytest.mark.asyncio
+async def test_export_query_not_found(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    seeded_query: tuple[str, str],
+):
+    """Export non-existent query returns 404."""
+    resp = await client.get(
+        "/api/queries/nonexistent/export",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_query_no_access(
+    client: AsyncClient,
+    test_db: AsyncSession,
+    seeded_query: tuple[str, str],
+):
+    """Export query without workspace access returns 404 (not 403)."""
+    ws_id, q_id = seeded_query
+
+    other = User(
+        email="qexport@example.com",
+        username="qexport",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(other)
+    await test_db.commit()
+    await test_db.refresh(other)
+    other_token = create_access_token(other.id, other.role)
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    resp = await client.get(
+        f"/api/queries/{q_id}/export",
+        headers=other_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_query_no_auth(
+    client: AsyncClient,
+    seeded_query: tuple[str, str],
+):
+    """Export query without auth returns 401."""
+    ws_id, q_id = seeded_query
+    resp = await client.get(f"/api/queries/{q_id}/export")
+    assert resp.status_code == 401
