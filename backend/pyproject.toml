@@ -45,3 +45,8 @@ markers = [
 
 [tool.coverage.run]
 source = ["app"]
+# SQLAlchemy's async engine runs DB calls inside greenlets; without tracing
+# through them, coverage under-counts every line after the first `await`
+# database call in a request handler. Trace threads + greenlets so coverage
+# reflects what the async endpoints actually execute.
+concurrency = ["thread", "greenlet"]
