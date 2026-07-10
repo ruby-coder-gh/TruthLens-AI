@@ -9,7 +9,8 @@ import {
   ArrowRight,
   AlertTriangle,
 } from 'lucide-react';
-import { Button, LoadingSpinner, EmptyState, fadeIn } from '../components/ui';
+import { Button, LoadingSpinner, EmptyState } from '../components/ui';
+import { fadeIn } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { workspaceApi } from '../api/client';
 

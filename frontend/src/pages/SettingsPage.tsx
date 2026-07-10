@@ -4,9 +4,11 @@ import { motion } from 'framer-motion';
 import {
   User, Mail, Lock, Eye, EyeOff, AlertTriangle, Key, Shield, Sparkles,
 } from 'lucide-react';
-import { Button, Modal, useToast, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { Button, Modal } from '../components/ui';
+import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import { authApi } from '../api/client';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput, { InputActionButton } from '../components/premium/AnimatedInput';

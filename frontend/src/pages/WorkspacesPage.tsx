@@ -3,25 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, FolderKanban, Users, FileText, Shield, Sparkles } from 'lucide-react';
-import {
-  Button,
-  Input,
-  TextArea,
-  Card,
-  Badge,
-  Modal,
-  EmptyState,
-  Skeleton,
-  useToast,
-  staggerContainer,
-  staggerItem,
-  fadeIn,
-  pageTransition,
-  fadeInScale,
-} from '../components/ui';
+import { Button, Input, TextArea, Card, Badge, Modal, EmptyState, Skeleton } from '../components/ui';
+import { staggerContainer, staggerItem, fadeIn, pageTransition, fadeInScale } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
 import { workspaceApi } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import type { Workspace } from '../api/types';
 
 export default function WorkspacesPage() {

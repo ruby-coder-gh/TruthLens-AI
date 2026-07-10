@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Settings, Save, RotateCcw, Bot, Database, Sliders, BarChart3 } from 'lucide-react';
-import { Button, Card, Input, Select, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Button, Card, Input, Select } from '../components/ui';
+import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 

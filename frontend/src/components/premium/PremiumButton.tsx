@@ -1,7 +1,7 @@
 import { useState, useRef, type ReactNode, type ButtonHTMLAttributes } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { Loader2, Check, Sparkles } from 'lucide-react';
+import { Loader2, Check } from 'lucide-react';
 
 interface PremiumButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
@@ -54,7 +54,7 @@ function ParticleSpark() {
           style={{ left: `${20 + i * 25}%`, top: '50%' }}
           initial={{ y: 0, opacity: 0 }}
           animate={{
-            y: [0, -20 - Math.random() * 20],
+            y: [0, -24 - i * 6],
             opacity: [0, 0.8, 0],
             scale: [0, 1, 0],
           }}
@@ -76,7 +76,6 @@ export default function PremiumButton({
   disabled,
   onClick,
   type = 'submit',
-  ...props
 }: PremiumButtonProps) {
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
   const [showSpark, setShowSpark] = useState(false);
@@ -97,7 +96,7 @@ export default function PremiumButton({
     if (!loading && !success && onClick) {
       setShowSpark(true);
       setTimeout(() => setShowSpark(false), 800);
-      onClick(e as any);
+      onClick(e);
     }
   };
 

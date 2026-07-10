@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock,
 } from 'lucide-react';
-import { Button, Badge, Input, EmptyState, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { Button, Badge, Input, EmptyState } from '../components/ui';
+import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 

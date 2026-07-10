@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CenterContent from '../components/api-catalog/CenterContent';
 import RightPanel from '../components/api-catalog/RightPanel';
-import { pageTransition } from '../components/ui';
+import { pageTransition } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 
 export default function ApiCatalogPage() {

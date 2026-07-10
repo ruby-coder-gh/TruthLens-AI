@@ -22,7 +22,7 @@ import {
   Menu,
   X,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import Logo from './Logo';
 
 // ─── Ambient Background ───────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ function NavGlowParticles() {
           style={{ left: `${20 + i * 20}%`, top: '50%' }}
           initial={{ y: 0, opacity: 0 }}
           animate={{
-            y: [0, -15 - Math.random() * 10],
+            y: [0, -15 - ((i * 7) % 10)],
             opacity: [0, 0.6, 0],
           }}
           transition={{ duration: 1.5, delay: i * 0.3, repeat: Infinity, ease: 'easeOut' }}
@@ -296,7 +296,7 @@ export default function Layout() {
                     style={{ left: `${30 + i * 20}%`, top: '40%' }}
                     initial={{ y: 0, opacity: 0 }}
                     animate={{
-                      y: [0, -12 - Math.random() * 8],
+                      y: [0, -12 - ((i * 5) % 8)],
                       opacity: [0, 0.5, 0],
                     }}
                     transition={{ duration: 1.5, delay: i * 0.4, repeat: Infinity, ease: 'easeOut' }}

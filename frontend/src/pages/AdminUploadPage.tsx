@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
-import { Button, useToast, pageTransition } from '../components/ui';
+import { Button } from '../components/ui';
+import { pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 

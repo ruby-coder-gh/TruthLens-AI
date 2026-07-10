@@ -20,7 +20,7 @@ const stageIcons: Record<string, typeof Lock> = {
   Lock, Edit3, Search, ArrowUpDown, Brain, Shield, Gauge, Database,
 };
 
-function PipelineNode({ stage, index, isLast }: { stage: WebSocketStage; index: number; isLast: boolean }) {
+function PipelineNode({ stage }: { stage: WebSocketStage }) {
   const Icon = stageIcons[stage.icon] || Lock;
   const isActive = stage.status === 'active';
   const isCompleted = stage.status === 'completed';
@@ -154,7 +154,7 @@ export default function WebSocketViz() {
       <div className="space-y-0">
         {pipelineStages.map((stage, i) => (
           <div key={stage.id}>
-            <PipelineNode stage={stage} index={i} isLast={i === pipelineStages.length - 1} />
+            <PipelineNode stage={stage} />
             {i < pipelineStages.length - 1 && (
               <ConnectionLine active={stage.status === 'completed' || (stage.status === 'active' && pipelineStages[i + 1]?.status === 'idle')} />
             )}

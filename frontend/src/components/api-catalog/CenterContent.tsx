@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { staggerContainer, staggerItem } from '../ui';
+import { staggerContainer, staggerItem } from '../motion';
 import HeroSection from './HeroSection';
 import StatsRow from './StatsRow';
 import SearchBar from './SearchBar';

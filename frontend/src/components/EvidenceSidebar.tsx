@@ -16,8 +16,6 @@ import {
   Brain,
   MessageSquare,
   ChevronDown,
-  ChevronRight,
-  Copy,
   Download,
   Eye,
   Target,
@@ -25,27 +23,19 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
-  Clock,
   Sparkles,
   Layers,
   Shield,
   Zap,
   Loader2,
-  ArrowRight,
 } from 'lucide-react';
 import {
   Badge,
-  Card,
   Button,
   Skeleton,
-  EmptyState,
-  ProgressBar,
-  useToast,
-  fadeIn,
-  fadeInUp,
-  staggerContainer,
-  staggerItem,
 } from './ui';
+import { useToast } from './toast-context';
+import { staggerContainer, staggerItem } from './motion';
 import type { Source } from '../api/types';
 import { getRelevanceMeta, relevancePercent } from '../utils/relevance';
 
@@ -57,14 +47,8 @@ interface GuardrailResult {
   details: string;
 }
 
-interface StoredQueryDetail {
-  queryId: string;
-  queryText: string;
-  responseText: string;
-  timestamp: string;
-}
-
 interface EvidenceSidebarProps {
+  sources: Source[];
   guardrail: GuardrailResult | null;
   trustScore: number | null;
   trustComponents: Record<string, number>;
@@ -74,6 +58,11 @@ interface EvidenceSidebarProps {
   onToggleSidebar: () => void;
   pipelinePhase?: string | null;
   isMobile?: boolean;
+  activeTab?: string;
+  onTabChange?: (tabId: string) => void;
+  expandedSourceId?: string | null;
+  onToggleSource?: (id: string | null) => void;
+  highlightedSourceId?: string | null;
 }
 
 function getRelevanceLevel(score: number) {
@@ -535,8 +524,6 @@ function AIReasoningTab({
 
           <div className="space-y-0">
             {steps.map((step, i) => {
-              const Icon = step.icon;
-              const isLast = i === steps.length - 1;
               return (
                 <motion.div
                   key={step.id}
@@ -673,179 +660,6 @@ function AIReasoningTab({
   );
 }
 
-// ─── Conversation Tab ────────────────────────────────────────────────────────
-
-function ConversationTab({
-  queries,
-  loading,
-  error,
-  onRetry,
-  onSelect,
-  historyOpen,
-  onDelete,
-  isDeleting,
-  conversationId,
-}: {
-  queries: StoredQueryDetail[];
-  loading: boolean;
-  error: boolean;
-  onRetry?: () => void;
-  onSelect?: (queryId: string) => void;
-  historyOpen?: string | null;
-  onDelete?: (queryId: string) => void;
-  isDeleting?: boolean;
-  conversationId?: string | null;
-}) {
-  if (loading) {
-    return (
-      <div className="p-4 space-y-3">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="space-y-2">
-            <Skeleton height={14} width="80%" />
-            <Skeleton height={10} width="40%" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-4">
-        <EmptyState
-          icon={<MessageSquare size={20} />}
-          title="Failed to load history"
-          description="There was an error loading your conversation history."
-          action={
-            onRetry ? <Button size="sm" onClick={onRetry}>Retry</Button> : undefined
-          }
-        />
-      </div>
-    );
-  }
-
-  if (queries.length === 0) {
-    return (
-      <div className="p-4">
-        <EmptyState
-          icon={<MessageSquare size={20} />}
-          title="No conversation history"
-          description="Ask a question to start a conversation."
-        />
-      </div>
-    );
-  }
-
-  const displayQueries = conversationId
-    ? queries.filter((q) => q.queryId !== conversationId)
-    : queries;
-
-  return (
-    <div className="p-4 space-y-1">
-      {conversationId && (
-        <div className="mb-3 rounded-xl bg-primary/5 border border-primary/10 px-3 py-2">
-          <p className="text-[11px] text-primary-soft font-medium">Current conversation</p>
-          <p className="text-xs text-text-dim mt-0.5">Showing related history</p>
-        </div>
-      )}
-
-      {displayQueries.length === 0 ? (
-        <p className="text-xs text-text-dim text-center py-6">No related queries found</p>
-      ) : (
-        displayQueries.map((q, i) => {
-          const isOpen = historyOpen === q.queryId;
-          return (
-            <motion.div
-              key={q.queryId}
-              variants={staggerItem}
-              initial="initial"
-              animate="animate"
-            >
-              <div
-                className={clsx(
-                  'rounded-xl border transition-all cursor-pointer group',
-                  isOpen
-                    ? 'border-primary/30 bg-primary/5'
-                    : 'border-border/30 bg-card/40 hover:border-border/60 hover:bg-card/60',
-                )}
-                onClick={() => onSelect?.(q.queryId)}
-              >
-                <div className="p-3">
-                  <div className="flex items-start gap-2.5">
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/5 mt-0.5">
-                      <MessageSquare size={11} className="text-text-dim" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-text line-clamp-1 leading-relaxed">
-                        {q.queryText}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <span className="flex items-center gap-1 text-[10px] text-text-dim">
-                          <Clock size={9} />
-                          {formatDate(q.timestamp)}
-                        </span>
-                        {q.responseText && (
-                          <span className="text-[10px] text-green/70">✓ answered</span>
-                        )}
-                      </div>
-
-                      {/* Expanded response */}
-                      {isOpen && q.responseText && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          className="mt-2 pt-2 border-t border-border/30"
-                        >
-                          <p className="text-xs text-text-muted leading-relaxed line-clamp-3">
-                            {q.responseText}
-                          </p>
-
-                          <div className="flex items-center gap-1.5 mt-2">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) => { e.stopPropagation(); }}
-                            >
-                              <ArrowRight size={11} />
-                              Open
-                            </Button>
-                            {onDelete && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onDelete(q.queryId);
-                                }}
-                                disabled={isDeleting}
-                              >
-                                <AlertTriangle size={11} />
-                                Delete
-                              </Button>
-                            )}
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-
-                    <motion.div
-                      animate={{ rotate: isOpen ? 90 : 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="shrink-0 text-text-dim mt-0.5"
-                    >
-                      <ChevronRight size={13} />
-                    </motion.div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          );
-        })
-      )}
-    </div>
-  );
-}
-
 // ─── Empty State ─────────────────────────────────────────────────────────────
 
 function EvidenceEmptyState() {
@@ -897,13 +711,79 @@ function EvidenceEmptyState() {
   );
 }
 
+// ─── Sources Panel ───────────────────────────────────────────────────────────
+
+function SourcesPanel({
+  sources,
+  isLoading,
+  isStreaming,
+  expandedSourceId,
+  onToggleSource,
+  highlightedSourceId,
+}: {
+  sources: Source[];
+  isLoading: boolean;
+  isStreaming: boolean;
+  expandedSourceId: string | null;
+  onToggleSource: (id: string | null) => void;
+  highlightedSourceId: string | null;
+}) {
+  // Skeletons while retrieving with nothing to show yet.
+  if (isLoading && sources.length === 0) {
+    return (
+      <div className="space-y-3 p-1">
+        {[0, 1, 2].map((i) => (
+          <SourceCardSkeleton key={i} />
+        ))}
+      </div>
+    );
+  }
+
+  // Empty state once idle and no evidence was found.
+  if (sources.length === 0) {
+    return <EvidenceEmptyState />;
+  }
+
+  return (
+    <motion.div
+      className="space-y-3 p-1"
+      variants={staggerContainer}
+      initial="initial"
+      animate="animate"
+    >
+      {/* Streaming shimmer — more evidence may still arrive */}
+      {isStreaming && (
+        <div className="space-y-1.5 px-1 pb-1">
+          <ShimmerBar width="70%" />
+          <ShimmerBar width="45%" delay={0.2} />
+        </div>
+      )}
+      {sources.map((source, index) => (
+        <SourceCard
+          key={source.chunk_id || index}
+          source={source}
+          index={index}
+          isExpanded={expandedSourceId === source.chunk_id}
+          onToggle={() =>
+            onToggleSource(expandedSourceId === source.chunk_id ? null : source.chunk_id)
+          }
+          isHighlighted={highlightedSourceId === source.chunk_id}
+          streaming={isStreaming}
+        />
+      ))}
+    </motion.div>
+  );
+}
+
 // ─── Evidence Sidebar (Main) ─────────────────────────────────────────────────
 
 const SIDEBAR_TABS = [
+  { id: 'sources', label: 'Sources', icon: <FileText size={15} /> },
   { id: 'reasoning', label: 'AI Reasoning', icon: <Brain size={15} /> },
 ];
 
 export default function EvidenceSidebar({
+  sources,
   guardrail,
   trustScore,
   trustComponents,
@@ -913,9 +793,15 @@ export default function EvidenceSidebar({
   onToggleSidebar,
   pipelinePhase,
   isMobile,
+  activeTab,
+  onTabChange,
+  expandedSourceId,
+  onToggleSource,
+  highlightedSourceId,
 }: EvidenceSidebarProps) {
   const effectiveTrust = trustScore ?? 0;
-
+  const currentTab = activeTab ?? 'sources';
+  const sourceCount = sources.length;
 
   return (
     <AnimatePresence>
@@ -970,18 +856,67 @@ export default function EvidenceSidebar({
                   </svg>
                 </motion.button>
               </div>
+
+              {/* ─── Tab bar ─────────────────────────────────────────────── */}
+              <div className="mt-3 flex gap-1 rounded-xl bg-white/[0.03] p-1" role="tablist">
+                {SIDEBAR_TABS.map((tab) => {
+                  const isActive = tab.id === currentTab;
+                  return (
+                    <motion.button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => onTabChange?.(tab.id)}
+                      className={clsx(
+                        'relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
+                        isActive ? 'text-primary-soft' : 'text-text-dim hover:text-text',
+                      )}
+                      whileTap={{ scale: 0.97 }}
+                    >
+                      {isActive && (
+                        <motion.div
+                          layoutId="sidebarActiveTab"
+                          className="absolute inset-0 rounded-lg border border-primary/20 bg-primary/10"
+                          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                        />
+                      )}
+                      <span className="relative z-10 flex items-center gap-1.5">
+                        {tab.icon}
+                        {tab.label}
+                        {tab.id === 'sources' && sourceCount > 0 && (
+                          <Badge color="purple" className="ml-0.5 !px-1.5 !py-0 text-[9px]">
+                            {sourceCount}
+                          </Badge>
+                        )}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* ─── AI Reasoning Content ──────────────────────────────────── */}
+            {/* ─── Tab content ───────────────────────────────────────────── */}
             <div className="overflow-y-auto overflow-x-hidden px-4 pb-4 max-h-[60vh]">
-              <AIReasoningTab
-                guardrail={guardrail}
-                trustScore={trustScore}
-                trustComponents={trustComponents}
-                isLoading={isLoading && !pipelinePhase}
-                isStreaming={isStreaming ?? isLoading}
-                pipelinePhase={pipelinePhase ?? null}
-              />
+              {currentTab === 'sources' ? (
+                <SourcesPanel
+                  sources={sources}
+                  isLoading={isLoading}
+                  isStreaming={isStreaming ?? isLoading}
+                  expandedSourceId={expandedSourceId ?? null}
+                  onToggleSource={onToggleSource ?? (() => {})}
+                  highlightedSourceId={highlightedSourceId ?? null}
+                />
+              ) : (
+                <AIReasoningTab
+                  guardrail={guardrail}
+                  trustScore={trustScore}
+                  trustComponents={trustComponents}
+                  isLoading={isLoading && !pipelinePhase}
+                  isStreaming={isStreaming ?? isLoading}
+                  pipelinePhase={pipelinePhase ?? null}
+                />
+              )}
             </div>
           </div>
         </motion.aside>

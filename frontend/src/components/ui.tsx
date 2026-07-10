@@ -3,15 +3,13 @@ import {
   useState,
   useEffect,
   useCallback,
-  createContext,
-  useContext,
   type ReactNode,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type TextareaHTMLAttributes,
   type SelectHTMLAttributes,
 } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type HTMLMotionProps } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
   X,
@@ -21,50 +19,7 @@ import {
   Loader2,
   ChevronDown,
 } from 'lucide-react';
-
-// ─── Motion Variants (WAAPI-safe, no opacity:0 in initial) ───
-export const fadeIn = {
-  initial: { opacity: 0.99, y: 6 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
-  exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
-};
-
-export const fadeInUp = {
-  initial: { opacity: 0.99, y: 12 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const } },
-};
-
-export const fadeInScale = {
-  initial: { opacity: 0.99, scale: 0.98 },
-  animate: { opacity: 1, scale: 1, transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] as const } },
-};
-
-export const slideInLeft = {
-  initial: { opacity: 0.99, x: -12 },
-  animate: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
-};
-
-export const slideInRight = {
-  initial: { opacity: 0.99, x: 12 },
-  animate: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
-};
-
-export const staggerContainer = {
-  animate: {
-    transition: { staggerChildren: 0.04, delayChildren: 0.05 },
-  },
-};
-
-export const staggerItem = {
-  initial: { opacity: 0.99, y: 8 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
-};
-
-export const pageTransition = {
-  initial: { opacity: 0.99, y: 6 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const } },
-  exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
-};
+import { ToastContext, type ToastType } from './toast-context';
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  BUTTON
@@ -114,7 +69,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           sizeStyles[size],
           className,
         )}
-        {...props as any}
+        {...(props as HTMLMotionProps<'button'>)}
       >
         {loading && <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />}
         {children}
@@ -421,27 +376,14 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  TOAST SYSTEM
+//  (ToastContext + useToast live in ./toast-context to keep this a components-only
+//   module for react-refresh; ToastProvider stays here.)
 // ═════════════════════════════════════════════════════════════════════════════
-
-type ToastType = 'success' | 'error' | 'info';
 
 interface ToastData {
   id: string;
   message: string;
   type: ToastType;
-}
-
-interface ToastContextValue {
-  addToast: (message: string, type?: ToastType) => void;
-  removeToast: (id: string) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used within a ToastProvider');
-  return ctx;
 }
 
 const toastIcons: Record<ToastType, ReactNode> = {

@@ -26,31 +26,15 @@ import {
   MessageSquare,
   Loader2,
 } from 'lucide-react';
-import {
-  Button,
-  Input,
-  TextArea,
-  Select,
-  Card,
-  Badge,
-  Modal,
-  EmptyState,
-  Tabs,
-  Skeleton,
-  ProgressBar,
-  useToast,
-  staggerContainer,
-  staggerItem,
-  fadeIn,
-  pageTransition,
-  slideInRight,
-} from '../components/ui';
+import { Button, Input, TextArea, Select, Card, Badge, Modal, EmptyState, Tabs, Skeleton, ProgressBar } from '../components/ui';
+import { staggerContainer, staggerItem, fadeIn, pageTransition, slideInRight } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
 import {
   workspaceApi,
   documentApi,
 } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import type {
   ActivityEntry,
   Workspace,
@@ -579,6 +563,8 @@ function ActivityTab({ workspaceId }: { workspaceId: string }) {
   });
 
   const activities = data?.data ?? [];
+  // Seed "now" once (lazy state init) so render stays pure — no Date.now() in render.
+  const [now] = useState(() => Date.now());
 
   const iconMap: Record<string, React.ReactNode> = {
     query: <MessageSquare size={16} className="text-accent-2" />,
@@ -587,7 +573,7 @@ function ActivityTab({ workspaceId }: { workspaceId: string }) {
   };
 
   function timeAgo(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
+    const diff = now - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return 'Just now';
     if (mins < 60) return `${mins}m ago`;

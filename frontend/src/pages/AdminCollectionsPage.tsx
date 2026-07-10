@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
 import { FolderOpen, Plus, FileText, Clock } from 'lucide-react';
-import { Button, Card, Input, Modal, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Button, Card, Input, Modal } from '../components/ui';
+import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { collectionApi } from '../api/client';
 

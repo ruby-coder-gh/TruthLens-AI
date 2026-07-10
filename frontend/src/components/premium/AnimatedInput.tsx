@@ -1,4 +1,4 @@
-import { useState, useRef, type ReactNode, type InputHTMLAttributes } from 'react';
+import { useState, type ReactNode, type InputHTMLAttributes } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -9,17 +9,6 @@ interface AnimatedInputProps extends InputHTMLAttributes<HTMLInputElement> {
   icon?: ReactNode;
   actionButton?: ReactNode;
   loading?: boolean;
-}
-
-function RippleDot() {
-  return (
-    <motion.span
-      className="absolute inset-0 rounded-lg pointer-events-none"
-      initial={{ scale: 0.8, opacity: 0.5 }}
-      animate={{ scale: 1.5, opacity: 0 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
-    />
-  );
 }
 
 export function InputActionButton({

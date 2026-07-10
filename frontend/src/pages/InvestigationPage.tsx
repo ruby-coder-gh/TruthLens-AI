@@ -16,20 +16,9 @@ import {
   Sparkles,
   Loader2,
 } from 'lucide-react';
-import {
-  Button,
-  TextArea,
-  Card,
-  Badge,
-  Skeleton,
-  useToast,
-  fadeIn,
-  fadeInUp,
-  fadeInScale,
-  staggerContainer,
-  staggerItem,
-  pageTransition,
-} from '../components/ui';
+import { Button, TextArea, Card, Badge, Skeleton } from '../components/ui';
+import { fadeIn, fadeInUp, fadeInScale, staggerContainer, staggerItem, pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { investigationApi } from '../api/client';
 import type { InvestigationResponse } from '../api/types';

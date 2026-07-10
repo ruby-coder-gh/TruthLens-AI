@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, User, Calendar, Clock, MessageSquare, FileText, Ban, Trash2, AlertTriangle } from 'lucide-react';
-import { Button, Card, Badge, Modal, useToast, pageTransition } from '../components/ui';
+import { Button, Card, Badge, Modal } from '../components/ui';
+import { pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 

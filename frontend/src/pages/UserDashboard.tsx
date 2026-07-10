@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Clock, FileText, MessageSquare, Plus, Settings, Shield } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, LoadingSpinner, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { Badge, Button, Card, EmptyState, LoadingSpinner } from '../components/ui';
+import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import type { QuerySummary } from '../api/types';
 import { getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
 

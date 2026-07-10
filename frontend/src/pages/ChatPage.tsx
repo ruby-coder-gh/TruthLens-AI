@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, type FormEvent, type Keyboard
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -22,40 +22,19 @@ import {
   PanelRightOpen,
   PanelRightClose,
   Loader2,
-  MessageSquare,
-  Trash2,
-  ExternalLink,
-  Pin,
-  Search,
-  Flag,
-  ChevronDown,
-  Eye,
-  Quote,
-  Zap,
   Layers,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-  Button,
-  Badge,
-  EmptyState,
-  Skeleton,
-  useToast,
-  fadeInUp,
-  staggerContainer,
-  staggerItem,
-  pageTransition,
-} from '../components/ui';
+import { Button, Badge } from '../components/ui';
+import { fadeInUp, staggerContainer, staggerItem, pageTransition } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
-import {
-  queryApi,
-  feedbackApi,
-} from '../api/client';
+import { feedbackApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
-import type { Source, QuerySummary } from '../api/types';
-import { getRelevanceMeta, getTrustColorVar, getTrustConfidenceLabel, relevancePercent } from '../utils/relevance';
+import type { Source } from '../api/types';
+import { getRelevanceMeta, getTrustBadgeColor, getTrustColorVar, getTrustConfidenceLabel, relevancePercent } from '../utils/relevance';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -66,7 +45,6 @@ const EXAMPLE_QUESTIONS = [
 ];
 
 const MAX_TEXTAREA_ROWS = 6;
-const INITIAL_SOURCES_SHOWN = 3;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -91,13 +69,6 @@ interface ChatMessage {
   queryId: string | null;
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error';
-}
-
-interface StoredQueryDetail {
-  queryId: string;
-  queryText: string;
-  responseText: string;
-  timestamp: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -151,57 +122,21 @@ export default function ChatPage() {
   const [inputValue, setInputValue] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [_streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [, setSidebarTab] = useState('sources');
+  const [, setStreamingMessageId] = useState<string | null>(null);
+  const [sidebarTab, setSidebarTab] = useState('sources');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [, setExpandedSource] = useState<string | null>(null);
+  const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const [tracingBeam, setTracingBeam] = useState<{ startId: string; targetId: string } | null>(null);
-  const [, setHighlightedSourceId] = useState<string | null>(null);
-  const [, setHistoryOpen] = useState<string | null>(null);
+  const [highlightedSourceId, setHighlightedSourceId] = useState<string | null>(null);
   const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
   const [pipelinePhase, setPipelinePhase] = useState<string | null>(null);
-  // Track queries stored in API for history tab
-  const [, setStoredQueries] = useState<StoredQueryDetail[]>([]);
 
   // Refs
   const wsRef = useRef<QueryWebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const inputKey = useRef(0); // force re-mount textarea after send
-
-  // ─── Fetch conversation history from API ─────────────────────────────────
-  const {
-    data: historyData,
-    refetch: refetchHistory,
-  } = useQuery({
-    queryKey: ['queries', workspaceId, conversationId],
-    queryFn: () =>
-      queryApi.list(workspaceId!, {
-        conversation_id: conversationId,
-        page_size: 50,
-      }),
-    enabled: !!workspaceId && !!conversationId,
-  });
-
-  // Sync conversation history into storedQueries when data loads
-  useEffect(() => {
-    if (!historyData?.data) return;
-    const mapped: StoredQueryDetail[] = historyData.data
-      .filter((q: QuerySummary) => q.query_text)
-      .map((q: QuerySummary) => ({
-        queryId: q.id,
-        queryText: q.query_text,
-        responseText: '',
-        timestamp: q.created_at,
-      }));
-    setStoredQueries((prev) => {
-      const existingIds = new Set(prev.map((s) => s.queryId));
-      const newOnes = mapped.filter((m) => !existingIds.has(m.queryId));
-      return [...newOnes, ...prev].sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-      );
-    });
-  }, [historyData]);
+  const inputKeyRef = useRef(0); // force re-mount textarea after send
+  const [inputKey, setInputKey] = useState(0);
 
   // ─── Auto-scroll ──────────────────────────────────────────────────────────
   const scrollToBottom = useCallback(() => {
@@ -279,7 +214,8 @@ export default function ChatPage() {
       setIsStreaming(true);
 
       // Update textarea key to clear
-      inputKey.current += 1;
+      inputKeyRef.current += 1;
+      setInputKey(inputKeyRef.current);
 
       // Create WebSocket
       const ws = new QueryWebSocket(workspaceId, queryText.trim(), {
@@ -339,11 +275,6 @@ export default function ChatPage() {
           setIsStreaming(false);
           setStreamingMessageId(null);
           setPipelinePhase(null);
-
-          // Refetch conversation history to pick up new query
-          setTimeout(() => {
-            refetchHistory();
-          }, 500);
         },
 
         onError: (code: string, message: string) => {
@@ -363,7 +294,7 @@ export default function ChatPage() {
           setPipelinePhase(null);
         },
 
-        onProgress: (phase: string, _progress: number) => {
+        onProgress: (phase: string) => {
           setPipelinePhase(phase);
         },
       }, convId);
@@ -371,7 +302,7 @@ export default function ChatPage() {
       wsRef.current = ws;
       ws.connect();
     },
-    [workspaceId, conversationId, genId, refetchHistory],
+    [workspaceId, conversationId, genId],
   );
 
   // ─── Submit handler ───────────────────────────────────────────────────────
@@ -408,12 +339,12 @@ export default function ChatPage() {
     setStreamingMessageId(null);
     setIsStreaming(false);
     setPipelinePhase(null);
-    setStoredQueries([]);
-    setHistoryOpen(null);
     setExpandedSource(null);
     setTracingBeam(null);
     setHighlightedSourceId(null);
-    inputKey.current += 1;
+    setSidebarTab('sources');
+    inputKeyRef.current += 1;
+    setInputKey(inputKeyRef.current);
     textareaRef.current?.focus();
   }, [isStreaming]);
 
@@ -441,42 +372,6 @@ export default function ChatPage() {
       addToast('Failed to submit feedback', 'error');
     },
   });
-
-  // ─── Delete query mutation ────────────────────────────────────────────────
-  const deleteQueryMutation = useMutation({
-    mutationFn: (queryId: string) =>
-      queryApi.delete(workspaceId!, queryId),
-    onSuccess: () => {
-      addToast('Query deleted', 'success');
-      refetchHistory();
-    },
-    onError: () => {
-      addToast('Failed to delete query', 'error');
-    },
-  });
-
-  // ─── Load query detail for history ────────────────────────────────────────
-  const loadQueryDetail = useCallback(
-    async (queryId: string) => {
-      if (!workspaceId) return;
-      try {
-        const detail = await queryApi.get(workspaceId, queryId);
-        setStoredQueries((prev) =>
-          prev.map((sq) =>
-            sq.queryId === queryId
-              ? {
-                  ...sq,
-                  responseText: detail.response_text ?? '',
-                }
-              : sq,
-          ),
-        );
-      } catch {
-        // silently fail — detail isn't critical
-      }
-    },
-    [workspaceId],
-  );
 
   // ─── Click example question ───────────────────────────────────────────────
   const handleExampleClick = useCallback(
@@ -643,7 +538,7 @@ export default function ChatPage() {
             >
               <div className="relative flex-1">
                 <textarea
-                  key={inputKey.current}
+                  key={inputKey}
                   ref={textareaRef}
                   value={inputValue}
                   onChange={(e) => {
@@ -708,6 +603,7 @@ export default function ChatPage() {
 
         {/* ─── Evidence Sidebar ──────────────────────────────────────────── */}
         <EvidenceSidebar
+          sources={latestSources}
           guardrail={latestGuardrail}
           trustScore={latestTrustScore}
           trustComponents={latestTrustComponents}
@@ -717,6 +613,11 @@ export default function ChatPage() {
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           pipelinePhase={pipelinePhase}
           isMobile={isMobile}
+          activeTab={sidebarTab}
+          onTabChange={setSidebarTab}
+          expandedSourceId={expandedSource}
+          onToggleSource={setExpandedSource}
+          highlightedSourceId={highlightedSourceId}
         />
       </motion.div>
       </PageShell>
@@ -1386,786 +1287,6 @@ function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
           </motion.ul>
         )}
       </div>
-    </motion.div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  SOURCES TAB — Premium Evidence Context Panel
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function getFileIcon(fileType?: string) {
-  switch ((fileType ?? '').toLowerCase()) {
-    case 'pdf': return <FileText size={16} className="text-red-400" />;
-    case 'docx':
-    case 'doc': return <FileText size={16} className="text-blue-400" />;
-    case 'txt': return <FileText size={16} className="text-text-muted" />;
-    default: return <FileText size={16} className="text-purple-400" />;
-  }
-}
-
-function getFileTypeLabel(name?: string): string {
-  if (!name) return 'DOC';
-  const ext = name.split('.').pop()?.toUpperCase() ?? 'DOC';
-  return ext;
-}
-
-function getQualityBadge(score: number): { label: string; color: string; icon: React.ReactNode } {
-  const relevance = getRelevanceMeta(score);
-
-  if (relevance.tier === 'high') {
-    return { label: relevance.label, color: relevance.colors.badge, icon: <Zap size={12} /> };
-  }
-
-  if (relevance.tier === 'medium') {
-    return { label: relevance.label, color: relevance.colors.badge, icon: <Flag size={12} /> };
-  }
-
-  return { label: relevance.label, color: relevance.colors.badge, icon: <AlertCircle size={12} /> };
-}
-
-function formatConfidence(score?: number): number {
-  return relevancePercent(score);
-}
-
-function highlightMatches(text: string, query?: string): React.ReactNode {
-  if (!query || query.length < 2) return text;
-
-  const words = [...new Set(
-    query
-      .split(/\s+/)
-      .map((w) => w.trim())
-      .filter((w) => w.length > 2),
-  )];
-  if (words.length === 0) return text;
-
-  const pattern = words
-    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|');
-  if (!pattern) return text;
-
-  const parts = text.split(new RegExp(`(${pattern})`, 'gi'));
-  return parts.map((part, i) => {
-    const isMatch = words.some((word) => part.toLowerCase() === word.toLowerCase());
-    return isMatch
-      ? <mark key={`${part}-${i}`} className="rounded bg-purple-500/20 px-0.5 text-purple-200">{part}</mark>
-      : part;
-  });
-}
-
-function SourcesTab({
-  sources,
-  expandedSource,
-  onToggleExpand,
-  isLoading,
-  highlightedSourceId,
-}: {
-  sources: Source[];
-  expandedSource: string | null;
-  onToggleExpand: (id: string | null) => void;
-  isLoading: boolean;
-  highlightedSourceId?: string | null;
-}) {
-  // ─── Loading State ───────────────────────────────────────────────────────
-  if (isLoading) {
-    return (
-      <div className="space-y-3 p-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0.99, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.08 }}
-          >
-            <div className="overflow-hidden rounded-xl border border-border/40 glass">
-              <div className="animate-pulse space-y-3 p-4">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-card-2" />
-                  <div className="h-3 flex-1 rounded bg-card-2" />
-                </div>
-                <div className="h-2 w-full rounded-full bg-card-2" />
-                <div className="h-2 w-3/4 rounded bg-card-2" />
-                <div className="h-2 w-1/2 rounded bg-card-2" />
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    );
-  }
-
-  // ─── Empty State ─────────────────────────────────────────────────────────
-  if (sources.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
-        <motion.div
-          initial={{ scale: 0, rotate: -10 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', damping: 12, stiffness: 150 }}
-          className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl glass shadow-lg shadow-primary/10"
-        >
-          <Search size={28} className="text-primary-soft/60" />
-        </motion.div>
-        <motion.h4
-          className="text-sm font-semibold text-text"
-          initial={{ opacity: 0.99, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
-          No supporting evidence found
-        </motion.h4>
-        <motion.p
-          className="mt-1 max-w-[220px] text-xs text-text-dim"
-          initial={{ opacity: 0.99, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-        >
-          Sources will appear after you ask a question.
-        </motion.p>
-        <motion.div
-          className="mt-4 space-y-1.5 text-left"
-          initial={{ opacity: 0.99 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.25 }}
-        >
-          {[
-            'Rephrase your question',
-            'Upload more documents',
-            'Search with broader terms',
-          ].map((tip) => (
-            <div key={tip} className="flex items-center gap-2 text-[11px] text-text-dim">
-              <div className="h-1 w-1 rounded-full bg-primary-soft/40" />
-              {tip}
-            </div>
-          ))}
-        </motion.div>
-      </div>
-    );
-  }
-
-  const visibleSources = sources.slice(0, expandedSource ? sources.length : INITIAL_SOURCES_SHOWN);
-  const hasMore = sources.length > INITIAL_SOURCES_SHOWN && !expandedSource;
-
-  return (
-    <motion.div
-      className="space-y-2 p-3"
-      variants={staggerContainer}
-      initial="initial"
-      animate="animate"
-    >
-      {/* Header count */}
-      <motion.div
-        className="flex items-center justify-between px-1 pb-1"
-        variants={staggerItem}
-      >
-        <span className="text-xs font-medium text-text-muted">
-          {sources.length} source{sources.length !== 1 ? 's' : ''} retrieved
-        </span>
-        <span className="text-[10px] text-text-dim">
-          Sorted by relevance
-        </span>
-      </motion.div>
-
-      <div className="space-y-2.5">
-        {visibleSources.map((source) => {
-          const isExpanded = expandedSource === source.chunk_id;
-          const relevance = getRelevanceMeta(source.relevance_score);
-          const pct = relevance.percent;
-          const conf = formatConfidence(source.confidence ?? source.relevance_score);
-          const quality = getQualityBadge(relevance.score);
-          const docName = source.document_name || `Document ${source.document_id.slice(0, 8)}`;
-          const fileType = source.file_type || getFileTypeLabel(source.document_name);
-
-          return (
-            <motion.div
-              key={source.chunk_id}
-              variants={staggerItem}
-              layout
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-            >
-              <motion.div
-                id={`source-${source.chunk_id}`}
-                className={clsx(
-                  'group relative overflow-hidden rounded-xl border transition-all duration-300',
-                  isExpanded
-                    ? 'border-purple-500/40 shadow-[0_0_20px_rgba(168,85,247,0.12)]'
-                    : highlightedSourceId === source.chunk_id
-                      ? 'border-accent shadow-[0_0_15px_rgba(45,212,191,0.2)]'
-                      : 'border-border/40 hover:border-purple-500/25',
-                  'glass backdrop-blur-xl',
-                )}
-                whileHover={{ y: -2, transition: { duration: 0.2 } }}
-              >
-                {/* Glow sweep on highlight */}
-                {highlightedSourceId === source.chunk_id && (
-                  <div className="pointer-events-none absolute inset-0 animate-glow-sweep mix-blend-screen" />
-                )}
-
-                {/* Gradient border overlay on hover */}
-                <div className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(168,85,247,0.08) 0%, transparent 50%)',
-                  }}
-                />
-
-                <div className="relative z-10 space-y-3 p-3.5">
-                  {/* ─── Row 1: Icon + Name + Badge ──────────────────────── */}
-                  <div className="flex items-start gap-2.5">
-                    {/* File type icon with glass bg */}
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-card-2/80 ring-1 ring-border/30">
-                      {getFileIcon(fileType)}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="truncate text-sm font-medium text-text">
-                          {docName}
-                        </h4>
-                        <span className="shrink-0 rounded-md bg-card-2/60 px-1.5 py-0.5 text-[10px] font-mono font-medium text-text-dim ring-1 ring-border/20">
-                          {fileType}
-                        </span>
-                      </div>
-
-                      {/* Confidence + matched chunks row */}
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-dim">
-                        <span className="flex items-center gap-1">
-                          <Shield size={11} className="text-primary-soft/70" />
-                          Confidence: <span className={clsx('font-semibold', conf >= 70 ? 'text-green' : conf >= 40 ? 'text-orange' : 'text-red')}>{conf}%</span>
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Pin size={11} className="text-accent/70" />
-                          Chunks: {source.matched_chunks ?? 1}
-                        </span>
-                        {source.updated_at && (
-                          <span className="flex items-center gap-1">
-                            <Clock size={11} className="text-text-dim/70" />
-                            {new Date(source.updated_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ─── Row 2: Animated Relevance Bar ───────────────────── */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-text-dim">Relevance</span>
-                      <span className={clsx('font-semibold font-mono', relevance.colors.text)}>
-                        {pct}%
-                      </span>
-                    </div>
-                    <div className="relative h-2 overflow-hidden rounded-full bg-card-2">
-                      <motion.div
-                        className={clsx('h-full rounded-full', relevance.colors.bar)}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
-                      />
-                      {/* Pulse glow */}
-                      <motion.div
-                        className={clsx('absolute inset-y-0 right-0 w-4 rounded-full blur-[4px]', relevance.colors.glow)}
-                        style={{ right: `${100 - pct}%` }}
-                        animate={{ opacity: [0, 0.8, 0] }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* ─── Row 3: Quality Badge ────────────────────────────── */}
-                  <div className={clsx(
-                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium',
-                    quality.color
-                  )}>
-                    {quality.icon}
-                    {quality.label}
-                  </div>
-
-                  {/* ─── Row 4: Excerpt with highlighting ────────────────── */}
-                  <div className="relative">
-                    <div className={clsx(
-                      'overflow-hidden rounded-lg border border-border/20 bg-bg-soft/40',
-                      isExpanded ? 'max-h-96' : 'max-h-[72px]'
-                    )}>
-                      <p className="px-2.5 py-2 text-xs leading-relaxed text-text-muted font-[family-name:var(--font-mono,monospace)]">
-                        {isExpanded
-                          ? highlightMatches(source.excerpt, '')
-                          : highlightMatches(source.excerpt.slice(0, 200), '')}
-                        {!isExpanded && source.excerpt.length > 200 && '…'}
-                      </p>
-                    </div>
-
-                    {/* Expand / collapse */}
-                    {source.excerpt.length > 200 && (
-                      <motion.button
-                        type="button"
-                        onClick={() => onToggleExpand(isExpanded ? null : source.chunk_id)}
-                        className="mt-1 flex items-center gap-1 text-[10px] font-medium text-primary-soft/70 transition-colors hover:text-primary-soft"
-                        whileHover={{ x: 2 }}
-                      >
-                        {isExpanded ? 'Show less' : 'Show more'}
-                        <ChevronDown
-                          size={12}
-                          className={clsx('transition-transform', isExpanded && 'rotate-180')}
-                        />
-                      </motion.button>
-                    )}
-                  </div>
-
-                  {/* ─── Row 5: AI Explanation ───────────────────────────── */}
-                  {source.explanation && (
-                    <motion.div
-                      initial={{ opacity: 0.99, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="rounded-lg border border-purple-500/15 bg-purple-500/5 px-2.5 py-2"
-                    >
-                      <div className="flex items-start gap-2">
-                        <Brain size={12} className="mt-0.5 shrink-0 text-purple-400" />
-                        <div>
-                          <p className="text-[10px] font-medium text-purple-300">Why this source was used</p>
-                          <p className="mt-0.5 text-[11px] leading-relaxed text-text-dim">
-                            {source.explanation}
-                          </p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* ─── Row 6: Action Buttons ───────────────────────────── */}
-                  <div className="flex items-center gap-1.5 pt-0.5">
-                    <motion.button
-                      type="button"
-                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-text"
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.97 }}
-                      title="View document"
-                    >
-                      <Eye size={12} />
-                      View
-                    </motion.button>
-                    <motion.button
-                      type="button"
-                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-text"
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.97 }}
-                      title="View match location"
-                    >
-                      <ExternalLink size={12} />
-                      Match
-                    </motion.button>
-                    <motion.button
-                      type="button"
-                      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-dim transition-colors hover:bg-card-2 hover:text-primary-soft"
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.97 }}
-                      title="Copy citation"
-                      onClick={() => {
-                        const citation = `[${docName}] (Confidence: ${conf}%) — "${source.excerpt.slice(0, 100)}..."`;
-                        navigator.clipboard.writeText(citation).catch(() => {});
-                      }}
-                    >
-                      <Quote size={12} />
-                      Cite
-                    </motion.button>
-
-                    {/* Page number */}
-                    {source.page_number != null && (
-                      <span className="ml-auto text-[10px] text-text-dim">
-                        p.{source.page_number}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Show all button */}
-      {hasMore && (
-        <motion.button
-          type="button"
-          onClick={() => onToggleExpand('__all__')}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl glass px-3 py-2.5 text-xs text-text-muted transition-all hover:border-primary/20 hover:bg-card-hover hover:text-text hover:shadow-lg hover:shadow-primary/5"
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          variants={staggerItem}
-        >
-          Show all {sources.length} sources
-          <ChevronDown size={14} />
-        </motion.button>
-      )}
-    </motion.div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  WHY THIS ANSWER TAB
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function WhyThisAnswerTab({
-  guardrail,
-  trustScore,
-  trustComponents,
-  isLoading,
-}: {
-  guardrail: GuardrailResult | null;
-  trustScore: number | null;
-  trustComponents: Record<string, number>;
-  isLoading: boolean;
-}) {
-  if (isLoading) {
-    return (
-      <div className="space-y-4 p-4">
-        <Skeleton height={80} width="100%" />
-        <Skeleton height={120} width="100%" />
-      </div>
-    );
-  }
-
-  if (trustScore === null && !guardrail) {
-    return (
-      <div className="p-4">
-        <EmptyState
-          icon={<Brain size={24} />}
-          title="No analysis yet"
-          description="Trust score and guardrail analysis will appear here after you ask a question."
-        />
-      </div>
-    );
-  }
-
-  const componentLabels: Record<string, string> = {
-    retrieval_quality: 'Retrieval quality',
-    faithfulness: 'Faithfulness',
-    relevance: 'Relevance',
-    source_authority: 'Source authority',
-  };
-
-  const componentEntries = Object.entries(trustComponents).filter(
-    ([key]) => key in componentLabels || key !== 'overall',
-  );
-
-  const trustTone = trustScore !== null ? getTrustBadgeColor(trustScore) : 'gray';
-  const trustStroke = trustTone === 'green' ? '#34d399' : trustTone === 'orange' ? '#fb923c' : '#f87171';
-  const trustTextClass = trustTone === 'green' ? 'text-green' : trustTone === 'orange' ? 'text-orange' : 'text-red';
-
-  return (
-    <motion.div
-      className="space-y-6 p-4"
-      variants={staggerContainer}
-      initial="initial"
-      animate="animate"
-    >
-      {/* Overall trust score ring */}
-      {trustScore !== null && (
-        <motion.div className="text-center" variants={staggerItem}>
-          <div className="relative mx-auto flex h-24 w-24 items-center justify-center">
-            {/* Animated SVG ring */}
-            <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 100 100">
-              {/* Background circle */}
-              <circle
-                cx="50" cy="50" r="42"
-                fill="none"
-                stroke="rgba(60,75,110,0.3)"
-                strokeWidth="6"
-                strokeLinecap="round"
-              />
-              {/* Foreground animated arc */}
-              <motion.circle
-                cx="50" cy="50" r="42"
-                fill="none"
-                stroke={trustStroke}
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeDasharray={`${2 * Math.PI * 42}`}
-                initial={{ strokeDashoffset: 2 * Math.PI * 42 }}
-                animate={{ strokeDashoffset: 2 * Math.PI * 42 * (1 - trustScore) }}
-                transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] as const }}
-              />
-            </svg>
-            {/* Score text */}
-            <motion.span
-              className={clsx('text-2xl font-bold', trustTextClass)}
-              initial={{ opacity: 0.99, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.3, type: 'spring', damping: 10 }}
-            >
-              {(trustScore * 100).toFixed(0)}
-            </motion.span>
-          </div>
-          <motion.p
-            className="mt-2 text-sm font-medium text-text"
-            initial={{ opacity: 0.99 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-          >
-            {getTrustConfidenceLabel(trustScore)}
-          </motion.p>
-          <motion.p
-            className="text-xs text-text-muted"
-            initial={{ opacity: 0.99 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.45 }}
-          >
-            Overall trust score
-          </motion.p>
-        </motion.div>
-      )}
-
-      {/* Component breakdown */}
-      {componentEntries.length > 0 && (
-        <motion.div className="space-y-3" variants={staggerItem}>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-            Score breakdown
-          </h4>
-          {componentEntries.map(([key, value]) => (
-            <motion.div
-              key={key}
-              className="space-y-1"
-              initial={{ opacity: 0.99, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-text-muted">
-                  {componentLabels[key] ?? key.replace(/_/g, ' ')}
-                </span>
-                <span
-                  className={clsx(
-                    'font-medium',
-                    getTrustBadgeColor(value) === 'green'
-                      ? 'text-green'
-                      : getTrustBadgeColor(value) === 'orange'
-                        ? 'text-orange'
-                        : 'text-red',
-                  )}
-                >
-                  {(value * 100).toFixed(0)}%
-                </span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-card-2">
-                <motion.div
-                  className={clsx(
-                    'h-full rounded-full',
-                    getTrustBadgeColor(value) === 'green'
-                      ? 'bg-green'
-                      : getTrustBadgeColor(value) === 'orange'
-                        ? 'bg-orange'
-                        : 'bg-red',
-                  )}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${value * 100}%` }}
-                  transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-                />
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-      )}
-
-      {/* Guardrail result */}
-      {guardrail && (
-        <motion.div className="space-y-3" variants={staggerItem}>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-            Guardrail check
-          </h4>
-          <GuardrailBadge guardrail={guardrail} />
-        </motion.div>
-      )}
-    </motion.div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  CONVERSATION HISTORY TAB
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function ConversationHistoryTab({
-  queries,
-  historyLoading,
-  historyError,
-  onRetry,
-  onSelect,
-  historyOpen,
-  onDelete,
-  isDeleting,
-  conversationId,
-}: {
-  queries: StoredQueryDetail[];
-  historyLoading: boolean;
-  historyError: boolean;
-  onRetry: () => void;
-  onSelect: (queryId: string) => void;
-  historyOpen: string | null;
-  onDelete: (queryId: string) => void;
-  isDeleting: boolean;
-  conversationId: string | null;
-}) {
-  if (historyLoading) {
-    return (
-      <div className="space-y-2 p-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0.99, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-          >
-            <Skeleton height={60} width="100%" />
-          </motion.div>
-        ))}
-      </div>
-    );
-  }
-
-  if (historyError) {
-    return (
-      <div className="p-4">
-        <motion.div
-          className="flex flex-col items-center justify-center py-8 text-center"
-          initial={{ opacity: 0.99 }}
-          animate={{ opacity: 1 }}
-        >
-          <AlertCircle size={20} className="mb-2 text-red" />
-          <p className="text-sm text-text-muted">Failed to load history</p>
-          <Button variant="secondary" size="sm" className="mt-3" onClick={onRetry}>
-            Try again
-          </Button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (!conversationId) {
-    return (
-      <div className="p-4">
-        <EmptyState
-          icon={<MessageSquare size={24} />}
-          title="No conversation yet"
-          description="Start a conversation to see your history here."
-        />
-      </div>
-    );
-  }
-
-  if (queries.length === 0) {
-    return (
-      <div className="p-4">
-        <EmptyState
-          icon={<MessageSquare size={24} />}
-          title="No queries yet"
-          description="Ask a question to begin."
-        />
-      </div>
-    );
-  }
-
-  return (
-    <motion.div
-      className="space-y-1 p-4"
-      variants={staggerContainer}
-      initial="initial"
-      animate="animate"
-    >
-      <motion.p className="mb-2 text-xs font-medium text-text-muted" variants={staggerItem}>
-        {queries.length} quer{queries.length === 1 ? 'y' : 'ies'}
-      </motion.p>
-      <AnimatePresence>
-        {queries.map((q) => {
-          const isOpen = historyOpen === q.queryId;
-          return (
-            <motion.div
-              key={q.queryId}
-              variants={staggerItem}
-              layout
-              transition={{ duration: 0.3 }}
-            >
-              <motion.button
-                type="button"
-                onClick={() => onSelect(q.queryId)}
-                className={clsx(
-                  'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
-                  isOpen
-                    ? 'bg-primary/10 text-text border border-primary/20'
-                    : 'text-text-muted hover:bg-card-2 hover:text-text border border-transparent',
-                )}
-                whileHover={{ x: 2 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <MessageSquare size={14} className="mt-0.5 shrink-0" />
-                <span className="line-clamp-2 flex-1">{q.queryText}</span>
-                <span className="shrink-0 text-[10px] text-text-dim">
-                  {formatTimestamp(q.timestamp)}
-                </span>
-              </motion.button>
-
-              {/* Expanded detail */}
-              <AnimatePresence>
-                {isOpen && (
-                  <motion.div
-                    initial={{ opacity: 0.99, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] as const }}
-                    className="overflow-hidden"
-                  >
-                    <div className="ml-7 space-y-2 border-l-2 border-border/60 pl-4 pb-2 pt-1">
-                      {q.responseText ? (
-                        <motion.p
-                          className="text-xs leading-relaxed text-text-muted line-clamp-3"
-                          initial={{ opacity: 0.99 }}
-                          animate={{ opacity: 1 }}
-                          transition={{ delay: 0.1 }}
-                        >
-                          {q.responseText}
-                        </motion.p>
-                      ) : (
-                        <motion.p
-                          className="text-xs text-text-dim italic"
-                          initial={{ opacity: 0.99 }}
-                          animate={{ opacity: 1 }}
-                        >
-                          Loading response…
-                        </motion.p>
-                      )}
-                      <div className="flex items-center gap-2">
-                        <motion.button
-                          type="button"
-                          onClick={() => onDelete(q.queryId)}
-                          disabled={isDeleting}
-                          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-red transition-colors hover:bg-red/15"
-                          aria-label={`Delete query: ${q.queryText}`}
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                        >
-                          <Trash2 size={12} />
-                          Delete
-                        </motion.button>
-                        {q.responseText && (
-                          <motion.button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(q.responseText).catch(() => {});
-                            }}
-                            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-text-muted transition-colors hover:bg-card-2"
-                            aria-label="Copy response"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <Copy size={12} />
-                            Copy
-                          </motion.button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
     </motion.div>
   );
 }

@@ -34,24 +34,12 @@ import {
   TrendingUp,
   TrendingDown,
 } from 'lucide-react';
-import {
-  Button,
-  Card,
-  Badge,
-  Tabs,
-  LoadingSpinner,
-  Skeleton,
-  EmptyState,
-  useToast,
-  staggerContainer,
-  staggerItem,
-  fadeIn,
-  pageTransition,
-  fadeInScale,
-} from '../components/ui';
+import { Button, Card, Badge, Tabs, LoadingSpinner, Skeleton, EmptyState } from '../components/ui';
+import { staggerContainer, staggerItem, fadeIn, pageTransition, fadeInScale } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import type { AdminStats, AuditLogEntry } from '../api/types';
 import { getSafeLabel, getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
 

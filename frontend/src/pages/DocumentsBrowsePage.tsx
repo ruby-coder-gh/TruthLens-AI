@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, File, FileSpreadsheet, FileImage, Search, Clock, Upload } from 'lucide-react';
-import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, Input, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, Input } from '../components/ui';
+import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 import type { Document } from '../api/types';

@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, Search, Upload, ChevronRight, Clock } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Badge, Input, EmptyState, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Button, Badge, Input, EmptyState } from '../components/ui';
+import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 

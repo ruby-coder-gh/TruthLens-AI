@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -9,7 +9,7 @@ import {
   Shield,
   Unlock,
 } from 'lucide-react';
-import type { LucideProps } from 'lucide-react';
+import type { LucideIcon as LucideIconType } from 'lucide-react';
 import type { ApiGroup, ApiEndpoint } from './types';
 import { METHOD_COLORS } from './data';
 import * as Icons from 'lucide-react';
@@ -25,7 +25,7 @@ const LucideIcon = ({
   className?: string;
   color?: string;
 }) => {
-  const iconMap = Icons as Partial<Record<string, ComponentType<LucideProps>>>;
+  const iconMap = Icons as unknown as Record<string, LucideIconType>;
   const Icon = iconMap[name];
   if (!Icon) return null;
   return <Icon size={size} className={className} color={color} />;

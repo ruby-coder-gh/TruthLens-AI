@@ -10,15 +10,48 @@ export interface QueryWebSocketCallbacks {
   onProgress?: (phase: string, progress: number) => void;
 }
 
-type WSMessageData =
-  | { type: 'token'; content: string }
-  | { type: 'source'; chunk_id: string; document_id: string; excerpt: string; score: number; document_name?: string; relevance_score?: number; rerank_score?: number; page_number?: number }
-  | { type: 'guardrail'; passed: boolean; score: number; details: string }
-  | { type: 'trust_score'; score: number; components: Record<string, number> }
-  | { type: 'complete'; query_id: string; latency_ms: number; model_used: string; token_count: number }
-  | { type: 'error'; code: string; message: string }
-  | { type: 'progress'; phase: string; progress: number }
-  | { type: string; [key: string]: unknown };
+/** Raw source object as delivered inside a `sources` message payload. */
+interface WSSourcePayload {
+  chunk_id: string;
+  document_id: string;
+  excerpt: string;
+  score?: number;
+  relevance_score?: number;
+  rerank_score?: number;
+  document_name?: string;
+  page_number?: number;
+  confidence?: number;
+  matched_chunks?: number;
+  explanation?: string;
+  updated_at?: string;
+  file_type?: string;
+}
+
+/** Payload fields the server may attach to a message envelope. */
+interface WSMessagePayload {
+  content?: string;
+  token?: string;
+  sources?: WSSourcePayload[];
+  passed?: boolean;
+  score?: number;
+  details?: string;
+  components?: Record<string, number>;
+  query_id?: string;
+  latency_ms?: number;
+  model_used?: string;
+  token_count?: number;
+  code?: string;
+  message?: string;
+  phase?: string;
+  progress?: number;
+}
+
+/** Envelope for every message received over the query WebSocket. */
+interface WSServerMessage {
+  type: string;
+  payload?: WSMessagePayload;
+  content?: string;
+}
 
 export class QueryWebSocket {
   private ws: WebSocket | null = null;
@@ -57,7 +90,7 @@ export class QueryWebSocket {
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data) as WSMessageData;
+        const data = JSON.parse(event.data) as WSServerMessage;
         this.handleMessage(data);
       } catch {
         // Non-JSON message, ignore
@@ -88,9 +121,9 @@ export class QueryWebSocket {
     }
   }
 
-  private handleMessage(msg: any): void {
-    const payload = msg.payload || {};
-    
+  private handleMessage(msg: WSServerMessage): void {
+    const payload: WSMessagePayload = msg.payload ?? {};
+
     switch (msg.type) {
       case 'auth_success':
         // Auth confirmed — now send the query
@@ -105,7 +138,7 @@ export class QueryWebSocket {
         break;
 
       case 'token': {
-        this.callbacks.onToken?.(payload.content || payload.token || msg.content);
+        this.callbacks.onToken?.(payload.content ?? payload.token ?? msg.content ?? '');
         break;
       }
 
@@ -134,35 +167,35 @@ export class QueryWebSocket {
 
       case 'guardrail': {
         this.callbacks.onGuardrail?.({
-          passed: payload.passed,
-          score: payload.score,
-          details: payload.details,
+          passed: payload.passed ?? false,
+          score: payload.score ?? 0,
+          details: payload.details ?? '',
         });
         break;
       }
 
       case 'trust_score': {
-        this.callbacks.onTrustScore?.(payload.score, payload.components);
+        this.callbacks.onTrustScore?.(payload.score ?? 0, payload.components ?? {});
         break;
       }
 
       case 'complete': {
         this.callbacks.onComplete?.({
-          query_id: payload.query_id,
-          latency_ms: payload.latency_ms,
-          model_used: payload.model_used,
-          token_count: payload.token_count,
+          query_id: payload.query_id ?? '',
+          latency_ms: payload.latency_ms ?? 0,
+          model_used: payload.model_used ?? '',
+          token_count: payload.token_count ?? 0,
         });
         break;
       }
 
       case 'error': {
-        this.callbacks.onError?.(payload.code || 'error', payload.message || 'Unknown error');
+        this.callbacks.onError?.(payload.code ?? 'error', payload.message ?? 'Unknown error');
         break;
       }
 
       case 'progress': {
-        this.callbacks.onProgress?.(payload.phase, payload.progress);
+        this.callbacks.onProgress?.(payload.phase ?? '', payload.progress ?? 0);
         break;
       }
 

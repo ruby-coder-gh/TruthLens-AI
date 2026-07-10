@@ -1,4 +1,3 @@
-import { useRef, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { clsx } from 'clsx';
 
@@ -12,23 +11,29 @@ interface GlowingIconProps {
 }
 
 function ParticleBurst({ color }: { color: string }) {
+  // Deterministic burst directions (6 evenly-spread radial offsets) — pure render.
   return (
     <span className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <motion.span
-          key={i}
-          className="absolute w-1 h-1 rounded-full"
-          style={{ background: color, left: '50%', top: '50%' }}
-          initial={{ x: 0, y: 0, opacity: 0.99 }}
-          animate={{
-            x: [0, (Math.random() - 0.5) * 40],
-            y: [0, (Math.random() - 0.5) * 40],
-            opacity: [0.99, 0],
-            scale: [1, 0],
-          }}
-          transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 + i * 0.3, ease: 'easeOut' }}
-        />
-      ))}
+      {Array.from({ length: 6 }).map((_, i) => {
+        const angle = (i / 6) * Math.PI * 2;
+        const dx = Math.cos(angle) * 18;
+        const dy = Math.sin(angle) * 18;
+        return (
+          <motion.span
+            key={i}
+            className="absolute w-1 h-1 rounded-full"
+            style={{ background: color, left: '50%', top: '50%' }}
+            initial={{ x: 0, y: 0, opacity: 0.99 }}
+            animate={{
+              x: [0, dx],
+              y: [0, dy],
+              opacity: [0.99, 0],
+              scale: [1, 0],
+            }}
+            transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 + i * 0.3, ease: 'easeOut' }}
+          />
+        );
+      })}
     </span>
   );
 }

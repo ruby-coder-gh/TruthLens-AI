@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-import { clsx } from 'clsx';
 import {
   Key,
   Zap,
@@ -73,7 +72,7 @@ function AuthPanel() {
 }
 
 function QuickPlayground() {
-  const [code, setCode] = useState(`curl -X POST https://api.truthlens.ai/api/auth/login \\
+  const [code] = useState(`curl -X POST https://api.truthlens.ai/api/auth/login \\
   -H "Content-Type: application/json" \\
   -d '{"username": "user", "password": "pass"}'`);
 

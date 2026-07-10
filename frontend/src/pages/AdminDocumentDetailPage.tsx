@@ -3,7 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowLeft, FileText, Clock, Trash2, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
-import { Button, Card, Badge, Modal, useToast, pageTransition, fadeInUp } from '../components/ui';
+import { Button, Card, Badge, Modal } from '../components/ui';
+import { pageTransition, fadeInUp } from '../components/motion';
+import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 

@@ -12,7 +12,7 @@ function ParticleField() {
     if (!ctx) return;
 
     let animationId: number;
-    let particles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number }[] = [];
+    const particles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number }[] = [];
 
     const resize = () => {
       if (!canvas) return;

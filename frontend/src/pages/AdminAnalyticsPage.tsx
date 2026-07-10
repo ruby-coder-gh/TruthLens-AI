@@ -21,15 +21,8 @@ import {
   Shield,
   TrendingUp,
 } from 'lucide-react';
-import {
-  Badge,
-  Button,
-  Card,
-  Tabs,
-  pageTransition,
-  staggerContainer,
-  staggerItem,
-} from '../components/ui';
+import { Badge, Button, Card, Tabs } from '../components/ui';
+import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 

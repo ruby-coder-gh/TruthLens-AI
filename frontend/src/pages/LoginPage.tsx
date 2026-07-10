@@ -5,7 +5,7 @@ import { Mail, Lock, Eye, EyeOff, LogIn, Sparkles } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth-context';
 import Logo from '../components/Logo';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
