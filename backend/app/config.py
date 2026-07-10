@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     TRUST_RELEVANCE_WEIGHT: float = 0.2
     TRUST_SOURCE_WEIGHT: float = 0.1
 
+    # ─── Evaluation ───────────────────────────
+    EVAL_MIN_FAITHFULNESS: float = 0.6
+    EVAL_MIN_TRUST: float = 0.5
+    EVAL_MIN_CONTEXT_PRECISION: float = 0.5
+    EVAL_REFUSAL_ACCURACY_MIN: float = 0.7
+
     # ─── JWT Auth ────────────────────────────
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7

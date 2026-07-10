@@ -40,6 +40,7 @@ python_files = ["test_*.py"]
 asyncio_mode = "auto"
 markers = [
     "asyncio: mark test as async",
+    "slow: full golden-set eval, needs Ollama (opt-in via EVAL_RUN=1)",
 ]
 
 [tool.coverage.run]

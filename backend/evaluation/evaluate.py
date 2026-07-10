@@ -18,12 +18,84 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def _golden_set_version() -> str | None:
+    """Short content hash of the golden dataset source file (stamps EvalRun)."""
+    try:
+        dataset_path = Path(__file__).resolve().parent / "golden_dataset.py"
+        return hashlib.sha1(dataset_path.read_bytes()).hexdigest()[:12]
+    except Exception:
+        return None
+
+
+async def _persist_eval_run(summary: dict[str, Any]) -> str | None:
+    """Insert one EvalRun row from a pipeline summary.
+
+    Self-contained and best-effort: reuses the app's async session factory,
+    maps the pipeline's aggregate metrics onto the six EvalRun columns, and
+    never raises into the caller (a persistence failure must not fail a run
+    that already produced its JSON output). Returns the new row id or None.
+    """
+    try:
+        from app.database import async_session_factory, engine
+        from app.models.eval_run import EvalRun
+
+        # Ensure the eval_runs table exists (self-contained; no Alembic needed
+        # for a standalone eval run against a fresh DB).
+        async with engine.begin() as conn:
+            await conn.run_sync(EvalRun.__table__.create, checkfirst=True)
+
+        results = summary.get("results", [])
+        # Refusal accuracy: over unanswerable entries (empty source_documents /
+        # a "cannot be answered" reference), did the guardrail flag the answer
+        # as unsupported? Recomputed here from per-entry data.
+        unanswerable = [r for r in results if r.get("expected_grounding") is False]
+        refused = sum(
+            1
+            for r in unanswerable
+            if r.get("guardrail_passed") is False
+            or "cannot" in (r.get("answer", "") or "").lower()
+        )
+        refusal_accuracy = refused / len(unanswerable) if unanswerable else None
+
+        breakdown = {
+            "model": summary.get("model"),
+            "total_entries": summary.get("total_entries"),
+            "completed": summary.get("completed"),
+            "failed": summary.get("failed"),
+            "avg_word_f1": summary.get("avg_word_f1"),
+            "guardrail_pass_rate": summary.get("guardrail_pass_rate"),
+            "unanswerable_total": len(unanswerable),
+            "refused_total": refused,
+        }
+
+        async with async_session_factory() as session:
+            row = EvalRun(
+                faithfulness=summary.get("avg_guardrail_score"),
+                context_precision=None,
+                context_recall=None,
+                answer_relevance=summary.get("avg_word_f1"),
+                answer_correctness=None,
+                refusal_accuracy=refusal_accuracy,
+                golden_set_version=_golden_set_version(),
+                notes=json.dumps(breakdown, default=str),
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            print(f"  💾 EvalRun persisted: id={row.id} (version={row.golden_set_version})")
+            return row.id
+    except Exception as e:  # noqa: BLE001 — best-effort persistence
+        print(f"  ⚠ EvalRun persistence skipped: {e}")
+        return None
 
 
 def _generate_html_report(all_results: list[dict[str, Any]]) -> str:
@@ -225,6 +297,7 @@ async def evaluate_pipeline(
                 "query": query,
                 "answer": gen_result.text[:500],
                 "guardrail_passed": guardrail.passed,
+                "expected_grounding": entry.expected_grounding,
                 "metrics": {
                     "word_f1": round(f1, 4),
                     "word_precision": round(precision, 4),
@@ -265,6 +338,10 @@ async def evaluate_pipeline(
     }
 
     _print_terminal_report(summary)
+
+    # Persist an EvalRun row alongside the JSON output (best-effort).
+    await _persist_eval_run(summary)
+
     return summary
 
 
