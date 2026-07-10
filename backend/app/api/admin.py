@@ -44,6 +44,8 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_cu
 _settings_overrides: dict[str, Any] = {}
 
 TRUST_SCORE_LOW_THRESHOLD = 0.4
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
 
 
 # ─── Inline schemas for admin-only operations ────────────────────────
@@ -132,6 +134,8 @@ async def get_audit_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Get audit log entries (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     query = select(AuditLog)
     count_query = select(func.count(AuditLog.id))
 
@@ -246,6 +250,8 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """List all users with pagination (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     count_result = await db.execute(select(func.count(User.id)))
     total = count_result.scalar() or 0
 
@@ -442,6 +448,8 @@ async def get_user_activity(
     db: AsyncSession = Depends(get_db),
 ):
     """Get query history for a specific user (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     result = await db.execute(select(User).where(User.id == user_id))
     if not result.scalar_one_or_none():
         raise NotFoundException("User", user_id)
@@ -484,6 +492,8 @@ async def get_flagged_answers(
     db: AsyncSession = Depends(get_db),
 ):
     """Return queries with low trust scores (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     count_query = select(func.count(Query.id)).where(
         Query.trust_score.isnot(None),
         Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
@@ -598,6 +608,8 @@ async def get_evaluation_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Get all past eval runs (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     count_result = await db.execute(select(func.count(EvalRun.id)))
     total = count_result.scalar() or 0
 

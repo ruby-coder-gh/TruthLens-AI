@@ -1,9 +1,10 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ToastProvider, Skeleton } from './components/ui'
 import Layout from './components/Layout'
+import CursorGlow from './components/CursorGlow'
 
 // Route-level code splitting — chunks load on demand
 const LandingPage = lazy(() => import('./pages/LandingPage'))
@@ -61,6 +62,12 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+function AdminRoute() {
+  const { user } = useAuth()
+  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />
+  return <Outlet />
+}
+
 // ─── App Routes ─────────────────────────────────────────────────────────────
 function RouteFallback() {
   return (
@@ -95,6 +102,8 @@ function AppRoutes() {
       >
         {/* User pages */}
         <Route path="/dashboard" element={<UserDashboard />} />
+        <Route path="/workspace" element={<Navigate to="/workspaces" replace />} />
+        <Route path="/chat" element={<Navigate to="/chat/new" replace />} />
         <Route path="/chat/new" element={<ChatNewPage />} />
         <Route path="/chats" element={<ChatHistoryPage />} />
         <Route path="/chat/:queryId" element={<ChatDetailPage />} />
@@ -108,18 +117,20 @@ function AppRoutes() {
         <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
 
         {/* Admin pages */}
-        <Route path="/api-catalog" element={<ApiCatalogPage />} />
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/admin/documents" element={<AdminDocumentsPage />} />
-        <Route path="/admin/documents/upload" element={<AdminUploadPage />} />
-        <Route path="/admin/documents/:docId" element={<AdminDocumentDetailPage />} />
-        <Route path="/admin/collections" element={<AdminCollectionsPage />} />
-        <Route path="/admin/users" element={<AdminUsersPage />} />
-        <Route path="/admin/users/invite" element={<AdminInviteUserPage />} />
-        <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
-        <Route path="/admin/settings" element={<AdminSettingsPage />} />
-        <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
-        <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+        <Route element={<AdminRoute />}>
+          <Route path="/api-catalog" element={<ApiCatalogPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/documents" element={<AdminDocumentsPage />} />
+          <Route path="/admin/documents/upload" element={<AdminUploadPage />} />
+          <Route path="/admin/documents/:docId" element={<AdminDocumentDetailPage />} />
+          <Route path="/admin/collections" element={<AdminCollectionsPage />} />
+          <Route path="/admin/users" element={<AdminUsersPage />} />
+          <Route path="/admin/users/invite" element={<AdminInviteUserPage />} />
+          <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
+          <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+        </Route>
       </Route>
 
       {/* ── STATIC PAGES ────────────────────────────────────────────────── */}
@@ -141,6 +152,8 @@ export default function App() {
         <ToastProvider>
           <AuthProvider>
             <AppRoutes />
+            <CursorGlow />
+            <div className="noise-overlay" aria-hidden="true" />
           </AuthProvider>
         </ToastProvider>
       </BrowserRouter>

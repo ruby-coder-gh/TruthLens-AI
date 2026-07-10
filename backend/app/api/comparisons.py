@@ -24,9 +24,24 @@ from app.schemas.common import (
     ComparisonCreateResponse,
     PaginatedResponse,
 )
-from app.graph.comparison_graph import run_comparison
+from app.utils.logger import logger
 
 router = APIRouter(tags=["comparisons"])
+
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
+
+
+async def _run_comparison(*, query: str, workspace_id: str, document_ids: list[str], user_id: str, query_id: str):
+    from app.graph.comparison_graph import run_comparison
+
+    return await run_comparison(
+        query=query,
+        workspace_id=workspace_id,
+        document_ids=document_ids,
+        user_id=user_id,
+        query_id=query_id,
+    )
 
 
 @router.post(
@@ -107,7 +122,7 @@ async def _run_and_save_comparison(
     from app.database import async_session_factory
 
     try:
-        result = await run_comparison(
+        result = await _run_comparison(
             query=query,
             workspace_id=workspace_id,
             document_ids=document_ids,
@@ -135,7 +150,7 @@ async def _run_and_save_comparison(
 
                 # Get document name
                 doc_result = await db.execute(
-                    select(Document.name).where(Document.id == doc_id)
+                    select(Document.original_filename).where(Document.id == doc_id)
                 )
                 doc_name = doc_result.scalar() or ""
 
@@ -170,6 +185,8 @@ async def list_comparisons(
     db: AsyncSession = Depends(get_db),
 ):
     """List comparison history for a workspace."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     count_result = await db.execute(
         select(func.count(Comparison.id)).where(Comparison.workspace_id == workspace_id)
     )
@@ -234,7 +251,7 @@ async def get_comparison(
     doc_names = {}
     if doc_ids:
         doc_result = await db.execute(
-            select(Document.id, Document.name).where(Document.id.in_(doc_ids))
+            select(Document.id, Document.original_filename).where(Document.id.in_(doc_ids))
         )
         doc_names = {row[0]: row[1] for row in doc_result.fetchall()}
 

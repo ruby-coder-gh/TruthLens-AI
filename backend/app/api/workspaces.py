@@ -104,31 +104,40 @@ async def list_workspaces(
             seen.add(ws.id)
             all_workspaces.append(ws)
 
+    if not all_workspaces:
+        return ListResponse(data=[])
+
+    workspace_ids = [ws.id for ws in all_workspaces]
+
+    member_counts_result = await db.execute(
+        select(
+            WorkspaceMember.workspace_id,
+            func.count(WorkspaceMember.id),
+        )
+        .where(WorkspaceMember.workspace_id.in_(workspace_ids))
+        .group_by(WorkspaceMember.workspace_id)
+    )
+    member_counts = {workspace_id: count for workspace_id, count in member_counts_result.all()}
+
+    document_counts_result = await db.execute(
+        select(
+            Document.workspace_id,
+            func.count(Document.id),
+        )
+        .where(Document.workspace_id.in_(workspace_ids))
+        .group_by(Document.workspace_id)
+    )
+    document_counts = {workspace_id: count for workspace_id, count in document_counts_result.all()}
+
     summaries = []
     for ws in all_workspaces:
-        # Count members
-        m_count = await db.execute(
-            select(func.count(WorkspaceMember.id)).where(WorkspaceMember.workspace_id == ws.id)
-        )
-        member_count = m_count.scalar() or 0
-
-        # Count documents
-        d_count = await db.execute(
-            select(func.count()).select_from(type(ws).__table__).where(Workspace.id == ws.id)
-        )
-        from app.models.document import Document
-        doc_count = await db.execute(
-            select(func.count(Document.id)).where(Document.workspace_id == ws.id)
-        )
-        document_count = doc_count.scalar() or 0
-
         summaries.append(WorkspaceSummary(
             id=ws.id,
             name=ws.name,
             description=ws.description,
             owner_id=ws.owner_id,
-            member_count=member_count,
-            document_count=document_count,
+            member_count=member_counts.get(ws.id, 0),
+            document_count=document_counts.get(ws.id, 0),
             created_at=ws.created_at,
         ))
 
@@ -354,25 +363,25 @@ async def list_members(
 ):
     """List workspace members."""
     result = await db.execute(
-        select(WorkspaceMember)
+        select(WorkspaceMember, User)
+        .outerjoin(User, User.id == WorkspaceMember.user_id)
         .where(WorkspaceMember.workspace_id == workspace.id)
         .order_by(WorkspaceMember.joined_at)
     )
-    members = result.scalars().all()
+    rows = result.all()
 
-    member_responses = []
-    for m in members:
-        user_result = await db.execute(select(User).where(User.id == m.user_id))
-        user = user_result.scalar_one_or_none()
-        member_responses.append(MemberResponse(
-            id=m.id,
-            workspace_id=m.workspace_id,
-            user_id=m.user_id,
-            role=m.role,
+    member_responses = [
+        MemberResponse(
+            id=member.id,
+            workspace_id=member.workspace_id,
+            user_id=member.user_id,
+            role=member.role,
             username=user.username if user else None,
             email=user.email if user else None,
-            joined_at=m.joined_at,
-        ))
+            joined_at=member.joined_at,
+        )
+        for member, user in rows
+    ]
 
     return ListResponse(data=member_responses)
 

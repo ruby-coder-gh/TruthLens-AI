@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback, createPortal, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type FormEvent, type KeyboardEvent } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +13,6 @@ import {
   Shield,
   Brain,
   ChevronRight,
-  X,
   Copy,
   ThumbsUp,
   ThumbsDown,
@@ -38,18 +38,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Button,
-  Card,
   Badge,
   EmptyState,
   Skeleton,
-  ProgressBar,
   useToast,
-  fadeIn,
   fadeInUp,
   staggerContainer,
   staggerItem,
   pageTransition,
 } from '../components/ui';
+import { PageShell } from '../components/PageWrappers';
 import {
   queryApi,
   feedbackApi,
@@ -57,6 +55,7 @@ import {
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
 import type { Source, QuerySummary } from '../api/types';
+import { getRelevanceMeta, getTrustColorVar, getTrustConfidenceLabel, relevancePercent } from '../utils/relevance';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -108,18 +107,6 @@ function formatLatency(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function trustScoreColor(score: number): 'green' | 'orange' | 'red' {
-  if (score >= 0.75) return 'green';
-  if (score >= 0.5) return 'orange';
-  return 'red';
-}
-
-function trustScoreLabel(score: number): string {
-  if (score >= 0.75) return 'High confidence';
-  if (score >= 0.5) return 'Medium confidence';
-  return 'Low confidence';
-}
-
 function formatTimestamp(ts: string): string {
   const d = new Date(ts);
   const now = new Date();
@@ -165,16 +152,16 @@ export default function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [_streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [sidebarTab, setSidebarTab] = useState('sources');
+  const [, setSidebarTab] = useState('sources');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [expandedSource, setExpandedSource] = useState<string | null>(null);
+  const [, setExpandedSource] = useState<string | null>(null);
   const [tracingBeam, setTracingBeam] = useState<{ startId: string; targetId: string } | null>(null);
-  const [highlightedSourceId, setHighlightedSourceId] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [, setHighlightedSourceId] = useState<string | null>(null);
+  const [, setHistoryOpen] = useState<string | null>(null);
   const [sourcesModalOpen, setSourcesModalOpen] = useState(false);
   const [pipelinePhase, setPipelinePhase] = useState<string | null>(null);
   // Track queries stored in API for history tab
-  const [storedQueries, setStoredQueries] = useState<StoredQueryDetail[]>([]);
+  const [, setStoredQueries] = useState<StoredQueryDetail[]>([]);
 
   // Refs
   const wsRef = useRef<QueryWebSocket | null>(null);
@@ -185,8 +172,6 @@ export default function ChatPage() {
   // ─── Fetch conversation history from API ─────────────────────────────────
   const {
     data: historyData,
-    isLoading: historyLoading,
-    isError: historyError,
     refetch: refetchHistory,
   } = useQuery({
     queryKey: ['queries', workspaceId, conversationId],
@@ -528,6 +513,7 @@ export default function ChatPage() {
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
 
+      <PageShell className="space-y-0">
       <motion.div
         className="flex h-full -m-4 lg:-m-6 relative z-10"
         {...pageTransition}
@@ -630,7 +616,7 @@ export default function ChatPage() {
                           feedbackMutation.mutate({ queryId: msg.queryId, rating });
                         }
                       }}
-                      onSourceClick={(source, e, msgId, index) => {
+                      onSourceClick={(source, _e, msgId, index) => {
                         const markerId = `cite-${msgId}-${index}`;
                         const targetId = `source-${source.chunk_id}`;
                         setSidebarTab('sources');
@@ -733,6 +719,7 @@ export default function ChatPage() {
           isMobile={isMobile}
         />
       </motion.div>
+      </PageShell>
 
       {/* ─── Sources Popup Modal ──────────────────────────────────────────── */}
       <AnimatePresence>
@@ -776,8 +763,9 @@ export default function ChatPage() {
                   <p className="text-sm text-text-muted text-center py-8">No sources retrieved yet.</p>
                 ) : (
                   latestSources.map((source, i) => {
-                    const relevancePct = Math.round((source.relevance_score || 0) * 100);
-                    const confidencePct = Math.round((source.confidence ?? source.relevance_score ?? 0) * 100);
+                    const relevance = getRelevanceMeta(source.relevance_score);
+                    const relevancePct = relevance.percent;
+                    const confidencePct = relevancePercent(source.confidence ?? source.relevance_score);
                     const docName = source.document_name || `Source ${i + 1}`;
                     const fileExt = docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC';
 
@@ -812,13 +800,13 @@ export default function ChatPage() {
                           <div className="space-y-1">
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-text-dim">Relevance</span>
-                              <span className={`font-medium tabular-nums ${relevancePct >= 70 ? 'text-green' : relevancePct >= 40 ? 'text-orange' : 'text-red'}`}>
+                              <span className={clsx('font-medium tabular-nums', relevance.colors.text)}>
                                 {relevancePct}%
                               </span>
                             </div>
                             <div className="relative h-2 rounded-full bg-white/5 overflow-hidden">
                               <motion.div
-                                className={`absolute inset-y-0 left-0 rounded-full ${relevancePct >= 70 ? 'bg-gradient-to-r from-green-400 to-emerald-500' : relevancePct >= 40 ? 'bg-gradient-to-r from-orange-400 to-amber-500' : 'bg-gradient-to-r from-red-400 to-rose-500'}`}
+                                className={clsx('absolute inset-y-0 left-0 rounded-full', relevance.colors.bar)}
                                 initial={{ width: 0 }}
                                 animate={{ width: `${relevancePct}%` }}
                                 transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
@@ -828,7 +816,7 @@ export default function ChatPage() {
 
                           {/* Row 3: Excerpt */}
                           <p className="text-xs text-text-muted leading-relaxed line-clamp-2">
-                            {source.excerpt || source.text || 'No content'}
+                            {source.excerpt || 'No content'}
                           </p>
 
                           {/* Row 4: Confidence + Meta */}
@@ -1053,9 +1041,9 @@ function ChatMessageBubble({
                       <TrustScoreRing score={message.trustScore} />
                       <span
                         className="text-xs font-medium"
-                        style={{ color: message.trustScore >= 0.75 ? 'var(--color-accent)' : 'var(--color-orange)' }}
+                        style={{ color: getTrustColorVar(message.trustScore) }}
                       >
-                        {trustScoreLabel(message.trustScore)}
+                        {getTrustConfidenceLabel(message.trustScore)}
                       </span>
                     </div>
                   )}
@@ -1193,9 +1181,9 @@ function CitationHoverCard({ source, children }: { source: Source; children: Rea
   const [show, setShow] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
-  const hoverTimer = useRef<ReturnType<typeof setTimeout>>();
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const relevancePct = Math.round((source.relevance_score || 0) * 100);
+  const relevancePct = relevancePercent(source.relevance_score);
   const docName = source.document_name || 'Source';
 
   const showCard = () => {
@@ -1212,11 +1200,13 @@ function CitationHoverCard({ source, children }: { source: Source; children: Rea
   };
 
   const hideCard = () => {
-    clearTimeout(hoverTimer.current);
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
     setShow(false);
   };
 
-  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  useEffect(() => () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+  }, []);
 
   return (
     <>
@@ -1421,34 +1411,46 @@ function getFileTypeLabel(name?: string): string {
 }
 
 function getQualityBadge(score: number): { label: string; color: string; icon: React.ReactNode } {
-  if (score >= 0.7) return { label: 'Highly Relevant', color: 'text-green border-green/30 bg-green/10', icon: <Zap size={12} /> };
-  if (score >= 0.4) return { label: 'Partial Match', color: 'text-orange border-orange/30 bg-orange/10', icon: <Flag size={12} /> };
-  return { label: 'Weak Evidence', color: 'text-red border-red/30 bg-red/10', icon: <AlertCircle size={12} /> };
+  const relevance = getRelevanceMeta(score);
+
+  if (relevance.tier === 'high') {
+    return { label: relevance.label, color: relevance.colors.badge, icon: <Zap size={12} /> };
+  }
+
+  if (relevance.tier === 'medium') {
+    return { label: relevance.label, color: relevance.colors.badge, icon: <Flag size={12} /> };
+  }
+
+  return { label: relevance.label, color: relevance.colors.badge, icon: <AlertCircle size={12} /> };
 }
 
 function formatConfidence(score?: number): number {
-  if (score === undefined || score === null) return 0;
-  return Math.round(Math.min(100, Math.max(0, score * 100)));
+  return relevancePercent(score);
 }
 
 function highlightMatches(text: string, query?: string): React.ReactNode {
-  if (!query || query.length < 2) return <>{text}</>;
-  const words = query.split(/\s+/).filter(w => w.length > 2);
-  if (words.length === 0) return <>{text}</>;
-  
-  let result: React.ReactNode = text;
-  for (const word of words) {
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = String(result).split(new RegExp(`(${escaped})`, 'gi'));
-    if (parts.length > 1) {
-      result = parts.map((part: string, i: number) =>
-        part.toLowerCase() === word.toLowerCase()
-          ? <mark key={i} className="rounded bg-purple-500/20 px-0.5 text-purple-200">{part}</mark>
-          : part
-      );
-    }
-  }
-  return result;
+  if (!query || query.length < 2) return text;
+
+  const words = [...new Set(
+    query
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 2),
+  )];
+  if (words.length === 0) return text;
+
+  const pattern = words
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  if (!pattern) return text;
+
+  const parts = text.split(new RegExp(`(${pattern})`, 'gi'));
+  return parts.map((part, i) => {
+    const isMatch = words.some((word) => part.toLowerCase() === word.toLowerCase());
+    return isMatch
+      ? <mark key={`${part}-${i}`} className="rounded bg-purple-500/20 px-0.5 text-purple-200">{part}</mark>
+      : part;
+  });
 }
 
 function SourcesTab({
@@ -1471,7 +1473,7 @@ function SourcesTab({
         {Array.from({ length: 3 }).map((_, i) => (
           <motion.div
             key={i}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
           >
@@ -1506,7 +1508,7 @@ function SourcesTab({
         </motion.div>
         <motion.h4
           className="text-sm font-semibold text-text"
-          initial={{ opacity: 0, y: 8 }}
+          initial={{ opacity: 0.99, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
@@ -1514,7 +1516,7 @@ function SourcesTab({
         </motion.h4>
         <motion.p
           className="mt-1 max-w-[220px] text-xs text-text-dim"
-          initial={{ opacity: 0, y: 8 }}
+          initial={{ opacity: 0.99, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
         >
@@ -1522,7 +1524,7 @@ function SourcesTab({
         </motion.p>
         <motion.div
           className="mt-4 space-y-1.5 text-left"
-          initial={{ opacity: 0 }}
+          initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.25 }}
         >
@@ -1565,11 +1567,12 @@ function SourcesTab({
       </motion.div>
 
       <div className="space-y-2.5">
-        {visibleSources.map((source, idx) => {
+        {visibleSources.map((source) => {
           const isExpanded = expandedSource === source.chunk_id;
-          const pct = Math.round((source.relevance_score ?? 0) * 100);
+          const relevance = getRelevanceMeta(source.relevance_score);
+          const pct = relevance.percent;
           const conf = formatConfidence(source.confidence ?? source.relevance_score);
-          const quality = getQualityBadge(source.relevance_score ?? 0);
+          const quality = getQualityBadge(relevance.score);
           const docName = source.document_name || `Document ${source.document_id.slice(0, 8)}`;
           const fileType = source.file_type || getFileTypeLabel(source.document_name);
 
@@ -1647,35 +1650,21 @@ function SourcesTab({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-text-dim">Relevance</span>
-                      <span className={clsx(
-                        'font-semibold font-mono',
-                        pct >= 70 ? 'text-accent' : pct >= 40 ? 'text-orange' : 'text-red'
-                      )}>
+                      <span className={clsx('font-semibold font-mono', relevance.colors.text)}>
                         {pct}%
                       </span>
                     </div>
                     <div className="relative h-2 overflow-hidden rounded-full bg-card-2">
                       <motion.div
-                        className="h-full rounded-full"
-                        style={{
-                          background: pct >= 70
-                            ? 'linear-gradient(90deg, #a855f7, #3b82f6)'
-                            : pct >= 40
-                              ? 'linear-gradient(90deg, #f59e0b, #f97316)'
-                              : 'linear-gradient(90deg, #ef4444, #f97316)',
-                        }}
+                        className={clsx('h-full rounded-full', relevance.colors.bar)}
                         initial={{ width: 0 }}
                         animate={{ width: `${pct}%` }}
                         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
                       />
                       {/* Pulse glow */}
                       <motion.div
-                        className="absolute inset-y-0 right-0 w-4 rounded-full"
-                        style={{
-                          background: 'linear-gradient(90deg, transparent, rgba(168,85,247,0.4))',
-                          filter: 'blur(4px)',
-                          right: `${100 - pct}%`,
-                        }}
+                        className={clsx('absolute inset-y-0 right-0 w-4 rounded-full blur-[4px]', relevance.colors.glow)}
+                        style={{ right: `${100 - pct}%` }}
                         animate={{ opacity: [0, 0.8, 0] }}
                         transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
                       />
@@ -1725,7 +1714,7 @@ function SourcesTab({
                   {/* ─── Row 5: AI Explanation ───────────────────────────── */}
                   {source.explanation && (
                     <motion.div
-                      initial={{ opacity: 0, height: 0 }}
+                      initial={{ opacity: 0.99, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       className="rounded-lg border border-purple-500/15 bg-purple-500/5 px-2.5 py-2"
                     >
@@ -1857,6 +1846,10 @@ function WhyThisAnswerTab({
     ([key]) => key in componentLabels || key !== 'overall',
   );
 
+  const trustTone = trustScore !== null ? getTrustBadgeColor(trustScore) : 'gray';
+  const trustStroke = trustTone === 'green' ? '#34d399' : trustTone === 'orange' ? '#fb923c' : '#f87171';
+  const trustTextClass = trustTone === 'green' ? 'text-green' : trustTone === 'orange' ? 'text-orange' : 'text-red';
+
   return (
     <motion.div
       className="space-y-6 p-4"
@@ -1882,7 +1875,7 @@ function WhyThisAnswerTab({
               <motion.circle
                 cx="50" cy="50" r="42"
                 fill="none"
-                stroke={trustScore >= 0.75 ? '#34d399' : trustScore >= 0.5 ? '#fb923c' : '#f87171'}
+                stroke={trustStroke}
                 strokeWidth="6"
                 strokeLinecap="round"
                 strokeDasharray={`${2 * Math.PI * 42}`}
@@ -1893,14 +1886,7 @@ function WhyThisAnswerTab({
             </svg>
             {/* Score text */}
             <motion.span
-              className={clsx(
-                'text-2xl font-bold',
-                trustScore >= 0.75
-                  ? 'text-green'
-                  : trustScore >= 0.5
-                    ? 'text-orange'
-                    : 'text-red',
-              )}
+              className={clsx('text-2xl font-bold', trustTextClass)}
               initial={{ opacity: 0.99, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.3, type: 'spring', damping: 10 }}
@@ -1914,7 +1900,7 @@ function WhyThisAnswerTab({
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
           >
-            {trustScoreLabel(trustScore)}
+            {getTrustConfidenceLabel(trustScore)}
           </motion.p>
           <motion.p
             className="text-xs text-text-muted"
@@ -1948,9 +1934,9 @@ function WhyThisAnswerTab({
                 <span
                   className={clsx(
                     'font-medium',
-                    value >= 0.75
+                    getTrustBadgeColor(value) === 'green'
                       ? 'text-green'
-                      : value >= 0.5
+                      : getTrustBadgeColor(value) === 'orange'
                         ? 'text-orange'
                         : 'text-red',
                   )}
@@ -1962,9 +1948,9 @@ function WhyThisAnswerTab({
                 <motion.div
                   className={clsx(
                     'h-full rounded-full',
-                    value >= 0.75
+                    getTrustBadgeColor(value) === 'green'
                       ? 'bg-green'
-                      : value >= 0.5
+                      : getTrustBadgeColor(value) === 'orange'
                         ? 'bg-orange'
                         : 'bg-red',
                   )}
@@ -2195,9 +2181,10 @@ function TrustScoreRing({ score }: { score: number }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - score);
-  
-  const isHigh = score >= 0.75;
-  const color = isHigh ? 'var(--color-accent)' : 'var(--color-orange)';
+
+  const tone = getTrustBadgeColor(score);
+  const isHigh = tone === 'green';
+  const color = tone === 'green' ? 'var(--color-accent)' : tone === 'orange' ? 'var(--color-orange)' : 'var(--color-red)';
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>

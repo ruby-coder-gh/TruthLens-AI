@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, User, Mail, Shield, Calendar, Clock, MessageSquare, FileText, Ban, Trash2, AlertTriangle } from 'lucide-react';
-import { Button, Card, Badge, Modal, LoadingSpinner, EmptyState, useToast, pageTransition } from '../components/ui';
+import { motion } from 'framer-motion';
+import { ArrowLeft, User, Calendar, Clock, MessageSquare, FileText, Ban, Trash2, AlertTriangle } from 'lucide-react';
+import { Button, Card, Badge, Modal, useToast, pageTransition } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ export default function AdminUserDetailPage() {
   const [confirmModal, setConfirmModal] = useState<{ action: 'deactivate' | 'delete' } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
     setLoading(true);
@@ -57,7 +59,7 @@ export default function AdminUserDetailPage() {
           adminApi.getUserActivity(userId),
         ]);
         setUser(userData as AdminUser);
-        setQueries(((activityData as { data?: RecentQuery[] }).data || []) as RecentQuery[]);
+        setQueries(((activityData as unknown as { data?: RecentQuery[] }).data || []) as RecentQuery[]);
       } catch (err) {
         addToast(err instanceof Error ? err.message : 'Failed to load user', 'error');
       } finally {
@@ -65,6 +67,7 @@ export default function AdminUserDetailPage() {
       }
     })();
   }, [userId, addToast]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleToggleActive() {
     if (!user) return;
@@ -97,18 +100,26 @@ export default function AdminUserDetailPage() {
   }
 
   if (loading) {
-    return <motion.div variants={pageTransition} initial="initial" animate="animate"><LoadingSpinner text="Loading user..." /></motion.div>;
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell className="max-w-3xl">
+          <PageHeader title="User Details" description="Inspect account profile, access level, and recent activity." />
+          <StateBlock role="status">Loading user…</StateBlock>
+        </PageShell>
+      </motion.div>
+    );
   }
 
   if (!user) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <EmptyState
-          icon={<User size={24} />}
-          title="User not found"
-          description="The requested user could not be found."
-          action={<Button variant="secondary" onClick={() => navigate('/admin/users')}>Back to Users</Button>}
-        />
+        <PageShell className="max-w-3xl">
+          <PageHeader title="User Details" description="Inspect account profile, access level, and recent activity." />
+          <StateBlock role="alert" className="space-y-3">
+            <p>The requested user could not be found.</p>
+            <Button variant="secondary" size="sm" onClick={() => navigate('/admin/users')}>Back to Users</Button>
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
@@ -116,12 +127,8 @@ export default function AdminUserDetailPage() {
   const queryCount = queries.length;
 
   return (
-    <motion.div
-      className="space-y-5 max-w-3xl"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell className="max-w-3xl">
       {/* Back */}
       <button
         type="button"
@@ -131,6 +138,11 @@ export default function AdminUserDetailPage() {
         <ArrowLeft size={14} />
         Back to Users
       </button>
+
+      <PageHeader
+        title="User Details"
+        description="Inspect account profile, access level, and recent activity."
+      />
 
       {/* User Info Card */}
       <Card className="p-5 lg:p-6">
@@ -180,7 +192,7 @@ export default function AdminUserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-text-dim">Last Login</p>
-            <p className="flex items-center gap-1 text-xs text-text"><Clock size={11} /> {formatDate(user.last_login)}</p>
+            <p className="flex items-center gap-1 text-xs text-text"><Clock size={11} /> {user.last_login ? formatDate(user.last_login) : 'Never'}</p>
           </div>
           <div>
             <p className="text-xs text-text-dim">Role</p>
@@ -292,6 +304,7 @@ export default function AdminUserDetailPage() {
           </div>
         </div>
       </Modal>
+      </PageShell>
     </motion.div>
   );
 }

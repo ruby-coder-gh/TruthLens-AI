@@ -9,7 +9,7 @@ from jose import jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.config import settings
 from app.core.auth import (
@@ -37,7 +37,6 @@ from app.schemas.auth import (
     RefreshRequest,
     RegisterRequest,
     ResetPasswordRequest,
-    TokenResponse,
     UserInfo,
 )
 from app.schemas.user import UserResponse, UserUpdate
@@ -45,9 +44,58 @@ from app.schemas.common import MessageResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+ACCESS_COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+
+
+def _cookie_secure() -> bool:
+    return settings.APP_ENV == "production"
+
+
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/api/auth/refresh",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(
+        key=ACCESS_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path="/api/auth/refresh",
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+    )
+
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(
+    body: RegisterRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     """Register a new user."""
     # Check email + username uniqueness (single error to prevent enumeration)
     email_exists = await db.execute(select(User).where(User.email == body.email))
@@ -70,6 +118,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     # Generate tokens
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id)
+    _set_auth_cookies(response, access_token, refresh_token)
 
     # Audit log
     db.add(AuditLog(
@@ -88,14 +137,16 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             role=user.role,
             created_at=user.created_at,
         ),
-        access_token=access_token,
-        refresh_token=refresh_token,
         expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    body: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     """Login with email and password."""
     # Rate limiting
     rate_limiter.check(f"login:{body.email}")
@@ -130,6 +181,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     # Generate tokens
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id)
+    _set_auth_cookies(response, access_token, refresh_token)
 
     # Audit log
     db.add(AuditLog(
@@ -147,17 +199,24 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             role=user.role,
             created_at=user.created_at,
         ),
-        access_token=access_token,
-        refresh_token=refresh_token,
         expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 
 @router.post("/refresh", response_model=AuthResponse)
-async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(
+    request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     """Refresh access token using refresh token."""
+    refresh_token = body.refresh_token if body and body.refresh_token else request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise UnauthorizedException("Missing refresh token")
+
     try:
-        payload = decode_token(body.refresh_token)
+        payload = decode_token(refresh_token)
     except Exception:
         raise UnauthorizedException("Invalid refresh token")
 
@@ -173,6 +232,7 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     # Rotate tokens
     access_token = create_access_token(user.id, user.role)
     new_refresh_token = create_refresh_token(user.id)
+    _set_auth_cookies(response, access_token, new_refresh_token)
 
     return AuthResponse(
         user=UserInfo(
@@ -182,8 +242,6 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
             role=user.role,
             created_at=user.created_at,
         ),
-        access_token=access_token,
-        refresh_token=new_refresh_token,
         expires_in=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
@@ -251,9 +309,9 @@ async def forgot_password(
     user = result.scalar_one_or_none()
 
     if user:
-        # Generate reset token (expires in 15 min)
+        # Generate reset token for out-of-band delivery (email/SMS), never return in API response.
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-        reset_token = jwt.encode(
+        _ = jwt.encode(
             {
                 "sub": user.id,
                 "type": "reset",
@@ -264,11 +322,9 @@ async def forgot_password(
             settings.APP_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
-        # In production, email this token. Here we return it directly.
-        return MessageResponse(message=f"Password reset token: {reset_token}")
 
-    # Always return success to prevent enumeration
-    return MessageResponse(message="If email exists, a reset token has been generated")
+    # Always return generic success to prevent enumeration/token disclosure
+    return MessageResponse(message="If email exists, password reset instructions have been sent")
 
 
 @router.post("/reset-password", response_model=MessageResponse)
@@ -333,17 +389,20 @@ async def change_password(
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
-    body: LogoutRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    body: LogoutRequest | None = None,
 ):
     """Logout user (adds audit log entry)."""
+    _clear_auth_cookies(response)
+
     db.add(AuditLog(
         user_id=current_user.id,
         action="user.logout",
         resource_type="user",
         resource_id=current_user.id,
-        details=json.dumps({"refresh_token": body.refresh_token}) if body.refresh_token else None,
+        details=json.dumps({"had_refresh_token": bool(body and body.refresh_token)}) if body else None,
     ))
 
     return MessageResponse(message="Logged out successfully")

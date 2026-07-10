@@ -9,9 +9,7 @@ import {
 import type { User } from '../api/types';
 import {
   api,
-  setStoredTokens,
   clearStoredTokens,
-  getStoredAccessToken,
 } from '../api/client';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -21,7 +19,7 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 // ─── Context ────────────────────────────────────────────────────────────────
@@ -32,14 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session on mount
+  // Restore session on mount from HttpOnly cookie session
   useEffect(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      setIsLoading(false);
-      return;
-    }
-
     let cancelled = false;
 
     api.auth
@@ -50,8 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {
-        // Token invalid or expired — clear
+        // Session missing/expired
         clearStoredTokens();
+        if (!cancelled) {
+          setUser(null);
+        }
       })
       .finally(() => {
         if (!cancelled) {
@@ -66,20 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.auth.login({ email, password });
-    setStoredTokens(res.access_token, res.refresh_token);
     setUser(res.user);
   }, []);
 
   const register = useCallback(
     async (email: string, username: string, password: string) => {
       const res = await api.auth.register({ email, username, password });
-      setStoredTokens(res.access_token, res.refresh_token);
       setUser(res.user);
     },
     [],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      await api.auth.logout();
+    } catch {
+      // best-effort server logout
+    }
     clearStoredTokens();
     setUser(null);
   }, []);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -50,7 +51,7 @@ async def rewrite(
 
         messages.append(("human", query))
 
-        response = llm.invoke(messages)
+        response = await asyncio.to_thread(llm.invoke, messages)
         rewritten = response.content.strip().strip('"').strip("'")
 
         logger.info(
@@ -95,7 +96,7 @@ async def expand(
             "Return as a JSON array of strings.\n\nQuery: {query}"
         )
 
-        response = llm.invoke([("human", prompt.format(query=query))])
+        response = await asyncio.to_thread(llm.invoke, [("human", prompt.format(query=query))])
         content = response.content.strip()
 
         # Try to parse JSON

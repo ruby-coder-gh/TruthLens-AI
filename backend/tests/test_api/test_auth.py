@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import AsyncClient
 
@@ -15,9 +17,12 @@ async def test_register(client: AsyncClient):
         "password": "SecureP@ss1",
     })
     assert response.status_code == 201
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any("access_token=" in cookie for cookie in set_cookies)
+    assert any("refresh_token=" in cookie for cookie in set_cookies)
     data = response.json()
-    assert "access_token" in data.get("data", data)
-    assert "refresh_token" in data.get("data", data)
+    auth_data = data.get("data", data)
+    assert "user" in auth_data
 
 
 @pytest.mark.asyncio
@@ -51,10 +56,13 @@ async def test_login(client: AsyncClient):
         "password": "SecureP@ss1",
     })
     assert response.status_code == 200
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any("access_token=" in cookie for cookie in set_cookies)
+    assert any("refresh_token=" in cookie for cookie in set_cookies)
     data = response.json()
     # Can be either wrapped or direct
     auth_data = data.get("data", data)
-    assert "access_token" in auth_data
+    assert "user" in auth_data
 
 
 @pytest.mark.asyncio
@@ -75,17 +83,15 @@ async def test_login_wrong_password(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_me_endpoint(client: AsyncClient):
     """Test /auth/me endpoint."""
-    # Register and get token
+    # Register (cookies should be set on client)
     reg = await client.post("/api/auth/register", json={
         "email": "me@example.com",
         "username": "meuser",
         "password": "SecureP@ss1",
     })
-    data = reg.json()
-    auth_data = data.get("data", data)
-    token = auth_data["access_token"]
+    assert reg.status_code == 201
 
-    response = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    response = await client.get("/api/auth/me")
     assert response.status_code == 200
     user_data = response.json()
     assert user_data["email"] == "me@example.com"
@@ -117,13 +123,28 @@ async def test_refresh_token(client: AsyncClient):
         "username": "refreshuser",
         "password": "SecureP@ss1",
     })
-    data = reg.json()
-    auth_data = data.get("data", data)
-    refresh_token = auth_data["refresh_token"]
-
-    response = await client.post("/api/auth/refresh", json={
-        "refresh_token": refresh_token,
-    })
+    response = await client.post("/api/auth/refresh", json={})
     assert response.status_code == 200
-    new_data = response.json().get("data", response.json())
-    assert "access_token" in new_data
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any("access_token=" in cookie for cookie in set_cookies)
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_no_token_leakage(client: AsyncClient):
+    """Forgot password response must not leak reset token."""
+    await client.post("/api/auth/register", json={
+        "email": "forgot@example.com",
+        "username": "forgotuser",
+        "password": "SecureP@ss1",
+    })
+
+    response = await client.post("/api/auth/forgot-password", json={"email": "forgot@example.com"})
+    assert response.status_code == 200
+    body = response.json()
+    assert "message" in body
+
+    serialized = json.dumps(body).lower()
+    assert "reset_token" not in serialized
+    assert '"token":' not in serialized
+    assert "access_token" not in serialized
+    assert "refresh_token" not in serialized

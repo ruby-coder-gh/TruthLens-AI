@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "VeritasRAG"
     APP_VERSION: str = "0.1.0"
     APP_ENV: Literal["development", "production"] = "development"
-    APP_SECRET_KEY: str = "change-me-in-production-openssl-rand-hex-32"
+    APP_SECRET_KEY: str
     APP_CORS_ORIGINS: str = "http://localhost:5173,http://localhost:4000"
 
     # ─── Server ────────────────────────────────
@@ -139,6 +140,20 @@ class Settings(BaseSettings):
     @property
     def pii_entities_list(self) -> list[str]:
         return [e.strip() for e in self.PII_ENTITIES.split(",") if e.strip()]
+
+    @field_validator("APP_SECRET_KEY")
+    @classmethod
+    def validate_app_secret_key(cls, value: str) -> str:
+        weak_keys = {
+            "change-me-in-production-openssl-rand-hex-32",
+            "dev-secret-key-openssl-rand-hex-32-12345678",
+            "dev-secret-key",
+            "secret",
+            "changeme",
+        }
+        if len(value) < 32 or value in weak_keys:
+            raise ValueError("APP_SECRET_KEY must be at least 32 chars and not a known weak default")
+        return value
 
 
 settings = Settings()

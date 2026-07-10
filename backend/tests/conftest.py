@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -11,6 +12,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+os.environ.setdefault("APP_SECRET_KEY", f"test-{uuid.uuid4().hex}{uuid.uuid4().hex}")
 
 from app.core.auth import hash_password
 from app.core.deps import get_db
@@ -24,7 +27,6 @@ TEST_DB_URL = "sqlite+aiosqlite:///./test_data/test.db"
 @pytest_asyncio.fixture
 async def test_engine():
     """Create test database engine (module-scoped)."""
-    import os
     os.makedirs("test_data", exist_ok=True)
 
     engine = create_async_engine(

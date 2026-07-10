@@ -6,7 +6,7 @@ from typing import AsyncGenerator
 
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, WebSocket
+from fastapi import Cookie, Depends, Header, HTTPException, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,18 +40,22 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_current_user(
-    authorization: str = Header(None),
+    authorization: str | None = Header(default=None),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Extract and validate current user from JWT Bearer token."""
-    if not authorization:
-        raise UnauthorizedException(message="Missing authorization header")
+    token: str | None = None
+    if authorization:
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise UnauthorizedException(message="Invalid authorization format")
+        token = parts[1]
+    elif access_token_cookie:
+        token = access_token_cookie
+    else:
+        raise UnauthorizedException(message="Missing authentication token")
 
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise UnauthorizedException(message="Invalid authorization format")
-
-    token = parts[1]
     payload = decode_token(token)
 
     if payload.get("type") != "access":

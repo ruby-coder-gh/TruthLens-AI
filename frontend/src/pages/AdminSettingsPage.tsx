@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Settings, Save, RotateCcw, Bot, Database, Sliders, BarChart3 } from 'lucide-react';
-import { Button, Card, Input, Select, useToast, LoadingSpinner, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { Button, Card, Input, Select, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 
 const DEFAULTS = {
@@ -43,7 +44,7 @@ export default function AdminSettingsPage() {
     queryFn: () => adminApi.getSettings(),
   });
 
-  const settings = settingsQuery.data ?? {};
+  const remoteSettings = settingsQuery.data as Record<string, unknown> | undefined;
 
   const [workspaceName, setWorkspaceName] = useState(DEFAULTS.workspaceName);
   const [llmModel, setLlmModel] = useState(DEFAULTS.llmModel);
@@ -55,17 +56,18 @@ export default function AdminSettingsPage() {
 
   const [savingSection, setSavingSection] = useState<string | null>(null);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (settingsQuery.data) {
-      setWorkspaceName(pick(settings, 'workspace_name', DEFAULTS.workspaceName));
-      setLlmModel(pick(settings, 'llm_model', DEFAULTS.llmModel));
-      setEmbeddingModel(pick(settings, 'embedding_model', DEFAULTS.embeddingModel));
-      setTopK(pick(settings, 'top_k', DEFAULTS.topK));
-      setChunkSize(pick(settings, 'chunk_size', DEFAULTS.chunkSize));
-      setTrustHigh(pick(settings, 'trust_threshold_high', DEFAULTS.trustThresholdHigh));
-      setTrustMed(pick(settings, 'trust_threshold_medium', DEFAULTS.trustThresholdMedium));
-    }
-  }, [settingsQuery.data]);
+    if (!remoteSettings) return;
+    setWorkspaceName(pick(remoteSettings, 'workspace_name', DEFAULTS.workspaceName));
+    setLlmModel(pick(remoteSettings, 'llm_model', DEFAULTS.llmModel));
+    setEmbeddingModel(pick(remoteSettings, 'embedding_model', DEFAULTS.embeddingModel));
+    setTopK(pick(remoteSettings, 'top_k', DEFAULTS.topK));
+    setChunkSize(pick(remoteSettings, 'chunk_size', DEFAULTS.chunkSize));
+    setTrustHigh(pick(remoteSettings, 'trust_threshold_high', DEFAULTS.trustThresholdHigh));
+    setTrustMed(pick(remoteSettings, 'trust_threshold_medium', DEFAULTS.trustThresholdMedium));
+  }, [remoteSettings]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const saveMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => adminApi.updateSettings(data),
@@ -100,41 +102,46 @@ export default function AdminSettingsPage() {
   }
 
   if (settingsQuery.isLoading) {
-    return <LoadingSpinner text="Loading settings..." />;
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell className="max-w-2xl">
+          <PageHeader title="Settings" description="Configure system-wide settings." />
+          <StateBlock role="status">Loading settings…</StateBlock>
+        </PageShell>
+      </motion.div>
+    );
   }
 
   if (settingsQuery.isError) {
     return (
-      <motion.div
-        className="flex flex-col items-center justify-center gap-4 py-20"
-        variants={pageTransition}
-        initial="initial"
-        animate="animate"
-      >
-        <p className="text-text-muted text-sm">Failed to load settings.</p>
-        <Button variant="secondary" size="sm" onClick={() => settingsQuery.refetch()}>
-          Retry
-        </Button>
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell className="max-w-2xl">
+          <PageHeader title="Settings" description="Configure system-wide settings." />
+          <StateBlock tone="danger" role="alert" className="space-y-3">
+            <p>Failed to load settings.</p>
+            <Button variant="secondary" size="sm" onClick={() => settingsQuery.refetch()}>
+              Retry
+            </Button>
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
 
   return (
-    <motion.div
-      className="space-y-6 max-w-2xl"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
-      <motion.div variants={staggerItem} className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text">Settings</h1>
-          <p className="text-sm text-text-muted mt-1">Configure system-wide settings.</p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={resetToDefaults}>
-          <RotateCcw size={14} />
-          Reset All
-        </Button>
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell className="max-w-2xl">
+      <motion.div variants={staggerItem}>
+        <PageHeader
+          title="Settings"
+          description="Configure system-wide settings."
+          actions={(
+            <Button variant="secondary" size="sm" onClick={resetToDefaults}>
+              <RotateCcw size={14} />
+              Reset All
+            </Button>
+          )}
+        />
       </motion.div>
 
       <motion.div
@@ -299,6 +306,7 @@ export default function AdminSettingsPage() {
           </Card>
         </motion.div>
       </motion.div>
+      </PageShell>
     </motion.div>
   );
 }

@@ -3,15 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MessageSquare, Clock, Shield, FileText, ExternalLink } from 'lucide-react';
 import { Button, Card, Badge, LoadingSpinner, pageTransition, staggerItem } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { queryApi } from '../api/client';
 import type { QueryDetail, Source } from '../api/types';
-
-function trustScoreColor(score: number | undefined): 'green' | 'orange' | 'red' | 'gray' {
-  if (score === undefined) return 'gray';
-  if (score >= 0.75) return 'green';
-  if (score >= 0.5) return 'orange';
-  return 'red';
-}
+import { getRelevanceMeta, getTrustBadgeColor } from '../utils/relevance';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -26,7 +21,6 @@ export default function ChatDetailPage() {
 
   useEffect(() => {
     if (!queryId) return;
-    setLoading(true);
     queryApi.getAnywhere(queryId)
       .then((data) => {
         setQuery(data);
@@ -44,24 +38,36 @@ export default function ChatDetailPage() {
 
   if (error || !query) {
     return (
-      <motion.div className="space-y-5" variants={pageTransition} initial="initial" animate="animate">
-        <Link to="/chats" className="inline-flex items-center gap-1 text-sm text-primary-soft hover:text-primary">
-          <ArrowLeft size={14} /> Back to history
-        </Link>
-        <Card className="p-8 text-center">
-          <p className="text-text-dim">{error || 'Chat not found'}</p>
-          <Link to="/chats">
-            <Button size="sm" className="mt-4">Back to Chat History</Button>
-          </Link>
-        </Card>
-      </motion.div>
+      <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+        <motion.div className="mx-auto max-w-3xl space-y-5 py-6" variants={pageTransition} initial="initial" animate="animate">
+          <PageShell>
+            <PageHeader
+              title="Chat Detail"
+              description="Review question, response, and sources."
+              actions={(
+                <Link to="/chats" className="inline-flex items-center gap-1 text-sm text-primary-soft hover:text-primary">
+                  <ArrowLeft size={14} /> Back to history
+                </Link>
+              )}
+            />
+            <Card className="p-8 text-center">
+              <p className="text-text-dim">{error || 'Chat not found'}</p>
+              <Link to="/chats">
+                <Button size="sm" className="mt-4">Back to Chat History</Button>
+              </Link>
+            </Card>
+          </PageShell>
+        </motion.div>
+      </div>
     );
   }
 
   // Map stored response_sources (DB JSON) to Source interface
   // Stored format uses: content, score, metadata.document_name
   // Source interface uses: excerpt, relevance_score, document_name
-  const rawSources = (query.response_sources || []) as Record<string, unknown>[];
+  const rawSources = Array.isArray(query.response_sources)
+    ? (query.response_sources as unknown as Record<string, unknown>[])
+    : [];
   const sources: Source[] = rawSources.map((s) => {
     const meta = s.metadata as Record<string, unknown> | undefined;
     const docId = (s.document_id as string) || '';
@@ -82,12 +88,19 @@ export default function ChatDetailPage() {
   });
 
   return (
-    <motion.div className="space-y-5 max-w-3xl" variants={pageTransition} initial="initial" animate="animate">
-      {/* Back link */}
+    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+      <motion.div className="mx-auto max-w-3xl space-y-5 py-6" variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       <motion.div variants={staggerItem}>
-        <Link to="/chats" className="inline-flex items-center gap-1 text-sm text-primary-soft hover:text-primary">
-          <ArrowLeft size={14} /> Back to history
-        </Link>
+        <PageHeader
+          title="Chat Detail"
+          description="Review question, response, and sources."
+          actions={(
+            <Link to="/chats" className="inline-flex items-center gap-1 text-sm text-primary-soft hover:text-primary">
+              <ArrowLeft size={14} /> Back to history
+            </Link>
+          )}
+        />
       </motion.div>
 
       {/* Query */}
@@ -130,7 +143,7 @@ export default function ChatDetailPage() {
               {/* Trust score */}
               {query.trust_score !== undefined && (
                 <div className="mt-3 flex items-center gap-2">
-                  <Badge color={trustScoreColor(query.trust_score)}>
+                  <Badge color={getTrustBadgeColor(query.trust_score)}>
                     Trust Score: {query.trust_score.toFixed(2)}
                   </Badge>
                   {query.guardrail_passed !== undefined && (
@@ -165,9 +178,7 @@ export default function ChatDetailPage() {
                     <span className="text-xs font-medium text-primary-soft truncate">
                       {s.document_name || `Source ${i + 1}`}
                     </span>
-                    <Badge color={trustScoreColor(s.relevance_score)}>
-                      {(s.relevance_score * 100).toFixed(0)}%
-                    </Badge>
+                    <Badge color={getRelevanceMeta(s.relevance_score).badgeColor}>{(s.relevance_score * 100).toFixed(0)}%</Badge>
                   </div>
                   <p className="text-xs text-text-dim line-clamp-2">{s.excerpt}</p>
                 </div>
@@ -180,12 +191,14 @@ export default function ChatDetailPage() {
       {/* Open in workspace */}
       <motion.div variants={staggerItem}>
         <Link to={`/workspaces/${query.workspace_id}/chat`}>
-          <Button size="sm" variant="outline">
+          <Button size="sm" variant="secondary">
             <ExternalLink size={14} />
             Open in Workspace
           </Button>
         </Link>
       </motion.div>
-    </motion.div>
+      </PageShell>
+      </motion.div>
+    </div>
   );
 }

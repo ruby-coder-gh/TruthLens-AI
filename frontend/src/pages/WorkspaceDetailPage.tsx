@@ -2,7 +2,6 @@ import { useState, useRef, type FormEvent, type DragEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
-import { clsx } from 'clsx';
 import {
   ArrowLeft,
   Upload,
@@ -36,6 +35,7 @@ import {
   Badge,
   Modal,
   EmptyState,
+  Tabs,
   Skeleton,
   ProgressBar,
   useToast,
@@ -45,6 +45,7 @@ import {
   pageTransition,
   slideInRight,
 } from '../components/ui';
+import { PageShell } from '../components/PageWrappers';
 import {
   workspaceApi,
   documentApi,
@@ -371,57 +372,14 @@ function WorkspaceHeader({
         variants={staggerItem}
         className="sticky top-0 z-20 -mx-1 px-1 pt-2 pb-1"
       >
-        <TabsSegmented
+        <Tabs
           tabs={TABS}
           activeTab={activeTab}
           onChange={setActiveTab}
+          className="w-fit border border-border/40 bg-white/[0.03]"
         />
       </motion.div>
     </motion.div>
-  );
-}
-
-// ─── Segmented Tabs (replaces default Tabs for workspace detail) ──────────────
-function TabsSegmented({
-  tabs,
-  activeTab,
-  onChange,
-}: {
-  tabs: { id: string; label: string; icon: React.ReactNode }[];
-  activeTab: string;
-  onChange: (id: string) => void;
-}) {
-  return (
-    <div className="flex gap-1 rounded-xl bg-white/[0.03] border border-border/40 p-1 w-fit" role="tablist">
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTab;
-        return (
-          <motion.button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onChange(tab.id)}
-            className={clsx(
-              'relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150',
-              isActive ? 'text-white' : 'text-text-muted hover:text-text',
-            )}
-          >
-            {isActive && (
-              <motion.div
-                layoutId="ws-tab-indicator"
-                className="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/25 shadow-lg shadow-primary/10"
-                transition={{ type: 'spring', damping: 25, stiffness: 300, mass: 0.8 }}
-              />
-            )}
-            <span className="relative z-10 flex items-center gap-2">
-              <span className={isActive ? 'text-primary-soft' : 'text-text-dim'}>{tab.icon}</span>
-              {tab.label}
-            </span>
-          </motion.button>
-        );
-      })}
-    </div>
   );
 }
 
@@ -464,6 +422,7 @@ export default function WorkspaceDetailPage() {
     return (
       <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
         <div className="mx-auto w-full max-w-[1400px] py-6">
+        <PageShell>
         <motion.div
           className="space-y-6"
           variants={pageTransition}
@@ -486,6 +445,7 @@ export default function WorkspaceDetailPage() {
           </div>
           <Skeleton height={40} width={300} className="rounded-lg" />
         </motion.div>
+        </PageShell>
         </div>
       </div>
     );
@@ -496,6 +456,7 @@ export default function WorkspaceDetailPage() {
     return (
       <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
         <div className="mx-auto w-full max-w-[1400px] py-6">
+        <PageShell>
         <motion.div
           className="flex flex-col items-center justify-center py-24 text-center"
           variants={pageTransition}
@@ -541,6 +502,7 @@ export default function WorkspaceDetailPage() {
             <Button onClick={() => refetchWorkspace()}>Try again</Button>
           </motion.div>
         </motion.div>
+        </PageShell>
         </div>
       </div>
     );
@@ -550,6 +512,7 @@ export default function WorkspaceDetailPage() {
   return (
     <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
       <div className="mx-auto w-full max-w-[1400px] py-6">
+      <PageShell>
       <motion.div
         className="relative"
         variants={pageTransition}
@@ -598,6 +561,7 @@ export default function WorkspaceDetailPage() {
           </div>
         </motion.div>
       </motion.div>
+      </PageShell>
       </div>
     </div>
   );
@@ -1384,7 +1348,7 @@ function AddMemberModal({
   setNewUserId: (v: string) => void;
   newRole: string;
   setNewRole: (v: string) => void;
-  addMemberMutation: ReturnType<typeof useMutation>;
+  addMemberMutation: { isPending: boolean };
   handleAddSubmit: (e: FormEvent) => void;
   handleAddClose: () => void;
 }) {

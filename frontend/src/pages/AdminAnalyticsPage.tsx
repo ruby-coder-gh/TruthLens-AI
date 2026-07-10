@@ -25,12 +25,12 @@ import {
   Badge,
   Button,
   Card,
-  LoadingSpinner,
   Tabs,
   pageTransition,
   staggerContainer,
   staggerItem,
 } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 
 type FlaggedAnswer = {
@@ -99,6 +99,11 @@ function extractData<T>(resp: unknown): T[] {
 function formatPercent(value: number | null): string {
   if (value === null) return '—';
   return `${Math.round(value * 100)}%`;
+}
+
+function tooltipNumber(value: number | string | readonly (number | string)[] | undefined): number {
+  const normalized = Array.isArray(value) ? value[0] : value;
+  return Number(normalized ?? 0);
 }
 
 function isLowTrustBucket(range: string): boolean {
@@ -225,9 +230,11 @@ export default function AdminAnalyticsPage() {
     }
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     void loadAnalytics(false);
   }, [loadAnalytics]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const totalQueries = useMemo(
     () => queriesOverTimeData.reduce((sum, point) => sum + point.queries, 0),
@@ -289,41 +296,27 @@ export default function AdminAnalyticsPage() {
 
   if (loading) {
     return (
-      <motion.div className="space-y-6" variants={pageTransition} initial="initial" animate="animate">
-        <LoadingSpinner text="Loading analytics..." />
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <PageHeader title="Analytics" description="Monitor demand, trust risk, and answer quality." />
+          <StateBlock role="status">Loading analytics…</StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
 
   return (
-    <motion.div className="space-y-6" variants={pageTransition} initial="initial" animate="animate">
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       <motion.div
         variants={staggerItem}
-        className="relative overflow-hidden rounded-3xl border border-primary/25 bg-gradient-to-br from-primary/14 via-bg-soft/70 to-bg/85 p-5 sm:p-6"
+        className="flex flex-wrap items-start justify-between gap-3"
       >
-        <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-primary/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-16 left-1/3 h-40 w-40 rounded-full bg-accent/16 blur-3xl" />
-
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-2">
-            <Badge color="purple" className="w-fit">Admin Analytics</Badge>
-            <h1 className="text-2xl font-bold text-text sm:text-3xl">Analytics Command Center</h1>
-            <p className="max-w-2xl text-sm text-text-muted sm:text-base">
-              Monitor demand, trust risk, and answer quality from a single control surface.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Badge color="gray">30-day query window</Badge>
-              <Badge color={lowTrustRatio !== null && lowTrustRatio > 0.2 ? 'orange' : 'green'}>
-                Low-trust share: {formatPercent(lowTrustRatio)}
-              </Badge>
-              <Badge color={metrics.length > 0 ? 'green' : 'gray'}>
-                {metrics.length > 0 ? 'Evaluation data synced' : 'Evaluation pending'}
-              </Badge>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {error && <Badge color="red">{error}</Badge>}
+        <PageHeader
+          title="Analytics"
+          description="Monitor demand, trust risk, and answer quality from a single control surface."
+          className="flex-1"
+          actions={(
             <Button
               variant="secondary"
               size="sm"
@@ -332,8 +325,22 @@ export default function AdminAnalyticsPage() {
             >
               Refresh Data
             </Button>
-          </div>
-        </div>
+          )}
+        />
+      </motion.div>
+
+      {error ? (
+        <StateBlock tone="danger" role="alert">{error}</StateBlock>
+      ) : null}
+
+      <motion.div className="flex flex-wrap gap-2" variants={staggerItem}>
+        <Badge color="gray">30-day query window</Badge>
+        <Badge color={lowTrustRatio !== null && lowTrustRatio > 0.2 ? 'orange' : 'green'}>
+          Low-trust share: {formatPercent(lowTrustRatio)}
+        </Badge>
+        <Badge color={metrics.length > 0 ? 'green' : 'gray'}>
+          {metrics.length > 0 ? 'Evaluation data synced' : 'Evaluation pending'}
+        </Badge>
       </motion.div>
 
       <motion.div
@@ -395,7 +402,7 @@ export default function AdminAnalyticsPage() {
                     <XAxis dataKey="label" stroke="#7f96bf" fontSize={12} tickMargin={8} />
                     <YAxis stroke="#7f96bf" fontSize={12} tickMargin={8} allowDecimals={false} />
                     <Tooltip
-                      formatter={(value: number | string) => [Number(value).toLocaleString(), 'Queries']}
+                      formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
                       contentStyle={{
                         backgroundColor: 'rgba(19, 26, 39, 0.96)',
                         backdropFilter: 'blur(8px)',
@@ -443,7 +450,7 @@ export default function AdminAnalyticsPage() {
                     <XAxis dataKey="range" stroke="#7f96bf" fontSize={12} tickMargin={8} />
                     <YAxis stroke="#7f96bf" fontSize={12} tickMargin={8} allowDecimals={false} />
                     <Tooltip
-                      formatter={(value: number | string) => [Number(value).toLocaleString(), 'Queries']}
+                      formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
                       contentStyle={{
                         backgroundColor: 'rgba(19, 26, 39, 0.96)',
                         backdropFilter: 'blur(8px)',
@@ -579,6 +586,7 @@ export default function AdminAnalyticsPage() {
           </div>
         </Card>
       </motion.div>
+      </PageShell>
     </motion.div>
   );
 }

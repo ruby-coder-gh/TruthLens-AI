@@ -4,9 +4,10 @@ import { motion } from 'framer-motion';
 import {
   User, Mail, Lock, Eye, EyeOff, AlertTriangle, Key, Shield, Sparkles,
 } from 'lucide-react';
-import { Button, Card, Modal, useToast, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { Button, Modal, useToast, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { useAuth } from '../context/AuthContext';
-import { authApi, clearStoredTokens } from '../api/client';
+import { authApi } from '../api/client';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput, { InputActionButton } from '../components/premium/AnimatedInput';
 import ParticleField from '../components/premium/ParticleField';
@@ -172,7 +173,6 @@ export default function SettingsPage() {
     setDeleteLoading(true);
     try {
       await authApi.deleteMe();
-      clearStoredTokens();
       setDeleteModalOpen(false);
       setDeleteConfirm('');
       addToast('Account deleted', 'success');
@@ -191,18 +191,20 @@ export default function SettingsPage() {
         <ParticleField count={25} color="#8B5CF6" />
       </div>
 
-      <motion.div
-        className="space-y-6 max-w-2xl relative z-10"
-        variants={pageTransition}
-        initial="initial"
-        animate="animate"
-      >
+      <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+        <motion.div
+          className="relative z-10 mx-auto max-w-2xl space-y-6 py-6"
+          variants={pageTransition}
+          initial="initial"
+          animate="animate"
+        >
+        <PageShell className="space-y-6">
         {/* Page header */}
         <motion.div variants={staggerItem}>
-          <h1 className="text-3xl font-bold">
-            <span className="gradient-text">Settings</span>
-          </h1>
-          <p className="text-sm text-text-muted mt-1">Manage your account, security, and preferences.</p>
+          <PageHeader
+            title={<span className="gradient-text">Settings</span>}
+            description="Manage your account, security, and preferences."
+          />
         </motion.div>
 
         <motion.div
@@ -374,7 +376,9 @@ export default function SettingsPage() {
             </div>
           </div>
         </Modal>
-      </motion.div>
+        </PageShell>
+        </motion.div>
+      </div>
     </>
   );
 }

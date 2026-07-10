@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -173,15 +174,16 @@ async def vector_search(
     k = top_k or settings.RETRIEVAL_TOP_K
 
     # Embed query
-    model = _load_model()
-    query_embedding = model.encode([query], normalize_embeddings=True)[0]
+    model = await asyncio.to_thread(_load_model)
+    query_embedding = (await asyncio.to_thread(model.encode, [query], normalize_embeddings=True))[0]
 
     # Search ChromaDB
-    collection = get_workspace_collection(workspace_id)
+    collection = await asyncio.to_thread(get_workspace_collection, workspace_id)
     where_filter = filters or None
 
     try:
-        results = collection.query(
+        results = await asyncio.to_thread(
+            collection.query,
             query_embeddings=[query_embedding.tolist()],
             n_results=k,
             where=where_filter,
@@ -233,13 +235,13 @@ async def bm25_search(
     """
     k = top_k or settings.RETRIEVAL_TOP_K
 
-    index, corpus, metadatas = _load_bm25_index(workspace_id)
+    index, corpus, metadatas = await asyncio.to_thread(_load_bm25_index, workspace_id)
     if index is None or not corpus:
         return []
 
     tokenized_query = _bm25_tokenizer(query)
     try:
-        scores = index.get_scores(tokenized_query)
+        scores = await asyncio.to_thread(index.get_scores, tokenized_query)
     except Exception as e:
         logger.error("bm25_search_failed", error=str(e), workspace_id=workspace_id)
         return []

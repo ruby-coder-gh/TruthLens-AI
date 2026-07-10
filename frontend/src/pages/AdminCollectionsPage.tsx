@@ -1,7 +1,8 @@
-import { useState, useEffect, type FormEvent } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FolderOpen, Plus, FileText, Clock, X } from 'lucide-react';
-import { Button, Card, Badge, Input, Modal, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { useState, useEffect, useCallback, type FormEvent } from 'react';
+import { motion } from 'framer-motion';
+import { FolderOpen, Plus, FileText, Clock } from 'lucide-react';
+import { Button, Card, Input, Modal, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { collectionApi } from '../api/client';
 
 function formatDate(iso: string): string {
@@ -23,25 +24,32 @@ interface CollectionItem {
 export default function AdminCollectionsPage() {
   const { addToast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
 
-  useEffect(() => {
+  const loadCollections = useCallback(async () => {
     setLoading(true);
-    (async () => {
-      try {
-        const result = await collectionApi.list('default');
-        setCollections((result.data || []) as CollectionItem[]);
-      } catch {
-        setCollections([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    setLoadError('');
+    try {
+      const result = await collectionApi.list('default');
+      setCollections((result.data || []) as CollectionItem[]);
+    } catch (err) {
+      setCollections([]);
+      setLoadError(err instanceof Error ? err.message : 'Failed to load collections.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    void loadCollections();
+  }, [loadCollections]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -65,23 +73,30 @@ export default function AdminCollectionsPage() {
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       {/* Header */}
-      <motion.div variants={staggerItem} className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text">Collections</h1>
-          <p className="text-sm text-text-muted mt-1">Organize documents into collections.</p>
-        </div>
-        <Button size="sm" onClick={() => setCreateModalOpen(true)}>
-          <Plus size={14} />
-          New Collection
-        </Button>
+      <motion.div variants={staggerItem}>
+        <PageHeader
+          title="Collections"
+          description="Organize documents into collections."
+          actions={(
+            <Button size="sm" onClick={() => setCreateModalOpen(true)}>
+              <Plus size={14} />
+              New Collection
+            </Button>
+          )}
+        />
       </motion.div>
+
+      {loadError ? (
+        <StateBlock tone="danger" role="alert" className="space-y-3">
+          <p>{loadError}</p>
+          <Button variant="secondary" size="sm" onClick={() => void loadCollections()}>
+            Retry
+          </Button>
+        </StateBlock>
+      ) : null}
 
       {/* Collection Grid */}
       <motion.div
@@ -91,11 +106,8 @@ export default function AdminCollectionsPage() {
         animate="animate"
       >
         {loading ? (
-          <div className="col-span-full flex justify-center py-12">
-            <div className="flex items-center gap-2 text-text-muted text-sm">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              Loading collections...
-            </div>
+          <div className="col-span-full">
+            <StateBlock role="status">Loading collections…</StateBlock>
           </div>
         ) : collections.length === 0 ? (
           <div className="col-span-full flex flex-col items-center justify-center py-16 text-center">
@@ -167,6 +179,7 @@ export default function AdminCollectionsPage() {
           </div>
         </form>
       </Modal>
+      </PageShell>
     </motion.div>
   );
 }

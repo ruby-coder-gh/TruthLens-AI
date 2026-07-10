@@ -1,19 +1,20 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, Eye, EyeOff, LogIn, Sparkles, Shield } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, LogIn, Sparkles } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import Logo from '../components/Logo';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const floatingParticles = [
   { icon: <Sparkles size={14} />, x: '15%', y: '20%', delay: 0, duration: 4 },
-  { icon: <Shield size={10} />, x: '85%', y: '15%', delay: 1.5, duration: 5 },
+  { icon: <Logo size={14} />, x: '85%', y: '15%', delay: 1.5, duration: 5 },
   { icon: <Sparkles size={12} />, x: '75%', y: '75%', delay: 0.8, duration: 3.5 },
-  { icon: <Shield size={8} />, x: '20%', y: '80%', delay: 2.2, duration: 4.5 },
+  { icon: <Logo size={12} />, x: '20%', y: '80%', delay: 2.2, duration: 4.5 },
 ];
 
 export default function LoginPage() {
@@ -107,7 +108,7 @@ export default function LoginPage() {
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
           >
             <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary-soft to-accent shadow-2xl shadow-primary/30">
-              <span className="text-2xl font-bold text-white drop-shadow-sm">V</span>
+              <Logo size={36} animated={false} />
               <motion.div
                 className="absolute -inset-1 rounded-2xl border border-white/10"
                 animate={{ opacity: [0.3, 0.6, 0.3] }}

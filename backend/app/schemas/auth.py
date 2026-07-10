@@ -40,7 +40,7 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
 
 
 class UserInfo(BaseModel):
@@ -51,19 +51,11 @@ class UserInfo(BaseModel):
     created_at: datetime
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int
-
-
 class AuthResponse(BaseModel):
     user: UserInfo
-    access_token: str
-    refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    message: str = "Authenticated"
 
 
 class ForgotPasswordRequest(BaseModel):

@@ -134,7 +134,7 @@ TruthLens AI/
 │   │   ├── test_main.py
 │   │   ├── test_chroma.py
 │   │   ├── test_database.py
-│   │   ├── test_api/            # API integration tests
+│   │   ├── test_api/            # API integration tests (admin pagination clamps, forgot-password no-token response, document upload guards, WS sanitize/top_k clamp)
 │   │   ├── test_evaluation/     # Trust score, RAGAS, feedback tests
 │   │   ├── test_generation/     # Generator, guardrail, citer, streamer tests
 │   │   ├── test_graph/          # Graph pipeline tests
@@ -186,6 +186,9 @@ TruthLens AI/
         │       ├── AnimatedInput.tsx, GlowingIcon.tsx,
         │       ├── ParticleField.tsx, PremiumButton.tsx
         │
+        ├── utils/
+        │   └── relevance.ts     # Shared relevance thresholds + tier/label/color mapping + clamp/percent helpers
+        │
         └── pages/               # Route-level page components
             ├── LandingPage.tsx
             ├── LoginPage.tsx
@@ -234,16 +237,16 @@ TruthLens AI/
 | Module | File(s) | Responsibility |
 |---|---|---|
 | **API Router** | `api/router.py` | Aggregates all sub-routers under `/api` |
-| **Auth API** | `api/auth.py` | Register, login, refresh, forgot/reset/change password, logout, profile CRUD |
-| **Workspace API** | `api/workspaces.py` | Workspace CRUD, member management (add by id or email, remove, role change) |
-| **Document API** | `api/documents.py` | Upload, list, detail, status polling, delete, reindex; background ingestion |
+| **Auth API** | `api/auth.py` | Register, login, refresh, forgot/reset/change password, logout, profile CRUD; forgot-password always returns generic `MessageResponse` (no token in response body) |
+| **Workspace API** | `api/workspaces.py` | Workspace CRUD, member management (add by id or email, remove, role change); list route batches member/document counts via grouped queries over `workspace_ids` |
+| **Document API** | `api/documents.py` | Upload, list, detail, status polling, delete, reindex; background ingestion; upload enforces content-length/size-hint precheck + streamed chunk size guard, and blocks `viewer` role uploads |
 | **Query API** | `api/queries.py` | List query history, detail with sources, delete |
 | **Feedback API** | `api/feedback.py` | Submit and list user ratings/comments per query |
-| **Collections API** | `api/collections.py` | Collection CRUD, access grants/revocations (by id or email) |
-| **Admin API** | `api/admin.py` | Stats, audit logs, user mgmt, flagged answers, analytics, eval history, settings |
+| **Collections API** | `api/collections.py` | Collection CRUD, access grants/revocations (by id or email); list route batches document counts via grouped query over `collection_ids` |
+| **Admin API** | `api/admin.py` | Stats, audit logs, user mgmt, flagged answers, analytics, eval history, settings; paginated endpoints clamp `page_size` to `MIN_PAGE_SIZE..MAX_PAGE_SIZE` |
 | **Investigation API** | `api/investigations.py` | Multi-step agentic research endpoint |
-| **WebSocket** | `api/ws.py` | Real-time streaming: auth -> query -> retrieval -> sources -> generate -> guardrail -> trust -> complete |
-| **Config** | `config.py` | Pydantic-settings, all env vars with defaults |
+| **WebSocket** | `api/ws.py` | Real-time streaming: auth -> query -> retrieval -> sources -> generate -> guardrail -> trust -> complete; auth only accepts active users, query text sanitized, `top_k` clamped to `MIN_TOP_K..MAX_TOP_K` |
+| **Config** | `config.py` | Pydantic-settings; `APP_SECRET_KEY` is required + validated fail-fast (no weak/default fallback) |
 | **Database** | `database.py` | SQLAlchemy async engine (SQLite + aiosqlite) + session factory |
 | **ChromaDB Client** | `chroma_client.py` | Singleton PersistentClient, workspace collection management |
 | **JWT Auth** | `core/auth.py` | JWT encode/decode, bcrypt password hashing |
@@ -283,16 +286,19 @@ TruthLens AI/
 |---|---|---|
 | **Entry** | `main.tsx` | ReactDOM.createRoot, error boundary |
 | **Router** | `App.tsx` | QueryClient, BrowserRouter, AuthProvider, lazy-loaded routes |
-| **API Client** | `api/client.ts` | Fetch wrapper with auto-refresh, all REST API functions |
+| **API Client** | `api/client.ts` | Fetch wrapper with cookie session auth (`credentials: include`), auto-refresh, all REST API functions; profile/workspace updates use `PUT` (`authApi.updateMe`, `workspaceApi.update`) |
 | **API Types** | `api/types.ts` | TypeScript interfaces: User, Workspace, Document, Query, Feedback, etc. |
 | **WebSocket** | `api/websocket.ts` | WS client for streaming queries (tokens, sources, guardrail, trust, complete) |
-| **Auth Context** | `context/AuthContext.tsx` | Auth state: login, register, logout, session restore |
+| **Auth Context** | `context/AuthContext.tsx` | Auth state backed by HttpOnly cookie session (`/auth/me` restore, server logout) |
 | **Layout** | `components/Layout.tsx` | Sidebar nav, ambient background, protected route shell |
 | **UI Primitives** | `components/ui.tsx` | ToastProvider, Skeleton, Modal, common UI atoms |
-| **Evidence Sidebar** | `components/EvidenceSidebar.tsx` | Citation/excerpt panel for query responses |
+| **Evidence Sidebar** | `components/EvidenceSidebar.tsx` | Floating evidence/reasoning panel; consumes shared relevance utility for source scoring UI |
+| **Relevance Utils** | `utils/relevance.ts` | Canonical relevance thresholds + tier/label/color mapping + clamp/percent helpers shared by ChatPage and EvidenceSidebar |
 | **API Catalog** | `components/api-catalog/` | Interactive API documentation viewer |
+| **Logo** | `components/Logo.tsx` | SVG TruthLens eye logo (geometric iris + lens flare), 4 variants (default/compact/gradient-bg/animated), optional text |
+| **Cursor Glow** | `components/CursorGlow.tsx` | Subtle purple radial gradient following cursor for immersive depth |
 | **Premium** | `components/premium/` | Animated input, particle field, glowing icon, premium button |
-| **Pages** | `pages/*.tsx` | 31 lazy-loaded page components covering all routes (incl. 404, Privacy, Terms, Contact) |
+| **Pages** | `pages/*.tsx` | 31 lazy-loaded page components; `ChatPage` now uses shared relevance scoring helpers and `WorkspaceDetailPage` reuses shared `Tabs` segmented pattern |
 
 ---
 
@@ -320,7 +326,7 @@ TruthLens AI/
 
 | Schema Group | Files | Description |
 |---|---|---|
-| **Auth** | `auth.py` | `LoginRequest`, `RegisterRequest`, `AuthResponse`, `TokenResponse`, `RefreshRequest`, `ChangePasswordRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest`, `LogoutRequest`, `UserInfo` |
+| **Auth** | `auth.py` | `LoginRequest`, `RegisterRequest`, cookie-session `AuthResponse` (no token body), `RefreshRequest`, `ChangePasswordRequest`, `ForgotPasswordRequest`, `ResetPasswordRequest`, `LogoutRequest`, `UserInfo` |
 | **User** | `user.py` | `UserResponse`, `UserUpdate` |
 | **Workspace** | `workspace.py` | `WorkspaceCreate`, `WorkspaceUpdate`, `WorkspaceResponse`, `WorkspaceSummary`, `MemberAdd` (user_id or email), `MemberUpdate`, `MemberResponse` |
 | **Document** | `document.py` | `DocumentResponse`, `DocumentDetailResponse`, `DocumentStatusResponse`, `ChunkInfo` |
@@ -338,7 +344,7 @@ TruthLens AI/
 | Interface | Description |
 |---|---|
 | `User` | User profile with id, email, username, role, is_active |
-| `AuthResponse` | Login/register result with user + access_token + refresh_token |
+| `AuthResponse` | Login/register/refresh result with user + session metadata (tokens in HttpOnly cookies) |
 | `Workspace` / `WorkspaceSummary` | Workspace with member/document counts |
 | `WorkspaceMember` | Member with role, username, email |
 | `Document` | File metadata + processing status |
@@ -364,13 +370,13 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 
 | Method | Route | Handler | Description |
 |---|---|---|---|
-| POST | `/api/auth/register` | `register` | Create account (email, username, password) -> JWT tokens |
-| POST | `/api/auth/login` | `login` | Email + password login with rate limiting & lockout |
-| POST | `/api/auth/refresh` | `refresh` | Rotate refresh token -> new access + refresh tokens |
+| POST | `/api/auth/register` | `register` | Create account; sets access/refresh HttpOnly cookies |
+| POST | `/api/auth/login` | `login` | Email + password login with rate limiting & lockout; sets HttpOnly cookies |
+| POST | `/api/auth/refresh` | `refresh` | Rotate session cookies using refresh cookie (or legacy body token) |
 | GET | `/api/auth/me` | `get_me` | Current user profile |
 | PUT | `/api/auth/me` | `update_me` | Update profile (email, username, password) |
 | DELETE | `/api/auth/me` | `delete_me` | Soft-delete current account |
-| POST | `/api/auth/forgot-password` | `forgot_password` | Generate password reset token |
+| POST | `/api/auth/forgot-password` | `forgot_password` | Generate reset token for out-of-band delivery; never returns token in body |
 | POST | `/api/auth/reset-password` | `reset_password` | Reset password with token |
 | POST | `/api/auth/change-password` | `change_password` | Change password (authenticated) |
 | POST | `/api/auth/logout` | `logout` | Logout with audit log |
@@ -380,7 +386,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | Method | Route | Handler | Description |
 |---|---|---|---|
 | POST | `/api/workspaces` | `create_workspace` | Create workspace (creator = owner) |
-| GET | `/api/workspaces` | `list_workspaces` | List user's workspaces (owned + member) |
+| GET | `/api/workspaces` | `list_workspaces` | List user's workspaces (owned + member) with batched member/document count aggregation |
 | GET | `/api/workspaces/{id}` | `get_workspace` | Workspace detail with counts |
 | PUT | `/api/workspaces/{id}` | `update_workspace` | Update workspace (owner only) |
 | DELETE | `/api/workspaces/{id}` | `delete_workspace` | Delete workspace + cascade (owner only) |
@@ -393,7 +399,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 
 | Method | Route | Handler | Description |
 |---|---|---|---|
-| POST | `/api/workspaces/{wid}/documents` | `upload_document` | Upload file -> 202 accepted, processes in background |
+| POST | `/api/workspaces/{wid}/documents` | `upload_document` | Upload file -> 202 accepted, processes in background; prechecks/stream guards enforce max size and `viewer` role cannot upload |
 | GET | `/api/workspaces/{wid}/documents` | `list_documents` | List documents (filterable by status) |
 | GET | `/api/workspaces/{wid}/documents/{did}` | `get_document` | Document detail with chunks |
 | GET | `/api/workspaces/{wid}/documents/{did}/status` | `get_document_status` | Poll processing status |
@@ -424,7 +430,7 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | Method | Route | Handler | Description |
 |---|---|---|---|
 | POST | `/api/workspaces/{wid}/collections` | `create_collection` | Create document collection |
-| GET | `/api/workspaces/{wid}/collections` | `list_collections` | List accessible collections |
+| GET | `/api/workspaces/{wid}/collections` | `list_collections` | List accessible collections with grouped document counts |
 | GET | `/api/workspaces/{wid}/collections/{cid}` | `get_collection` | Collection detail |
 | PUT | `/api/workspaces/{wid}/collections/{cid}` | `update_collection` | Update collection (owner/creator only) |
 | DELETE | `/api/workspaces/{wid}/collections/{cid}` | `delete_collection` | Delete collection (owner/creator only) |
@@ -452,11 +458,11 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 | Method | Route | Handler | Description |
 |---|---|---|---|
 | GET | `/api/admin/stats` | `get_admin_stats` | System-wide metrics (users, workspaces, docs, queries, avg trust) |
-| GET | `/api/admin/logs` | `get_audit_logs` | Paginated audit log (filterable by action) |
+| GET | `/api/admin/logs` | `get_audit_logs` | Paginated audit log (filterable by action); `page_size` clamped to bounds |
 | GET | `/api/admin/evaluation` | `get_evaluation` | Last RAGAS evaluation scores |
 | POST | `/api/admin/evaluation/run` | `run_evaluation` | Trigger RAGAS evaluation on recent queries |
 | GET | `/api/admin/evaluation/history` | `get_evaluation_history` | Past eval run history |
-| GET | `/api/admin/users` | `list_users` | List all users (paginated) |
+| GET | `/api/admin/users` | `list_users` | List all users (paginated; `page_size` clamped to bounds) |
 | POST | `/api/admin/users/invite` | `invite_user` | Invite user with temp password (requires email + username; validated) |
 | GET | `/api/admin/users/{uid}` | `get_user_detail` | Full user detail with query count |
 | PUT | `/api/admin/users/{uid}/role` | `update_user_role` | Change user role |
@@ -473,8 +479,8 @@ All routes are prefixed with `/api` (except WebSocket `/ws/query`).
 
 | Type | Route | Handler | Description |
 |---|---|---|---|
-| WS | `/ws/query` | `websocket_query` | Auth -> query -> stream tokens/sources/guardrail/trust/complete |
-| WS | `/ws/compare` | `websocket_compare` | Auth -> compare -> stream doc_results/synthesis/trust/complete |
+| WS | `/ws/query` | `websocket_query` | Cookie-auth WS session (legacy token-message fallback), active-user check, sanitized query input, `top_k` clamp -> query streaming |
+| WS | `/ws/compare` | `websocket_compare` | Cookie-auth WS session (legacy token-message fallback), active-user check, sanitized query input, `top_k` clamp -> comparison streaming |
 
 ### Health
 
@@ -559,7 +565,7 @@ All config lives in `backend/app/config.py` via `pydantic-settings.Settings`. Th
 | `APP_NAME` | VeritasRAG | Application name |
 | `APP_VERSION` | 0.1.0 | Version string |
 | `APP_ENV` | development | `development` or `production` |
-| `APP_SECRET_KEY` | (change-me...) | JWT signing secret (min 32 chars) |
+| `APP_SECRET_KEY` | (required) | JWT signing secret (>=32 chars, weak defaults rejected at startup) |
 | `APP_CORS_ORIGINS` | http://localhost:5173,... | Allowed CORS origins |
 | `SERVER_HOST` | 0.0.0.0 | Bind address |
 | `SERVER_PORT` | 8000 | Port |
@@ -658,8 +664,8 @@ Single container with Ollama binary copied from official image + Python app. Sta
 File: `.github/workflows/ci.yml`
 
 Runs on push/PR to main branch:
-- Backend: install deps, run `pytest` with coverage
-- Frontend: install deps, run `tsc --noEmit` type check, build with Vite
+- Backend: install deps, run Ruff lint, run required mypy type check, run `pytest` with coverage gate (`--cov-fail-under=70`), run `pip-audit`
+- Frontend: dedicated `frontend` job installs deps, runs build with Vite, and runs `tsc --noEmit` type check
 
 ### Local Development
 
@@ -673,5 +679,7 @@ Script: `run.sh`
 ```
 
 Requires: Ollama installed locally, Python 3.11+, Node.js.
+
+- QA session artifact (report-only): run_id `20260705T185649Z`; evidence root `artifacts/qa-report-only/20260705T185649Z/`; no source code/API/module changes.
 
 ---

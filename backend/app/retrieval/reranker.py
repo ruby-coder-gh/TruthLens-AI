@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 from typing import Any
 
@@ -60,14 +61,14 @@ async def rerank(
         return []
 
     k = top_k or settings.RETRIEVAL_RERANK_K
-    model = _load_reranker()
+    model = await asyncio.to_thread(_load_reranker)
 
     # Prepare pairs
     pairs = [(query, r.content) for r in results]
 
     # Score with cross-encoder
     try:
-        scores = model.predict(pairs)
+        scores = await asyncio.to_thread(model.predict, pairs)
     except Exception as e:
         logger.error("reranker_prediction_failed", error=str(e))
         # Fallback to original ordering

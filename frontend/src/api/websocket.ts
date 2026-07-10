@@ -1,5 +1,4 @@
 import type { Source } from './types';
-import { getStoredAccessToken } from './client';
 
 export interface QueryWebSocketCallbacks {
   onToken?: (token: string) => void;
@@ -46,12 +45,6 @@ export class QueryWebSocket {
       return;
     }
 
-    const token = getStoredAccessToken();
-    if (!token) {
-      this.callbacks.onError?.('auth_error', 'No authentication token available');
-      return;
-    }
-
     // Use the Vite proxy path — the dev server proxies /api to the backend
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/ws/query`;
@@ -60,8 +53,6 @@ export class QueryWebSocket {
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      // First message: authenticate
-      this.send({ type: 'auth', token });
     };
 
     this.ws.onmessage = (event: MessageEvent) => {

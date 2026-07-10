@@ -1,0 +1,173 @@
+{
+  "frontend_url": "http://127.0.0.1:5173",
+  "run_id": "20260705T185649Z",
+  "discovered_links": [
+    "/login",
+    "/register",
+    "/privacy",
+    "/terms",
+    "/contact"
+  ],
+  "flow_results": [
+    {
+      "flow": "public_pages",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "Load home page",
+          "status": "passed",
+          "expected": "Home page renders without crashes.",
+          "actual": "Loaded http://127.0.0.1:5173/; body length 2428.",
+          "route": "/",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-home.png"
+          ]
+        },
+        {
+          "name": "Visit public nav link 1: Sign in",
+          "status": "passed",
+          "expected": "Linked page renders without crash.",
+          "actual": "Loaded http://127.0.0.1:5173/login; body length 125.",
+          "route": "/login",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-link-1-login.png"
+          ]
+        },
+        {
+          "name": "Visit public nav link 2: Get Started",
+          "status": "passed",
+          "expected": "Linked page renders without crash.",
+          "actual": "Loaded http://127.0.0.1:5173/register; body length 151.",
+          "route": "/register",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-link-2-register.png"
+          ]
+        },
+        {
+          "name": "Visit public nav link 3: Privacy",
+          "status": "passed",
+          "expected": "Linked page renders without crash.",
+          "actual": "Loaded http://127.0.0.1:5173/privacy; body length 1123.",
+          "route": "/privacy",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-link-3-privacy.png"
+          ]
+        },
+        {
+          "name": "Visit public nav link 4: Terms",
+          "status": "passed",
+          "expected": "Linked page renders without crash.",
+          "actual": "Loaded http://127.0.0.1:5173/terms; body length 896.",
+          "route": "/terms",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-link-4-terms.png"
+          ]
+        },
+        {
+          "name": "Visit public nav link 5: Contact",
+          "status": "passed",
+          "expected": "Linked page renders without crash.",
+          "actual": "Loaded http://127.0.0.1:5173/contact; body length 199.",
+          "route": "/contact",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/public-link-5-contact.png"
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "invalid_login",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "Reject invalid login credentials",
+          "status": "failed",
+          "expected": "Invalid credentials are rejected with clear error and no authenticated session.",
+          "actual": "finalUrl=http://127.0.0.1:5173/login; tokenPresent=false; hasErrorText=false; stayedOnAuthPage=true",
+          "route": "/login",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/invalid-login-before-login.png",
+            "artifacts/qa-report-only/20260705T185649Z/invalid-login-after-submit.png"
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "workspace_chat_access",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "Logged-out protected route check: /workspace",
+          "status": "failed",
+          "expected": "Logged-out user should be redirected to login or shown access denied.",
+          "actual": "finalUrl=http://127.0.0.1:5173/workspace; deniedDetected=false",
+          "route": "/workspace",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/workspace-chat-1-workspace.png"
+          ]
+        },
+        {
+          "name": "Logged-out protected route check: /chat",
+          "status": "failed",
+          "expected": "Logged-out user should be redirected to login or shown access denied.",
+          "actual": "finalUrl=http://127.0.0.1:5173/chat; deniedDetected=false",
+          "route": "/chat",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/workspace-chat-2-chat.png"
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "invalid_route",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "Graceful not-found state for invalid route",
+          "status": "passed",
+          "expected": "Application shows graceful 404/not-found state without crash.",
+          "actual": "finalUrl=http://127.0.0.1:5173/__qa_invalid_route__; graceful404Detected=true",
+          "route": "/__qa_invalid_route__",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/invalid-route.png"
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "admin_access_logged_out",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "Logged-out /admin access denied",
+          "status": "passed",
+          "expected": "Logged-out user cannot access /admin (redirect/login/403).",
+          "actual": "finalUrl=http://127.0.0.1:5173/login; deniedDetected=true",
+          "route": "/admin",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/admin-logged-out.png"
+          ]
+        }
+      ]
+    },
+    {
+      "flow": "admin_access_non_admin",
+      "status": "failed",
+      "checks": [
+        {
+          "name": "Non-admin /admin access denied",
+          "status": "failed",
+          "expected": "Non-admin user cannot access /admin (redirect/login/403).",
+          "actual": "finalUrl=http://127.0.0.1:5173/dashboard; deniedDetected=false",
+          "route": "/admin",
+          "evidence_paths": [
+            "artifacts/qa-report-only/20260705T185649Z/admin-non-admin-admin-route.png",
+            "artifacts/qa-report-only/20260705T185649Z/admin-non-admin-signup-after-submit.png"
+          ]
+        }
+      ]
+    }
+  ],
+  "console_events_path": "artifacts/qa-report-only/20260705T185649Z/console-events.json",
+  "network_events_path": "artifacts/qa-report-only/20260705T185649Z/network-events.json"
+}

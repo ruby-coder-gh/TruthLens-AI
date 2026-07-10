@@ -7,10 +7,10 @@ import {
   FolderOpen,
   FileText,
   ArrowRight,
-  Loader2,
   AlertTriangle,
 } from 'lucide-react';
-import { Button, Card, LoadingSpinner, EmptyState, fadeIn } from '../components/ui';
+import { Button, LoadingSpinner, EmptyState, fadeIn } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { workspaceApi } from '../api/client';
 
 export default function ChatNewPage() {
@@ -31,54 +31,68 @@ export default function ChatNewPage() {
   // Error
   if (isError) {
     return (
-      <motion.div variants={fadeIn} initial="initial" animate="animate" className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full glass text-red">
-          <AlertTriangle size={28} />
-        </div>
-        <h3 className="text-lg font-semibold text-text">Failed to load workspaces</h3>
-        <p className="mt-1 max-w-md text-sm text-text-muted">
-          {error instanceof Error ? error.message : 'Could not connect to server'}
-        </p>
-        <Button variant="secondary" className="mt-6" onClick={() => refetch()}>
-          Try again
-        </Button>
-      </motion.div>
+      <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+        <motion.div variants={fadeIn} initial="initial" animate="animate" className="mx-auto max-w-3xl py-6">
+          <PageShell>
+            <PageHeader
+              title="New Chat"
+              description="Select workspace to start asking questions."
+            />
+            <StateBlock tone="danger" role="alert" className="flex items-start gap-2">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{error instanceof Error ? error.message : 'Could not connect to server'}</span>
+            </StateBlock>
+            <div>
+              <Button variant="secondary" onClick={() => refetch()}>
+                Try again
+              </Button>
+            </div>
+          </PageShell>
+        </motion.div>
+      </div>
     );
   }
 
   // Empty — no workspaces
   if (workspaces.length === 0) {
     return (
-      <motion.div variants={fadeIn} initial="initial" animate="animate">
-        <EmptyState
-          icon={<FolderOpen size={32} />}
-          title="No workspaces yet"
-          description="Create a workspace to start organizing documents and asking questions."
-          action={
-            <Button onClick={() => navigate('/workspaces')}>
-              <Plus size={16} />
-              Create Workspace
-            </Button>
-          }
-        />
-      </motion.div>
+      <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+        <motion.div variants={fadeIn} initial="initial" animate="animate" className="mx-auto max-w-3xl py-6">
+          <PageShell>
+            <PageHeader
+              title="New Chat"
+              description="Select workspace to start asking questions."
+            />
+            <EmptyState
+              icon={<FolderOpen size={32} />}
+              title="No workspaces yet"
+              description="Create a workspace to start organizing documents and asking questions."
+              action={
+                <Button onClick={() => navigate('/workspaces')}>
+                  <Plus size={16} />
+                  Create Workspace
+                </Button>
+              }
+            />
+          </PageShell>
+        </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0.99 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="max-w-3xl mx-auto space-y-6"
-    >
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-text">New Chat</h1>
-        <p className="text-sm text-text-muted mt-1">
-          Select a workspace to start asking questions
-        </p>
-      </div>
+    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+      <motion.div
+        initial={{ opacity: 0.99 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.3 }}
+        className="mx-auto max-w-3xl space-y-6 py-6"
+      >
+      <PageShell className="space-y-6">
+      <PageHeader
+        title="New Chat"
+        description="Select a workspace to start asking questions"
+      />
 
       {/* Workspace list */}
       <div className="space-y-3">
@@ -127,6 +141,8 @@ export default function ChatNewPage() {
           Create new workspace
         </Button>
       </div>
-    </motion.div>
+      </PageShell>
+      </motion.div>
+    </div>
   );
 }

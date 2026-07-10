@@ -1,0 +1,3 @@
+final_url=http://127.0.0.1:5173/login
+token_present=false
+body_text=Welcome back |  | Sign in to TruthLens AI to continue |  | ! | Session expired. Please log in again. | Email | Password | Forgot password? | Sign in |  | Don't have an account? Create one

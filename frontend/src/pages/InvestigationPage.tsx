@@ -30,8 +30,10 @@ import {
   staggerItem,
   pageTransition,
 } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { investigationApi } from '../api/client';
 import type { InvestigationResponse } from '../api/types';
+import { getTrustBadgeColor, getTrustConfidenceLabel } from '../utils/relevance';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -50,18 +52,6 @@ function formatLatency(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function trustScoreLabel(score: number): string {
-  if (score >= 0.75) return 'High confidence';
-  if (score >= 0.5) return 'Medium confidence';
-  return 'Low confidence';
-}
-
-function trustScoreBarColor(score: number): string {
-  if (score >= 0.75) return 'bg-green';
-  if (score >= 0.5) return 'bg-orange';
-  return 'bg-red';
-}
-
 // ─── Circular gauge SVG ──────────────────────────────────────────────────────
 
 function CircularGauge({ score, size = 80 }: { score: number; size?: number }) {
@@ -69,8 +59,8 @@ function CircularGauge({ score, size = 80 }: { score: number; size?: number }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - score);
-  const color =
-    score >= 0.75 ? '#34d399' : score >= 0.5 ? '#fb923c' : '#f87171';
+  const trustColor = getTrustBadgeColor(score);
+  const color = trustColor === 'green' ? '#34d399' : trustColor === 'orange' ? '#fb923c' : '#f87171';
 
   return (
     <svg width={size} height={size} className="shrink-0" role="img" aria-label={`Trust score ${(score * 100).toFixed(0)}%`}>
@@ -236,35 +226,37 @@ export default function InvestigationPage() {
   const isComplete = result && !isLoading && !isError && !result.error;
 
   return (
-    <motion.div
-      className="mx-auto max-w-4xl space-y-6 relative"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-      exit="exit"
-    >
+    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+      <motion.div
+        className="mx-auto max-w-4xl py-6"
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+      >
+      <PageShell className="relative space-y-6">
       {/* Ambient blobs */}
       <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
 
       {/* ─── Header ────────────────────────────────────────────────────── */}
-      <motion.div className="space-y-2" variants={fadeInUp}>
-        <div className="flex items-center gap-3">
-          <motion.div
-            className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 shadow-lg shadow-primary/5"
-            initial={{ scale: 0, rotate: -180 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: 'spring', damping: 15, stiffness: 200, delay: 0.05 }}
-          >
-            <Network size={22} className="text-primary-soft" />
-          </motion.div>
-          <div>
-            <h1 className="text-xl font-bold gradient-text">Investigation</h1>
-            <p className="text-sm text-text-muted">
-              Multi-step research that decomposes complex questions, gathers evidence, and synthesises findings.
-            </p>
-          </div>
-        </div>
+      <motion.div variants={fadeInUp}>
+        <PageHeader
+          title={(
+            <span className="inline-flex items-center gap-2">
+              <motion.span
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-accent/20"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', damping: 15, stiffness: 200, delay: 0.05 }}
+              >
+                <Network size={16} className="text-primary-soft" />
+              </motion.span>
+              <span className="gradient-text">Investigation</span>
+            </span>
+          )}
+          description="Multi-step research that decomposes complex questions, gathers evidence, and synthesises findings."
+        />
       </motion.div>
 
       {/* ─── Input Section ─────────────────────────────────────────────── */}
@@ -509,7 +501,9 @@ export default function InvestigationPage() {
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+      </PageShell>
+      </motion.div>
+    </div>
   );
 }
 
@@ -941,7 +935,7 @@ function TrustScoreSection({
               className="mt-2 text-sm font-medium text-text"
               variants={fadeIn}
             >
-              {trustScoreLabel(score)}
+              {getTrustConfidenceLabel(score)}
             </motion.p>
             <p className="text-xs text-text-muted">Overall</p>
           </motion.div>
@@ -973,9 +967,9 @@ function TrustScoreSection({
                     <motion.span
                       className={clsx(
                         'font-medium',
-                        value >= 0.75
+                        getTrustBadgeColor(value) === 'green'
                           ? 'text-green'
-                          : value >= 0.5
+                          : getTrustBadgeColor(value) === 'orange'
                             ? 'text-orange'
                             : 'text-red',
                       )}
@@ -990,7 +984,11 @@ function TrustScoreSection({
                     <motion.div
                       className={clsx(
                         'h-full rounded-full',
-                        trustScoreBarColor(value),
+                        getTrustBadgeColor(value) === 'green'
+                          ? 'bg-green'
+                          : getTrustBadgeColor(value) === 'orange'
+                            ? 'bg-orange'
+                            : 'bg-red',
                       )}
                       initial={{ width: 0 }}
                       animate={{ width: `${Math.min(100, value * 100)}%` }}

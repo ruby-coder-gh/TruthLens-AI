@@ -19,30 +19,61 @@ from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
-from app.models.comparison import Comparison
+from app.models.comparison import Comparison, ComparisonResult
 from app.utils.logger import logger
 
 router = APIRouter()
 
+MIN_TOP_K = 1
+MAX_TOP_K = 20
 
-async def _validate_ws_token(websocket: WebSocket) -> tuple[str, str, str] | None:
-    """Validate JWT token from WebSocket query params.
 
-    Returns (user_id, username, role) or None on failure.
-    """
-    token = websocket.query_params.get("token")
-    if not token:
-        return None
-
+async def _resolve_ws_user_id(token: str) -> str | None:
+    """Validate access token and ensure user is active."""
     try:
         payload = decode_token(token)
-        if payload.get("type") != "access":
-            return None
-        user_id = payload.get("sub")
-        role = payload.get("role", "user")
-        return user_id, user_id, role  # username not in token
     except Exception:
         return None
+
+    if payload.get("type") != "access":
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(User.id).where(User.id == user_id, User.is_active == True))
+        active_user_id = result.scalar_one_or_none()
+        return active_user_id
+
+
+async def _authenticate_websocket(websocket: WebSocket) -> str | None:
+    """Authenticate websocket using HttpOnly cookie; fallback to legacy auth message."""
+    cookie_token = websocket.cookies.get("access_token")
+    if cookie_token:
+        user_id = await _resolve_ws_user_id(cookie_token)
+        if not user_id:
+            return None
+        await websocket.send_json({"type": "auth_success"})
+        return user_id
+
+    # Legacy fallback for non-browser clients: first message carries token
+    try:
+        raw = await websocket.receive_text()
+        auth_msg = json.loads(raw)
+    except Exception:
+        return None
+
+    if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
+        return None
+
+    user_id = await _resolve_ws_user_id(auth_msg["token"])
+    if not user_id:
+        return None
+
+    await websocket.send_json({"type": "auth_success"})
+    return user_id
 
 
 async def _check_workspace_access(user_id: str, workspace_id: str) -> bool:
@@ -78,16 +109,28 @@ async def _run_query_pipeline(
     from app.generation.generator import GenerationInput
     from app.generation.streamer import stream_tokens
     from app.generation.guardrail import check as guardrail_check
+    from app.generation.safety import sanitize_input
     from app.evaluation.trust_score import compute_trust
     from app.retrieval.hybrid_search import hybrid_search
     from app.retrieval.reranker import rerank
     from app.retrieval.query_rewrite import rewrite as rewrite_query
+
+    sanitized_query = sanitize_input(query_text).strip()
+
+    try:
+        top_k = int(top_k)
+    except (TypeError, ValueError):
+        top_k = 5
+    top_k = max(MIN_TOP_K, min(top_k, MAX_TOP_K))
 
     start_time = time.time()
     model_used = "unknown"
     total_tokens = 0
 
     try:
+        if not sanitized_query:
+            raise ValueError("Query is empty after sanitization")
+
         # 1. Acknowledge
         await send_json({
             "type": "ack",
@@ -100,7 +143,7 @@ async def _run_query_pipeline(
             "payload": {"query_id": query_id, "phase": "retrieval", "progress": 0.1},
         })
 
-        rewritten = await rewrite_query(query_text)
+        rewritten = await rewrite_query(sanitized_query)
 
         # 3. Hybrid search
         await send_json({
@@ -109,14 +152,14 @@ async def _run_query_pipeline(
         })
 
         results = await hybrid_search(
-            rewritten or query_text,
+            rewritten or sanitized_query,
             workspace_id,
             top_k=top_k * 2,
             filters=filters,
         )
 
         # 4. Rerank
-        reranked = await rerank(rewritten or query_text, results, top_k=top_k)
+        reranked = await rerank(rewritten or sanitized_query, results, top_k=top_k)
 
         contexts = [
             {
@@ -159,7 +202,7 @@ async def _run_query_pipeline(
         })
 
         gen_input = GenerationInput(
-            query=query_text,
+            query=sanitized_query,
             rewritten_query=rewritten,
             contexts=contexts,
         )
@@ -194,7 +237,7 @@ async def _run_query_pipeline(
         trust = await compute_trust(
             retrieval_results=reranked,
             guardrail_result=guardrail_result,
-            query=query_text,
+            query=sanitized_query,
         )
 
         await send_json({
@@ -229,7 +272,7 @@ async def _run_query_pipeline(
             query_id=query_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            query_text=query_text,
+            query_text=sanitized_query,
             rewritten_query=rewritten,
             response_text=full_text,
             response_sources=contexts,
@@ -298,44 +341,17 @@ async def websocket_query(websocket: WebSocket):
     """WebSocket endpoint for streaming queries.
 
     Protocol:
-    1. Client connects (no query params).
-    2. First message MUST be auth: {"type": "auth", "token": "<jwt>"}
-    3. Subsequent messages: {"type": "query", "payload": {"workspace_id": "...", "query": "...", "top_k": 5}}
-    4. Server streams back tokens, sources, guardrail, trust_score, complete
+    1. Client connects with valid access_token cookie.
+    2. Server replies auth_success.
+    3. Client sends query messages: {"type": "query", "payload": {"workspace_id": "...", "query": "...", "top_k": 5}}
+    4. Server streams back tokens, sources, guardrail, trust_score, complete.
+
+    Legacy fallback: if no cookie, first message may be {"type": "auth", "token": "<jwt>"}.
     """
     await websocket.accept()
 
-    # First message must be auth (no token in URL to prevent leakage)
-    user_id: str | None = None
-    try:
-        raw = await websocket.receive_text()
-        auth_msg = json.loads(raw)
-        if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "First message must be auth with token"},
-            })
-            await websocket.close(code=4001)
-            return
-        payload = decode_token(auth_msg["token"])
-        if payload.get("type") != "access":
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "Invalid token type"},
-            })
-            await websocket.close(code=4001)
-            return
-        user_id = payload.get("sub")
-        if not user_id:
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "Invalid token payload"},
-            })
-            await websocket.close(code=4001)
-            return
-
-        await websocket.send_json({"type": "auth_success"})
-    except Exception:
+    user_id = await _authenticate_websocket(websocket)
+    if not user_id:
         await websocket.send_json({
             "type": "error",
             "payload": {"code": "UNAUTHORIZED", "message": "Authentication failed"},
@@ -450,10 +466,22 @@ async def _run_comparison_pipeline(
 ) -> None:
     """Run the comparison pipeline and stream results via WebSocket."""
     from app.graph.comparison_graph import run_comparison
+    from app.generation.safety import sanitize_input
+
+    sanitized_query = sanitize_input(query_text).strip()
+
+    try:
+        top_k = int(top_k)
+    except (TypeError, ValueError):
+        top_k = 5
+    top_k = max(MIN_TOP_K, min(top_k, MAX_TOP_K))
 
     start_time = time.time()
 
     try:
+        if not sanitized_query:
+            raise ValueError("Query is empty after sanitization")
+
         # 1. Acknowledge
         await send_json({
             "type": "ack",
@@ -474,7 +502,7 @@ async def _run_comparison_pipeline(
 
         # 3. Run comparison (streams internally)
         result = await run_comparison(
-            query=query_text,
+            query=sanitized_query,
             workspace_id=workspace_id,
             document_ids=document_ids,
             user_id=user_id,
@@ -554,7 +582,7 @@ async def _run_comparison_pipeline(
             comparison_id=comparison_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            query_text=query_text,
+            query_text=sanitized_query,
             document_ids=document_ids,
             synthesis_text=result.get("synthesis_text"),
             agreement_score=result.get("agreement_score"),
@@ -629,43 +657,17 @@ async def websocket_compare(websocket: WebSocket):
     """WebSocket endpoint for streaming multi-document comparisons.
 
     Protocol:
-    1. Client connects.
-    2. First message MUST be auth: {"type": "auth", "token": "<jwt>"}
-    3. Subsequent messages: {"type": "compare", "payload": {"workspace_id": "...", "query": "...", "document_ids": [...], "top_k": 5}}
-    4. Server streams back: ack, progress, doc_result (per doc), synthesis, trust_score, complete
+    1. Client connects with valid access_token cookie.
+    2. Server replies auth_success.
+    3. Client sends compare messages: {"type": "compare", "payload": {"workspace_id": "...", "query": "...", "document_ids": [...], "top_k": 5}}
+    4. Server streams back: ack, progress, doc_result, synthesis, trust_score, complete.
+
+    Legacy fallback: if no cookie, first message may be {"type": "auth", "token": "<jwt>"}.
     """
     await websocket.accept()
 
-    user_id: str | None = None
-    try:
-        raw = await websocket.receive_text()
-        auth_msg = json.loads(raw)
-        if auth_msg.get("type") != "auth" or not auth_msg.get("token"):
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "First message must be auth with token"},
-            })
-            await websocket.close(code=4001)
-            return
-        payload = decode_token(auth_msg["token"])
-        if payload.get("type") != "access":
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "Invalid token type"},
-            })
-            await websocket.close(code=4001)
-            return
-        user_id = payload.get("sub")
-        if not user_id:
-            await websocket.send_json({
-                "type": "error",
-                "payload": {"code": "UNAUTHORIZED", "message": "Invalid token payload"},
-            })
-            await websocket.close(code=4001)
-            return
-
-        await websocket.send_json({"type": "auth_success"})
-    except Exception:
+    user_id = await _authenticate_websocket(websocket)
+    if not user_id:
         await websocket.send_json({
             "type": "error",
             "payload": {"code": "UNAUTHORIZED", "message": "Authentication failed"},

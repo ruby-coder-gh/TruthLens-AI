@@ -22,6 +22,9 @@ from app.schemas.user import UserResponse
 # Non-admin callers get 403 "Admin access required".
 router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(get_current_admin)])
 
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
+
 
 @router.get("", response_model=PaginatedResponse[UserResponse])
 async def list_users(
@@ -30,6 +33,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """List all users (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
     offset = (page - 1) * page_size
     result = await db.execute(select(User).offset(offset).limit(page_size))
     users = result.scalars().all()

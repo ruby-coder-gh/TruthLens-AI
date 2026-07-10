@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ClipboardList, Search, Filter, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Shield, Clock,
+  ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock,
 } from 'lucide-react';
-import { Button, Card, Badge, Input, LoadingSpinner, EmptyState, useToast, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { Button, Badge, Input, EmptyState, pageTransition, staggerContainer, staggerItem } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
-import type { AuditLogEntry } from '../api/types';
 
 const ACTION_FILTERS = [
   { value: '', label: 'All actions' },
@@ -39,8 +39,6 @@ function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' |
 }
 
 export default function AdminAuditLogPage() {
-  const { addToast } = useToast();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [page, setPage] = useState(1);
@@ -80,18 +78,14 @@ export default function AdminAuditLogPage() {
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       {/* Header */}
-      <motion.div
-        variants={{ initial: { opacity: 0.99, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.3 } } }}
-      >
-        <h1 className="text-2xl font-bold text-text">Audit Log</h1>
-        <p className="text-sm text-text-muted mt-1">Track all system activity and changes.</p>
+      <motion.div variants={{ initial: { opacity: 0.99, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.3 } } }}>
+        <PageHeader
+          title="Audit Log"
+          description="Track all system activity and changes."
+        />
       </motion.div>
 
       {/* Filters */}
@@ -130,16 +124,15 @@ export default function AdminAuditLogPage() {
 
       {/* Table */}
       {logsQuery.isLoading ? (
-        <LoadingSpinner text="Loading audit logs..." />
+        <StateBlock role="status">Loading audit logs…</StateBlock>
       ) : logsQuery.isError ? (
-        <div className="flex flex-col items-center py-12 text-center">
-          <AlertTriangle size={24} className="text-red mb-3" />
-          <p className="text-sm text-text-muted">{(logsQuery.error as Error)?.message ?? 'Failed to load audit logs'}</p>
-          <Button variant="secondary" size="sm" className="mt-4" onClick={handleRetry}>
+        <StateBlock tone="danger" role="alert" className="space-y-3">
+          <p>{(logsQuery.error as Error)?.message ?? 'Failed to load audit logs.'}</p>
+          <Button variant="secondary" size="sm" onClick={handleRetry}>
             <RefreshCw size={14} />
             Retry
           </Button>
-        </div>
+        </StateBlock>
       ) : logs.length === 0 ? (
         <EmptyState
           icon={<ClipboardList size={24} />}
@@ -259,6 +252,7 @@ export default function AdminAuditLogPage() {
           )}
         </>
       )}
+      </PageShell>
     </motion.div>
   );
 }

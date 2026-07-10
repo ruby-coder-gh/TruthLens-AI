@@ -91,21 +91,33 @@ async def list_collections(
     result = await db.execute(query.order_by(Collection.created_at.desc()))
     collections = result.scalars().all()
 
-    responses = []
-    for c in collections:
-        doc_count = await db.execute(
-            select(func.count(Document.id)).where(Document.collection_id == c.id)
+    if not collections:
+        return ListResponse(data=[])
+
+    collection_ids = [c.id for c in collections]
+    doc_count_result = await db.execute(
+        select(
+            Document.collection_id,
+            func.count(Document.id),
         )
-        responses.append(CollectionResponse(
+        .where(Document.collection_id.in_(collection_ids))
+        .group_by(Document.collection_id)
+    )
+    doc_counts = {collection_id: count for collection_id, count in doc_count_result.all()}
+
+    responses = [
+        CollectionResponse(
             id=c.id,
             workspace_id=c.workspace_id,
             name=c.name,
             description=c.description,
             created_by=c.created_by,
-            document_count=doc_count.scalar() or 0,
+            document_count=doc_counts.get(c.id, 0),
             created_at=c.created_at,
             updated_at=c.updated_at,
-        ))
+        )
+        for c in collections
+    ]
 
     return ListResponse(data=responses)
 

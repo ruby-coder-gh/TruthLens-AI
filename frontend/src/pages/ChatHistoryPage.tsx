@@ -3,17 +3,12 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MessageSquare, Search, Clock, Trash2, ChevronRight } from 'lucide-react';
 import { Button, Card, Badge, Input, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { queryApi } from '../api/client';
 import type { QuerySummary } from '../api/types';
+import { getTrustBadgeColor } from '../utils/relevance';
 
 // ─── Mock Data Removed — API source ────────────────────────────────────────────
-
-function trustScoreBadgeColor(score: number | undefined): 'green' | 'orange' | 'red' | 'gray' {
-  if (score === undefined) return 'gray';
-  if (score >= 0.75) return 'green';
-  if (score >= 0.5) return 'orange';
-  return 'red';
-}
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -29,7 +24,6 @@ export default function ChatHistoryPage() {
   const [chats, setChats] = useState<QuerySummary[]>([]);
 
   useEffect(() => {
-    setLoading(true);
     queryApi.listAll()
       .then((result) => {
         setChats(result.data || []);
@@ -56,16 +50,19 @@ export default function ChatHistoryPage() {
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
-      {/* Header */}
+    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+      <motion.div
+        className="mx-auto max-w-4xl space-y-5 py-6"
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+      >
+      <PageShell>
       <motion.div variants={staggerItem}>
-        <h1 className="text-2xl font-bold text-text">Chat History</h1>
-        <p className="text-sm text-text-muted mt-1">Browse past conversations and their trust scores.</p>
+        <PageHeader
+          title="Chat History"
+          description="Browse past conversations and their trust scores."
+        />
       </motion.div>
 
       {/* Search */}
@@ -104,7 +101,7 @@ export default function ChatHistoryPage() {
             }
           />
         ) : (
-          filtered.map((chat, i) => (
+          filtered.map((chat) => (
             <motion.div
               key={chat.id}
               variants={staggerItem}
@@ -122,7 +119,7 @@ export default function ChatHistoryPage() {
                         <Badge color="gray">{chat.model_used}</Badge>
                       )}
                       {chat.trust_score !== undefined && (
-                        <Badge color={trustScoreBadgeColor(chat.trust_score)}>
+                        <Badge color={getTrustBadgeColor(chat.trust_score)}>
                           Score: {chat.trust_score.toFixed(2)}
                         </Badge>
                       )}
@@ -151,6 +148,8 @@ export default function ChatHistoryPage() {
           ))
         )}
       </motion.div>
-    </motion.div>
+      </PageShell>
+      </motion.div>
+    </div>
   );
 }

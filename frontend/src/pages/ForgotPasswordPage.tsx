@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, ArrowLeft, CheckCircle, Shield, Sparkles } from 'lucide-react';
+import { Mail, ArrowLeft, CheckCircle, Shield } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';

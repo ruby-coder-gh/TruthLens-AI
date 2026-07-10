@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from functools import lru_cache
 from typing import Any
@@ -109,7 +110,7 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     if not answer or not contexts:
         return GuardrailResult(passed=True, score=1.0, details="No answer or context to check")
 
-    model = _load_nli_model()
+    model = await asyncio.to_thread(_load_nli_model)
     if model is None:
         return GuardrailResult(passed=True, score=1.0, details="NLI model not available - skipping guardrail")
 
@@ -130,7 +131,7 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     unsupported: list[str] = []
 
     for claim in claims:
-        entail, neutral, contra = _nli_infer(model, premise, claim)
+        entail, neutral, contra = await asyncio.to_thread(_nli_infer, model, premise, claim)
 
         # Compute entailment ratio: entail / (entail + contra)
         total = entail + contra

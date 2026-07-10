@@ -1,0 +1,14 @@
+[
+  {
+    "name": "main",
+    "token": "your-ollama-token-1"
+  },
+  {
+    "name": "second",
+    "token": "your-ollama-token-2"
+  },
+  {
+    "name": "third",
+    "token": "your-ollama-token-3"
+  }
+]

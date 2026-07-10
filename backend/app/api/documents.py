@@ -20,7 +20,7 @@ from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.document import Document
 from app.models.user import User
-from app.models.workspace import Workspace
+from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.common import PaginatedResponse
 from app.schemas.document import (
     ChunkInfo,
@@ -42,6 +42,10 @@ SUPPORTED_MIME_TYPES = {
 }
 
 MAX_FILE_SIZE = 52_428_800  # 50 MB
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
+MAX_DETAIL_CHUNKS = 200
 
 
 @router.post("/workspaces/{workspace_id}/documents", response_model=DocumentResponse, status_code=202)
@@ -53,11 +57,27 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a document. Returns 202, processes in background."""
-    # Validate file size
-    contents = await file.read()
-    file_size = len(contents)
-    if file_size > MAX_FILE_SIZE:
+    content_length = file.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_FILE_SIZE:
+                raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
+        except ValueError:
+            pass
+
+    file_size_hint = getattr(file, "size", None)
+    if file_size_hint is not None and file_size_hint > MAX_FILE_SIZE:
         raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
+
+    if current_user.role != "admin" and workspace.owner_id != current_user.id:
+        member_result = await db.execute(
+            select(WorkspaceMember.role).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == current_user.id,
+            )
+        )
+        if member_result.scalar_one_or_none() == "viewer":
+            raise ForbiddenException("Viewer role cannot upload documents")
 
     # Validate MIME type
     mime_type = file.content_type or "application/octet-stream"
@@ -84,8 +104,21 @@ async def upload_document(
     server_filename = f"{file_id}{ext}"
     file_path = upload_dir / server_filename
 
-    with open(file_path, "wb") as f:
-        f.write(contents)
+    file_size = 0
+    try:
+        with open(file_path, "wb") as f:
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
+                f.write(chunk)
+    except TooLargeException:
+        if file_path.exists():
+            file_path.unlink()
+        raise
 
     # Create document record
     doc = Document(
@@ -149,6 +182,8 @@ async def list_documents(
     db: AsyncSession = Depends(get_db),
 ):
     """List documents in a workspace, filterable by status."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     query = select(Document).where(Document.workspace_id == workspace_id)
     count_query = select(func.count(Document.id)).where(Document.workspace_id == workspace_id)
 
@@ -204,7 +239,7 @@ async def get_document(
         raise NotFoundException("Document", doc_id)
 
     chunk_result = await db.execute(
-        select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.index)
+        select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.index).limit(MAX_DETAIL_CHUNKS)
     )
     chunks = chunk_result.scalars().all()
 
@@ -269,6 +304,16 @@ async def delete_document(
     if not doc:
         raise NotFoundException("Document", doc_id)
 
+    if current_user.role != "admin" and workspace.owner_id != current_user.id:
+        member_result = await db.execute(
+            select(WorkspaceMember.role).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == current_user.id,
+            )
+        )
+        if member_result.scalar_one_or_none() == "viewer":
+            raise ForbiddenException("Viewer role cannot delete documents")
+
     # Remove from ChromaDB + BM25
     from app.ingestion.indexer import delete_document as delete_index
     await delete_index(workspace_id, doc_id)
@@ -296,7 +341,7 @@ async def list_all_documents(
     db: AsyncSession = Depends(get_db),
 ):
     """List ALL documents across accessible workspaces (no workspace scope)."""
-    from app.models.workspace import WorkspaceMember
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
     # Admin sees all documents
     if current_user.role == "admin":
@@ -361,6 +406,16 @@ async def reindex_document(
     workspace = ws_result.scalar_one_or_none()
     if not workspace:
         raise NotFoundException("Workspace", workspace_id)
+
+    if current_user.role != "admin" and workspace.owner_id != current_user.id:
+        member_result = await db.execute(
+            select(WorkspaceMember.role).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == current_user.id,
+            )
+        )
+        if member_result.scalar_one_or_none() == "viewer":
+            raise ForbiddenException("Viewer role cannot reindex documents")
 
     if workspace.owner_id != current_user.id and current_user.role != "admin":
         raise ForbiddenException("Only workspace owner or admin can reindex")

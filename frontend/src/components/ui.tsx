@@ -82,9 +82,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-white hover:bg-primary-dark shadow-lg shadow-primary/20',
+    'bg-gradient-to-r from-primary to-accent text-white shadow-[0_12px_30px_rgba(45,107,255,0.3)] hover:brightness-[1.07] hover:shadow-[0_16px_34px_rgba(45,107,255,0.34)]',
   secondary:
-    'glass text-text hover:bg-card-hover hover:border-primary/30',
+    'bg-card/80 border border-border text-text hover:bg-card-hover hover:border-primary/45',
   ghost:
     'bg-transparent text-text-muted hover:bg-card-2 hover:text-text',
   danger:
@@ -107,7 +107,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         whileHover={{ scale: isDisabled ? 1 : 1.02 }}
         whileTap={{ scale: isDisabled ? 1 : 0.98 }}
         className={clsx(
-          'inline-flex items-center justify-center rounded-xl font-medium transition-all duration-150',
+          'inline-flex items-center justify-center rounded-xl font-semibold transition-all duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
           'disabled:cursor-not-allowed disabled:opacity-50',
           variantStyles[variant],
@@ -303,8 +303,8 @@ export function Card({ children, className, hover = false, onClick }: CardProps)
       whileHover={hover || onClick ? { y: -4, scale: 1.01 } : {}}
       whileTap={onClick ? { scale: 0.98 } : {}}
       className={clsx(
-        'glass rounded-2xl p-5 lg:p-6 transition-all duration-200',
-        (hover || onClick) && 'hover:shadow-lg hover:shadow-primary/5 cursor-pointer',
+        'glass rounded-2xl border border-border/60 p-5 shadow-[0_14px_34px_rgba(2,7,18,0.34)] transition-all duration-200 lg:p-6',
+        (hover || onClick) && 'cursor-pointer hover:border-primary/45 hover:shadow-[0_20px_42px_rgba(12,30,64,0.38)]',
         onClick && 'w-full text-left',
         className,
       )}
@@ -337,7 +337,7 @@ const badgeColors: Record<BadgeColor, string> = {
 
 export function Badge({ children, color = 'gray', className }: BadgeProps) {
   return (
-    <span className={clsx('inline-flex items-center rounded-lg border px-2.5 py-0.5 text-xs font-medium', badgeColors[color], className)}>
+    <span className={clsx('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-[0.01em]', badgeColors[color], className)}>
       {children}
     </span>
   );

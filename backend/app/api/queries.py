@@ -25,6 +25,9 @@ from app.schemas.query import (
 
 router = APIRouter(tags=["queries"])
 
+MIN_PAGE_SIZE = 1
+MAX_PAGE_SIZE = 100
+
 
 @router.get("/workspaces/{workspace_id}/queries", response_model=PaginatedResponse[QuerySummary])
 async def list_queries(
@@ -35,6 +38,8 @@ async def list_queries(
     db: AsyncSession = Depends(get_db),
 ):
     """List query history for a workspace."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     count_result = await db.execute(
         select(func.count(Query.id)).where(Query.workspace_id == workspace_id)
     )
@@ -75,6 +80,8 @@ async def list_all_queries(
     user: User = Depends(get_current_user),
 ):
     """List query history across all workspaces the user has access to."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
     # Get workspace IDs the user belongs to
     ws_result = await db.execute(
         select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user.id)

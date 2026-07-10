@@ -13,7 +13,6 @@ import type {
   Feedback,
   AdminStats,
   AuditLogEntry,
-  Collection,
   InvestigationRequest,
   InvestigationResponse,
   PaginatedResponse,
@@ -37,16 +36,16 @@ const ACCESS_KEY = 'veritas_access_token';
 const REFRESH_KEY = 'veritas_refresh_token';
 
 export function getStoredAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY);
-}
-
-function getStoredRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
+  return null;
 }
 
 export function setStoredTokens(access: string, refresh: string): void {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
+  // Tokens now live in HttpOnly cookies only.
+  // Keep function for backward-compatible call sites and clear legacy storage.
+  void access;
+  void refresh;
+  localStorage.removeItem(ACCESS_KEY);
+  localStorage.removeItem(REFRESH_KEY);
 }
 
 export function clearStoredTokens(): void {
@@ -81,13 +80,9 @@ function buildQuery(params?: Record<string, unknown>): string {
 }
 
 function getAuthHeaders(): Record<string, string> {
-  const token = getStoredAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
   return headers;
 }
 
@@ -115,20 +110,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
 // ─── Token refresh (with dedup) ─────────────────────────────────────────────
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
-let refreshSubscribers: Array<(token: string) => void> = [];
-
-function onRefreshed(token: string): void {
-  refreshSubscribers.forEach((cb) => cb(token));
-  refreshSubscribers = [];
-}
 
 async function attemptTokenRefresh(): Promise<boolean> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
   }
-
-  const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) return false;
 
   isRefreshing = true;
   refreshPromise = (async () => {
@@ -136,15 +122,14 @@ async function attemptTokenRefresh(): Promise<boolean> {
       const res = await fetch(`${API_BASE}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        body: JSON.stringify({}),
+        credentials: 'include',
       });
       if (!res.ok) {
         clearStoredTokens();
         return false;
       }
-      const data = (await res.json()) as AuthResponse;
-      setStoredTokens(data.access_token, data.refresh_token);
-      onRefreshed(data.access_token);
+      await res.json().catch(() => null);
       return true;
     } catch {
       clearStoredTokens();
@@ -168,16 +153,18 @@ async function request<T>(
   let res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: 'include',
   });
 
-  // Auto-refresh on 401
-  if (res.status === 401) {
+  // Auto-refresh on 401 for authenticated flows only.
+  // Keep backend 401 message for explicit login failures.
+  if (res.status === 401 && path !== '/auth/login') {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
-      headers['Authorization'] = `Bearer ${getStoredAccessToken()}`;
       res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers,
+        credentials: 'include',
       });
     } else {
       clearStoredTokens();
@@ -197,27 +184,19 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const token = getStoredAccessToken();
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  // Do NOT set Content-Type — browser sets it with boundary for FormData
-
   let res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers,
     body: formData,
+    credentials: 'include',
   });
 
   if (res.status === 401) {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
-      headers['Authorization'] = `Bearer ${getStoredAccessToken()}`;
       res = await fetch(`${API_BASE}${path}`, {
         method: 'POST',
-        headers,
         body: formData,
+        credentials: 'include',
       });
     } else {
       clearStoredTokens();
@@ -236,17 +215,17 @@ export const authApi = {
   login: (data: LoginRequest): Promise<AuthResponse> =>
     request('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
 
-  refresh: (refreshToken: string): Promise<AuthResponse> =>
+  refresh: (refreshToken?: string): Promise<AuthResponse> =>
     request('/auth/refresh', {
       method: 'POST',
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
     }),
 
   me: (): Promise<User> =>
     request('/auth/me'),
 
   updateMe: (data: UpdateUserRequest): Promise<User> =>
-    request('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
+    request('/auth/me', { method: 'PUT', body: JSON.stringify(data) }),
 
   deleteMe: (): Promise<void> =>
     request('/auth/me', { method: 'DELETE' }),
@@ -260,8 +239,8 @@ export const authApi = {
   changePassword: (data: { current_password: string; new_password: string }): Promise<void> =>
     request('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
 
-  logout: (data?: { refresh_token?: string }): Promise<void> =>
-    request('/auth/logout', { method: 'POST', body: JSON.stringify(data || {}) }),
+  logout: (): Promise<void> =>
+    request('/auth/logout', { method: 'POST' }),
 };
 
 // ─── Workspace API ──────────────────────────────────────────────────────────
@@ -276,7 +255,7 @@ export const workspaceApi = {
     request(`/workspaces/${id}`),
 
   update: (id: string, data: UpdateWorkspaceRequest): Promise<Workspace> =>
-    request(`/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    request(`/workspaces/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   delete: (id: string): Promise<void> =>
     request(`/workspaces/${id}`, { method: 'DELETE' }),

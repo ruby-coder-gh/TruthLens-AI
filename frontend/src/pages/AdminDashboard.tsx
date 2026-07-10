@@ -49,9 +49,11 @@ import {
   pageTransition,
   fadeInScale,
 } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { AdminStats, AuditLogEntry } from '../api/types';
+import { getSafeLabel, getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -103,27 +105,13 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-function trustScoreColor(score: number | undefined): string {
-  if (score === undefined || score === null) return 'var(--color-text-dim)';
-  if (score >= 0.75) return 'var(--color-green)';
-  if (score >= 0.5) return 'var(--color-orange)';
-  return 'var(--color-red)';
-}
-
-function trustScoreBadgeColor(score: number | undefined): 'green' | 'orange' | 'red' | 'gray' {
-  if (score === undefined || score === null) return 'gray';
-  if (score >= 0.75) return 'green';
-  if (score >= 0.5) return 'orange';
-  return 'red';
-}
-
 function evalScoreColor(value: number): string {
   if (value >= 0.8) return 'var(--color-green)';
   if (value >= 0.6) return 'var(--color-orange)';
   return 'var(--color-red)';
 }
 
-function countUp(end: number, duration = 1200): number {
+function useCountUp(end: number, duration = 1200): number {
   const [count, setCount] = useState(0);
   const frameRef = useRef<number>(0);
 
@@ -187,7 +175,7 @@ function StatCard({
   gradient: string;
   trend?: { direction: 'up' | 'down'; percent: number };
 }) {
-  const animated = countUp(value);
+  const animated = useCountUp(value);
 
   return (
     <motion.div
@@ -292,85 +280,6 @@ function StarRating({ rating, max = 5 }: { rating: number; max?: number }) {
         <Star key={`empty-${i}`} size={16} className="text-text-dim" />
       ))}
     </div>
-  );
-}
-
-/** Loading skeleton grid */
-function LoadingSkeleton() {
-  return (
-    <motion.div
-      className="space-y-6"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
-      {/* Overview skeleton */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-xl border border-border glass p-5 lg:p-6"
-          >
-            <Skeleton height={14} width="50%" className="mb-3" />
-            <Skeleton height={36} width="60%" className="mb-2" />
-            <Skeleton height={12} width="40%" />
-          </div>
-        ))}
-      </div>
-      {/* Secondary skeleton */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-xl border border-border glass p-5 lg:p-6"
-          >
-            <Skeleton height={14} width="40%" className="mb-2" />
-            <Skeleton height={24} width="30%" />
-          </div>
-        ))}
-      </div>
-      {/* Charts skeleton */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div
-            key={i}
-            className="rounded-xl border border-border glass p-5 lg:p-6"
-          >
-            <Skeleton height={20} width="40%" className="mb-4" />
-            <Skeleton height={200} width="100%" />
-          </div>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
-
-/** Error banner with retry */
-function ErrorBanner({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  return (
-    <motion.div
-      className="flex flex-col items-center justify-center py-20 text-center"
-      variants={fadeIn}
-      initial="initial"
-      animate="animate"
-      role="alert"
-    >
-      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full glass text-red">
-        <AlertTriangle size={28} />
-      </div>
-      <h3 className="text-lg font-semibold text-text">Failed to load dashboard</h3>
-      <p className="mt-1 max-w-md text-sm text-text-muted">{message}</p>
-      <Button variant="secondary" className="mt-6" onClick={onRetry}>
-        <RefreshCw size={16} />
-        Try again
-      </Button>
-    </motion.div>
   );
 }
 
@@ -1043,21 +952,32 @@ export default function AdminDashboard() {
   // ─── Loading state (initial) ───────────────────────────────────────────────
 
   if (statsQuery.isLoading) {
-    return <LoadingSkeleton />;
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <PageHeader title="Admin Dashboard" description="System overview and management." />
+          <StateBlock role="status">Loading dashboard…</StateBlock>
+        </PageShell>
+      </motion.div>
+    );
   }
 
   // ─── Error state (stats) ──────────────────────────────────────────────────
 
   if (statsQuery.isError) {
     return (
-      <ErrorBanner
-        message={
-          statsQuery.error instanceof Error
-            ? statsQuery.error.message
-            : 'An unexpected error occurred'
-        }
-        onRetry={() => statsQuery.refetch()}
-      />
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <PageHeader title="Admin Dashboard" description="System overview and management." />
+          <StateBlock tone="danger" role="alert" className="space-y-3">
+            <p>{statsQuery.error instanceof Error ? statsQuery.error.message : 'Failed to load dashboard.'}</p>
+            <Button variant="secondary" size="sm" onClick={() => statsQuery.refetch()}>
+              <RefreshCw size={16} />
+              Try again
+            </Button>
+          </StateBlock>
+        </PageShell>
+      </motion.div>
     );
   }
 
@@ -1076,35 +996,35 @@ export default function AdminDashboard() {
     <>
       <AmbientBlobs />
       <motion.div
-        className="space-y-6 relative z-0"
+        className="relative z-0"
         variants={pageTransition}
         initial="initial"
         animate="animate"
       >
+        <PageShell className="space-y-6">
         {/* ── Page header ───────────────────────────────────────────────────── */}
         <motion.div
-          className="flex items-center justify-between"
           variants={fadeIn}
           initial="initial"
           animate="animate"
         >
-          <div>
-            <h1 className="text-2xl font-bold text-text">Admin Dashboard</h1>
-            <p className="text-sm text-text-muted">
-              System overview and management
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              statsQuery.refetch();
-              addToast('Dashboard refreshed', 'info');
-            }}
-          >
-            <RefreshCw size={16} />
-            Refresh
-          </Button>
+          <PageHeader
+            title="Admin Dashboard"
+            description="System overview and management"
+            actions={(
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  statsQuery.refetch();
+                  addToast('Dashboard refreshed', 'info');
+                }}
+              >
+                <RefreshCw size={16} />
+                Refresh
+              </Button>
+            )}
+          />
         </motion.div>
 
         {/* ── Overview stat cards ───────────────────────────────────────────── */}
@@ -1159,21 +1079,19 @@ export default function AdminDashboard() {
             <div className="flex items-center gap-2">
               <span
                 className="text-xl font-bold tabular-nums"
-                style={{ color: trustScoreColor(stats.avg_trust_score) }}
+                style={{ color: getTrustColorVar(stats.avg_trust_score) }}
               >
                 {stats.avg_trust_score != null
                   ? stats.avg_trust_score.toFixed(2)
                   : 'N/A'}
               </span>
-              {stats.avg_trust_score !== undefined && (
-                <Badge color={trustScoreBadgeColor(stats.avg_trust_score)}>
-                  {stats.avg_trust_score >= 0.75
-                    ? 'Good'
-                    : stats.avg_trust_score >= 0.5
-                      ? 'Fair'
-                      : 'Poor'}
-                </Badge>
-              )}
+              <Badge color={stats.avg_trust_score == null ? 'gray' : getTrustBadgeColor(stats.avg_trust_score)}>
+                {getSafeLabel(
+                  stats.avg_trust_score == null
+                    ? 'Unknown'
+                    : getTrustStatusLabel(stats.avg_trust_score),
+                )}
+              </Badge>
             </div>
           </SecondaryStatCard>
 
@@ -1291,6 +1209,7 @@ export default function AdminDashboard() {
             </div>
           </Card>
         </motion.div>
+        </PageShell>
       </motion.div>
     </>
   );

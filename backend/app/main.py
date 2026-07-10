@@ -42,18 +42,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings.bm25_path.mkdir(parents=True, exist_ok=True)
     settings.chroma_path.mkdir(parents=True, exist_ok=True)
 
-    # Validate secret key
-    weak_keys = [
-        "change-me-in-production-openssl-rand-hex-32",
-        "dev-secret-key-openssl-rand-hex-32-12345678",
-        "dev-secret-key",
-    ]
-    if settings.APP_SECRET_KEY in weak_keys or len(settings.APP_SECRET_KEY) < 32:
-        import sys
-        logger.critical("CRITICAL: Replace default APP_SECRET_KEY with openssl rand -hex 32")
-        if settings.APP_ENV == "production":
-            sys.exit(1)
-
     # Create database tables
     async with engine.begin() as conn:
         await conn.run_sync(DeclarativeBase.metadata.create_all)

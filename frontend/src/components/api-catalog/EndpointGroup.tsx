@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -9,15 +9,26 @@ import {
   Shield,
   Unlock,
 } from 'lucide-react';
+import type { LucideProps } from 'lucide-react';
 import type { ApiGroup, ApiEndpoint } from './types';
 import { METHOD_COLORS } from './data';
 import * as Icons from 'lucide-react';
 
-const LucideIcon = ({ name, size = 20, className }: { name: string; size?: number; className?: string }) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Icon = (Icons as any)[name];
+const LucideIcon = ({
+  name,
+  size = 20,
+  className,
+  color,
+}: {
+  name: string;
+  size?: number;
+  className?: string;
+  color?: string;
+}) => {
+  const iconMap = Icons as Partial<Record<string, ComponentType<LucideProps>>>;
+  const Icon = iconMap[name];
   if (!Icon) return null;
-  return <Icon size={size} className={className} />;
+  return <Icon size={size} className={className} color={color} />;
 };
 
 interface EndpointGroupProps {
@@ -113,7 +124,7 @@ export default function EndpointGroup({ group, defaultOpen = false, onSelectEndp
             borderColor: `${group.color}30`,
           }}
         >
-          <LucideIcon name={group.icon} size={16} className="shrink-0" style={{ color: group.color }} />
+          <LucideIcon name={group.icon} size={16} className="shrink-0" color={group.color} />
         </div>
 
         {/* Info */}

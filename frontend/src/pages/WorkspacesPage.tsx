@@ -19,6 +19,7 @@ import {
   pageTransition,
   fadeInScale,
 } from '../components/ui';
+import { PageShell } from '../components/PageWrappers';
 import { workspaceApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { Workspace } from '../api/types';
@@ -108,6 +109,7 @@ export default function WorkspacesPage() {
         exit="exit"
         className="relative space-y-6"
       >
+        <PageShell className="space-y-6">
         {/* Ambient blobs */}
         <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
         <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
@@ -145,6 +147,7 @@ export default function WorkspacesPage() {
             </motion.div>
           ))}
         </div>
+        </PageShell>
       </motion.div>
     );
   }
@@ -159,6 +162,7 @@ export default function WorkspacesPage() {
         exit="exit"
         className="relative"
       >
+        <PageShell>
         {/* Ambient blobs */}
         <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
         <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
@@ -200,6 +204,7 @@ export default function WorkspacesPage() {
             </Button>
           </motion.div>
         </div>
+        </PageShell>
       </motion.div>
     );
   }
@@ -216,6 +221,7 @@ export default function WorkspacesPage() {
         exit="exit"
         className="relative"
       >
+        <PageShell>
         {/* Ambient blobs */}
         <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
         <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
@@ -245,6 +251,7 @@ export default function WorkspacesPage() {
           }
         />
         <CreateWorkspaceModal />
+        </PageShell>
       </motion.div>
     );
   }
@@ -258,6 +265,7 @@ export default function WorkspacesPage() {
       exit="exit"
       className="relative space-y-8"
     >
+      <PageShell className="space-y-8">
       {/* Ambient blobs */}
       <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
@@ -410,6 +418,7 @@ export default function WorkspacesPage() {
 
       {/* ── Create Workspace Modal ── */}
       <CreateWorkspaceModal />
+      </PageShell>
     </motion.div>
   );
 

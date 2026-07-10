@@ -1,0 +1,4 @@
+/workspace => http://127.0.0.1:5173/workspace
+404 |  | Page not found |  | Route does not exist or moved. Use one links below to continue. |  | Go home | Sign in |  | TruthLens AI
+/chat => http://127.0.0.1:5173/chat
+404 |  | Page not found |  | Route does not exist or moved. Use one links below to continue. |  | Go home | Sign in |  | TruthLens AI

@@ -47,6 +47,7 @@ import {
   staggerItem,
 } from './ui';
 import type { Source } from '../api/types';
+import { getRelevanceMeta, relevancePercent } from '../utils/relevance';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,26 +76,32 @@ interface EvidenceSidebarProps {
   isMobile?: boolean;
 }
 
-// ─── Theme Colors ────────────────────────────────────────────────────────────
+function getRelevanceLevel(score: number) {
+  const relevance = getRelevanceMeta(score);
 
-const RELEVANCE_COLORS: Record<string, { bar: string; glow: string; text: string }> = {
-  high:     { bar: 'bg-gradient-to-r from-green-400 to-emerald-500', glow: 'shadow-green-500/30',  text: 'text-green' },
-  good:     { bar: 'bg-gradient-to-r from-blue-400 to-cyan-500',    glow: 'shadow-blue-500/30',   text: 'text-blue' },
-  moderate: { bar: 'bg-gradient-to-r from-purple-400 to-violet-500', glow: 'shadow-purple-500/30', text: 'text-purple' },
-  low:      { bar: 'bg-gradient-to-r from-orange-400 to-amber-500',  glow: 'shadow-orange-500/30', text: 'text-orange' },
-};
-
-function getRelevanceLevel(score: number): { level: string; label: string; color: typeof RELEVANCE_COLORS[keyof typeof RELEVANCE_COLORS] } {
-  if (score >= 0.9) return { level: 'high',     label: 'Highly Relevant',  color: RELEVANCE_COLORS.high };
-  if (score >= 0.7) return { level: 'good',     label: 'Relevant',         color: RELEVANCE_COLORS.good };
-  if (score >= 0.5) return { level: 'moderate', label: 'Partial Match',    color: RELEVANCE_COLORS.moderate };
-  return { level: 'low', label: 'Weak Evidence', color: RELEVANCE_COLORS.low };
+  return {
+    level: relevance.tier,
+    label: relevance.label,
+    color: {
+      bar: relevance.colors.bar,
+      glow: relevance.colors.glow,
+      text: relevance.colors.text,
+    },
+  };
 }
 
 function getEvidenceBadge(score: number): { label: string; icon: React.ReactNode; color: 'green' | 'orange' | 'red' } {
-  if (score >= 0.7) return { label: 'Strong Evidence',  icon: <CheckCircle2 size={12} />,  color: 'green' };
-  if (score >= 0.4) return { label: 'Moderate Evidence', icon: <AlertTriangle size={12} />, color: 'orange' };
-  return { label: 'Weak Evidence', icon: <XCircle size={12} />, color: 'red' };
+  const relevance = getRelevanceMeta(score);
+
+  if (relevance.tier === 'high') {
+    return { label: relevance.evidenceLabel, icon: <CheckCircle2 size={12} />, color: relevance.badgeColor };
+  }
+
+  if (relevance.tier === 'medium') {
+    return { label: relevance.evidenceLabel, icon: <AlertTriangle size={12} />, color: relevance.badgeColor };
+  }
+
+  return { label: relevance.evidenceLabel, icon: <XCircle size={12} />, color: relevance.badgeColor };
 }
 
 function trustScoreColor(score: number | undefined): 'green' | 'orange' | 'red' | 'gray' {
@@ -240,8 +247,9 @@ function SourceCard({
   const { addToast } = useToast();
   const relevance = getRelevanceLevel(source.relevance_score || 0);
   const evidence = getEvidenceBadge(source.relevance_score || 0);
-  const confidencePct = Math.round((source.confidence ?? source.relevance_score ?? 0) * 100);
-  const relevancePct = Math.round((source.relevance_score || 0) * 100);
+  const confidencePct = relevancePercent(source.confidence ?? source.relevance_score);
+  const relevancePct = relevancePercent(source.relevance_score);
+  const chunkConfidencePct = relevancePercent(source.confidence);
   const docName = source.document_name || source.document_id.slice(0, 8) + '...' || `Source ${index + 1}`;
   const fileExt = docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC';
 
@@ -404,7 +412,7 @@ function SourceCard({
                 <div className="rounded-lg bg-white/5 px-3 py-2">
                   <p className="text-[10px] text-text-dim">Vector Similarity</p>
                   <p className="text-sm font-semibold text-text tabular-nums">
-                    {(source.relevance_score * 100).toFixed(1)}%
+                    {relevancePercent(source.relevance_score)}%
                   </p>
                 </div>
               )}
@@ -424,14 +432,14 @@ function SourceCard({
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-text-dim">Chunk Confidence</span>
                   <span className="text-text font-medium">
-                    {(source.confidence * 100).toFixed(0)}%
+                    {chunkConfidencePct}%
                   </span>
                 </div>
                 <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
                   <motion.div
                     className="h-full rounded-full bg-gradient-to-r from-primary-soft to-primary"
                     initial={{ width: 0 }}
-                    animate={{ width: `${(source.confidence * 100).toFixed(0)}%` }}
+                    animate={{ width: `${chunkConfidencePct}%` }}
                     transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                   />
                 </div>

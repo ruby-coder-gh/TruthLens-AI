@@ -1,0 +1,4 @@
+register_url=http://127.0.0.1:5173/workspaces
+token_present=true
+admin_final_url=http://127.0.0.1:5173/dashboard
+admin_text=TruthLens | AI PLATFORM | Dashboard | Chat History | My Documents | Workspaces | Settings |  | QUICK LINKS |  | New Chat | Browse Documents |  | qauser1783279328988 |  | qauser1783279328988@example.com |  | Sign out | Good morning, qauser1783279328988 |  | Snapshot of your docs, chats, and trust signals. |  | New Chat |  | Documents Available |  | 24 |  | Recent Queries |  | 18 |  | Avg Trust Score |  | 0.87 |  | Good | Quick Actions | New Chat | Browse Documents | View History | Settings | Rece

@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.queries import MAX_PAGE_SIZE
 from app.core.auth import create_access_token
 from app.models.query import Query
 from app.models.user import User
@@ -73,6 +74,22 @@ async def test_list_queries(
     assert "data" in body
     assert "meta" in body
     assert body["meta"]["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_queries_page_size_bounded(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    seeded_query: tuple[str, str],
+):
+    """Out-of-range page_size is clamped to configured max."""
+    ws_id, _ = seeded_query
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/queries?page_size=999",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["page_size"] == MAX_PAGE_SIZE
 
 
 @pytest.mark.asyncio

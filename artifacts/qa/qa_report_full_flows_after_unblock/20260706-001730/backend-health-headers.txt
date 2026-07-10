@@ -1,0 +1,11 @@
+HTTP/1.1 200 OK
+date: Sun, 05 Jul 2026 18:47:33 GMT
+server: uvicorn
+content-length: 33
+content-type: application/json
+x-content-type-options: nosniff
+x-frame-options: DENY
+strict-transport-security: max-age=31536000; includeSubDomains
+cache-control: no-cache
+x-request-id: 18927c20-415b-46ff-8f04-f782e5472ee8
+

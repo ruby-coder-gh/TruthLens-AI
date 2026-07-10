@@ -3,8 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Search, UserPlus, User, Ban, ChevronRight, Clock } from 'lucide-react';
-import { Button, Badge, LoadingSpinner, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
-import AnimatedInput from '../components/premium/AnimatedInput';
+import { Button, Badge, Input, EmptyState, useToast, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { adminApi } from '../api/client';
 import type { User as AdminUserType } from '../api/types';
 
@@ -72,49 +72,50 @@ export default function AdminUsersPage() {
   if (usersQuery.isLoading) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <LoadingSpinner text="Loading users..." />
+        <PageShell>
+          <PageHeader title="Users" description="Manage user accounts and permissions." />
+          <StateBlock role="status">Loading users…</StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
 
   if (usersQuery.isError) {
     return (
-      <motion.div
-        variants={pageTransition}
-        initial="initial"
-        animate="animate"
-        className="flex flex-col items-center justify-center py-20 gap-4"
-      >
-        <p className="text-text-muted">Failed to load users</p>
-        <Button onClick={() => usersQuery.refetch()} size="sm">Retry</Button>
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <PageHeader title="Users" description="Manage user accounts and permissions." />
+          <StateBlock tone="danger" role="alert" className="space-y-3">
+            <p>Failed to load users.</p>
+            <Button onClick={() => usersQuery.refetch()} size="sm" variant="secondary">Retry</Button>
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       {/* Header */}
-      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold gradient-text">Users</h1>
-          <p className="text-sm text-text-muted mt-1">Manage user accounts and permissions.</p>
-        </div>
-        <Link to="/admin/users/invite">
-          <Button size="sm">
-            <UserPlus size={14} />
-            Invite User
-          </Button>
-        </Link>
+      <motion.div variants={staggerItem}>
+        <PageHeader
+          title="Users"
+          description="Manage user accounts and permissions."
+          actions={(
+            <Link to="/admin/users/invite">
+              <Button size="sm">
+                <UserPlus size={14} />
+                Invite User
+              </Button>
+            </Link>
+          )}
+        />
       </motion.div>
 
       {/* Search */}
       <motion.div variants={staggerItem} className="max-w-md">
-        <AnimatedInput
+        <Input
           placeholder="Search users..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -261,6 +262,7 @@ export default function AdminUsersPage() {
           Showing {filtered.length} of {total} users
         </motion.p>
       )}
+      </PageShell>
     </motion.div>
   );
 }

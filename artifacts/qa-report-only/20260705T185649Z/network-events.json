@@ -1,0 +1,18 @@
+[
+  {
+    "flow": "invalid_login",
+    "url": "http://127.0.0.1:5173/api/auth/login",
+    "method": "POST",
+    "status": 401,
+    "failureText": null,
+    "resourceType": "fetch"
+  },
+  {
+    "flow": "workspace_chat_access",
+    "url": "http://127.0.0.1:5173/api/auth/login",
+    "method": "POST",
+    "status": null,
+    "failureText": "net::ERR_ABORTED",
+    "resourceType": "fetch"
+  }
+]

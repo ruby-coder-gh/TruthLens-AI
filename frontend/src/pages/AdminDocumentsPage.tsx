@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, Search, Upload, ChevronRight, Clock } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Badge, Input, LoadingSpinner, EmptyState, staggerContainer, staggerItem, pageTransition, useToast } from '../components/ui';
+import { Button, Badge, Input, EmptyState, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
-import type { Document } from '../api/types';
 
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
@@ -42,11 +42,7 @@ export default function AdminDocumentsPage() {
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['admin', 'documents', search, page],
-    queryFn: () => documentApi.listAll({
-      page,
-      page_size: 20,
-      ...(search ? { q: search } : {}),
-    } as any),
+    queryFn: () => documentApi.listAll({ page, page_size: 20 }),
     placeholderData: (prev) => prev,
   });
 
@@ -61,7 +57,10 @@ export default function AdminDocumentsPage() {
   if (isLoading) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <LoadingSpinner text="Loading documents..." />
+        <PageShell>
+          <PageHeader title="Documents" description="Manage all indexed documents." />
+          <StateBlock role="status">Loading documents…</StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
@@ -69,35 +68,34 @@ export default function AdminDocumentsPage() {
   if (isError) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <FileText size={40} className="text-red-400 mb-4" />
-          <h2 className="text-lg font-semibold text-text mb-2">Failed to load documents</h2>
-          <p className="text-sm text-text-muted mb-4">{(error as Error)?.message ?? 'An unexpected error occurred.'}</p>
-          <Button onClick={() => refetch()} size="sm">Retry</Button>
-        </div>
+        <PageShell>
+          <PageHeader title="Documents" description="Manage all indexed documents." />
+          <StateBlock tone="danger" role="alert" className="space-y-3">
+            <p>{(error as Error)?.message ?? 'Failed to load documents.'}</p>
+            <Button onClick={() => refetch()} size="sm" variant="secondary">Retry</Button>
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       {/* Header */}
-      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-text">Documents</h1>
-          <p className="text-sm text-text-muted mt-1">Manage all indexed documents.</p>
-        </div>
-        <Link to="/admin/documents/upload">
-          <Button size="sm">
-            <Upload size={14} />
-            Upload Document
-          </Button>
-        </Link>
+      <motion.div variants={staggerItem}>
+        <PageHeader
+          title="Documents"
+          description="Manage all indexed documents."
+          actions={(
+            <Link to="/admin/documents/upload">
+              <Button size="sm">
+                <Upload size={14} />
+                Upload Document
+              </Button>
+            </Link>
+          )}
+        />
       </motion.div>
 
       {/* Search */}
@@ -203,6 +201,7 @@ export default function AdminDocumentsPage() {
           </Button>
         </div>
       </motion.div>
+      </PageShell>
     </motion.div>
   );
 }

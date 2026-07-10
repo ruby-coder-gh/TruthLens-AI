@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { ArrowLeft, FileText, Clock, Trash2, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
-import { Button, Card, Badge, Modal, LoadingSpinner, EmptyState, useToast, pageTransition, fadeInUp } from '../components/ui';
+import { Button, Card, Badge, Modal, useToast, pageTransition, fadeInUp } from '../components/ui';
+import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
-import type { Document } from '../api/types';
 
 const STATUS_ORDER = ['uploaded', 'parsing', 'chunking', 'embedding', 'indexing', 'indexed'] as const;
 
@@ -17,41 +17,6 @@ const STATUS_LABELS: Record<string, string> = {
   indexing: 'Indexing',
   indexed: 'Indexed',
 };
-
-function SkeletonBlock({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-xl bg-card-2/50 ${className}`} />;
-}
-
-function DetailSkeleton() {
-  return (
-    <motion.div className="space-y-5" variants={pageTransition} initial="initial" animate="animate">
-      <SkeletonBlock className="h-4 w-32" />
-      <div className="rounded-2xl border border-border bg-card p-5 lg:p-6 space-y-4">
-        <div className="flex items-start gap-3">
-          <SkeletonBlock className="h-12 w-12 rounded-xl" />
-          <div className="flex-1 space-y-2">
-            <SkeletonBlock className="h-6 w-3/4" />
-            <div className="flex gap-3">
-              <SkeletonBlock className="h-5 w-16 rounded-full" />
-              <SkeletonBlock className="h-4 w-12" />
-              <SkeletonBlock className="h-4 w-16" />
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-5 border-t border-border">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="space-y-1">
-              <SkeletonBlock className="h-3 w-16" />
-              <SkeletonBlock className="h-4 w-24" />
-            </div>
-          ))}
-        </div>
-      </div>
-      <SkeletonBlock className="h-48 rounded-2xl" />
-      <SkeletonBlock className="h-40 rounded-2xl" />
-    </motion.div>
-  );
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -121,23 +86,29 @@ export default function AdminDocumentDetailPage() {
   });
 
   if (isLoading) {
-    return <DetailSkeleton />;
+    return (
+      <motion.div variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <PageHeader title="Document Details" description="Inspect document status, metadata, and indexing timeline." />
+          <StateBlock role="status">Loading document…</StateBlock>
+        </PageShell>
+      </motion.div>
+    );
   }
 
   if (isError) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <EmptyState
-          icon={<AlertTriangle size={24} />}
-          title="Failed to load document"
-          description={error instanceof Error ? error.message : 'An unexpected error occurred'}
-          action={
-            <Button variant="secondary" onClick={() => refetch()}>
+        <PageShell>
+          <PageHeader title="Document Details" description="Inspect document status, metadata, and indexing timeline." />
+          <StateBlock tone="danger" role="alert" className="space-y-3">
+            <p>{error instanceof Error ? error.message : 'Failed to load document.'}</p>
+            <Button variant="secondary" size="sm" onClick={() => refetch()}>
               <RefreshCw size={14} />
               Retry
             </Button>
-          }
-        />
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
@@ -145,12 +116,15 @@ export default function AdminDocumentDetailPage() {
   if (!doc) {
     return (
       <motion.div variants={pageTransition} initial="initial" animate="animate">
-        <EmptyState
-          icon={<FileText size={24} />}
-          title="Document not found"
-          description="The requested document could not be found."
-          action={<Button variant="secondary" onClick={() => navigate('/admin/documents')}>Back to Documents</Button>}
-        />
+        <PageShell>
+          <PageHeader title="Document Details" description="Inspect document status, metadata, and indexing timeline." />
+          <StateBlock role="alert" className="space-y-3">
+            <p>The requested document could not be found.</p>
+            <Button variant="secondary" size="sm" onClick={() => navigate('/admin/documents')}>
+              Back to Documents
+            </Button>
+          </StateBlock>
+        </PageShell>
       </motion.div>
     );
   }
@@ -158,12 +132,8 @@ export default function AdminDocumentDetailPage() {
   const currentIdx = STATUS_ORDER.indexOf(doc.status as typeof STATUS_ORDER[number]);
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       <button
         type="button"
         onClick={() => navigate('/admin/documents')}
@@ -172,6 +142,11 @@ export default function AdminDocumentDetailPage() {
         <ArrowLeft size={14} />
         Back to Documents
       </button>
+
+      <PageHeader
+        title="Document Details"
+        description="Inspect document status, metadata, and indexing timeline."
+      />
 
       <motion.div variants={fadeInUp}>
         <Card className="p-5 lg:p-6">
@@ -297,6 +272,7 @@ export default function AdminDocumentDetailPage() {
           </div>
         </div>
       </Modal>
+      </PageShell>
     </motion.div>
   );
 }

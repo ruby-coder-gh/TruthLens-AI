@@ -1,17 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Eye, EyeOff, ArrowLeft, CheckCircle, Shield, RefreshCw } from 'lucide-react';
+import { Lock, ArrowLeft, CheckCircle, RefreshCw } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';
 import { authApi } from '../api/client';
-
-const PASSWORD_REQUIREMENTS = [
-  { label: 'At least 8 characters', test: (v: string) => v.length >= 8 },
-  { label: 'One uppercase letter', test: (v: string) => /[A-Z]/.test(v) },
-  { label: 'One digit', test: (v: string) => /\d/.test(v) },
-];
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();

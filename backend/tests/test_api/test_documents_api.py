@@ -1,13 +1,18 @@
 """HTTP tests for document upload, list, get, delete — with real workspace."""
 
 from __future__ import annotations
+import sys
+import types
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.documents import MAX_DETAIL_CHUNKS, MAX_PAGE_SIZE, MIN_PAGE_SIZE, upload_document
+from app.core.exceptions import TooLargeException
 from app.core.auth import create_access_token
+from app.models.chunk import Chunk
 from app.models.user import User
 
 
@@ -112,6 +117,24 @@ async def test_list_documents(client: AsyncClient, auth_headers: dict[str, str],
 
 
 @pytest.mark.asyncio
+async def test_list_documents_page_size_bounded(client: AsyncClient, auth_headers: dict[str, str], workspace_id: str):
+    """Out-of-range page_size values are clamped to configured bounds."""
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents?page_size=999",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["page_size"] == MAX_PAGE_SIZE
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents?page_size=0",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["page_size"] == MIN_PAGE_SIZE
+
+
+@pytest.mark.asyncio
 async def test_list_documents_no_auth(client: AsyncClient, workspace_id: str):
     """List documents without auth returns 401."""
     resp = await client.get(f"/api/workspaces/{workspace_id}/documents")
@@ -148,6 +171,38 @@ async def test_get_document_not_found(client: AsyncClient, auth_headers: dict[st
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_get_document_chunks_capped(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    workspace_id: str,
+    test_db: AsyncSession,
+):
+    """Document detail response caps chunk payload length."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("capped.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    for i in range(MAX_DETAIL_CHUNKS + 25):
+        test_db.add(Chunk(
+            document_id=doc_id,
+            index=1000 + i,
+            content=f"chunk {i}",
+            token_count=2,
+        ))
+    await test_db.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["chunks"]) == MAX_DETAIL_CHUNKS
+
+
 # ── Status ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -181,7 +236,9 @@ async def test_delete_document(client: AsyncClient, auth_headers: dict[str, str]
     doc_id = upload.json()["id"]
 
     # Mock ChromaDB + BM25 calls that delete_document triggers
-    with patch("app.ingestion.indexer.delete_document", new=AsyncMock()):
+    fake_indexer = types.ModuleType("app.ingestion.indexer")
+    fake_indexer.delete_document = AsyncMock()
+    with patch.dict(sys.modules, {"app.ingestion.indexer": fake_indexer}):
         resp = await client.delete(
             f"/api/workspaces/{workspace_id}/documents/{doc_id}",
             headers=auth_headers,
@@ -197,3 +254,124 @@ async def test_delete_document_not_found(client: AsyncClient, auth_headers: dict
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_document_rejects_oversize_without_read():
+    """Content-Length oversize path rejects before reading file body."""
+    from types import SimpleNamespace
+
+    class NeverReadUpload:
+        filename = "big.txt"
+        content_type = "text/plain"
+        headers = {"content-length": "6"}
+
+        async def read(self, size: int = -1):
+            raise AssertionError("read() should not be called")
+
+    with patch("app.api.documents.MAX_FILE_SIZE", 5):
+        with pytest.raises(TooLargeException):
+            await upload_document(
+                workspace_id="ws-1",
+                file=NeverReadUpload(),
+                current_user=SimpleNamespace(id="user-1"),
+                workspace=SimpleNamespace(owner_id="user-1"),
+                db=None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_upload_document_oversize_returns_413(client: AsyncClient, auth_headers: dict[str, str], workspace_id: str):
+    """API returns 413 for oversized uploads."""
+    with patch("app.api.documents.MAX_FILE_SIZE", 5):
+        resp = await client.post(
+            f"/api/workspaces/{workspace_id}/documents",
+            files={"file": ("big.txt", b"123456", "text/plain")},
+            headers=auth_headers,
+        )
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_delete_document(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    workspace_id: str,
+    test_db: AsyncSession,
+):
+    """Viewer role is forbidden from destructive document delete action."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("viewer-delete.txt", b"delete me", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    viewer = User(
+        email="viewer@example.com",
+        username="vieweruser",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(viewer)
+    await test_db.commit()
+    await test_db.refresh(viewer)
+
+    add_member = await client.post(
+        f"/api/workspaces/{workspace_id}/members",
+        json={"user_id": viewer.id, "role": "viewer"},
+        headers=auth_headers,
+    )
+    assert add_member.status_code == 201
+
+    viewer_token = create_access_token(viewer.id, viewer.role)
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+
+    fake_indexer = types.ModuleType("app.ingestion.indexer")
+    fake_indexer.delete_document = AsyncMock()
+    with patch.dict(sys.modules, {"app.ingestion.indexer": fake_indexer}):
+        resp = await client.delete(
+            f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+            headers=viewer_headers,
+        )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_upload_document(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    workspace_id: str,
+    test_db: AsyncSession,
+):
+    """Viewer role cannot upload documents."""
+    viewer = User(
+        email="viewerupload@example.com",
+        username="viewerupload",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(viewer)
+    await test_db.commit()
+    await test_db.refresh(viewer)
+
+    add_member = await client.post(
+        f"/api/workspaces/{workspace_id}/members",
+        json={"user_id": viewer.id, "role": "viewer"},
+        headers=auth_headers,
+    )
+    assert add_member.status_code == 201
+
+    viewer_token = create_access_token(viewer.id, viewer.role)
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+
+    resp = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("viewer-upload.txt", b"blocked", "text/plain")},
+        headers=viewer_headers,
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"

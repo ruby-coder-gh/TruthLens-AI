@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FileText, File, FileSpreadsheet, FileImage, Search, Filter, Download, Clock, Upload, Plus } from 'lucide-react';
-import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, staggerContainer, staggerItem, pageTransition } from '../components/ui';
-import AnimatedInput from '../components/premium/AnimatedInput';
+import { FileText, File, FileSpreadsheet, FileImage, Search, Clock, Upload } from 'lucide-react';
+import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, Input, staggerContainer, staggerItem, pageTransition } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 import type { Document } from '../api/types';
 
@@ -52,7 +52,6 @@ export default function DocumentsBrowsePage() {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
     documentApi.listAll()
       .then((result) => {
         setDocuments(result.data || []);
@@ -71,24 +70,28 @@ export default function DocumentsBrowsePage() {
   });
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
+      <motion.div
+        className="mx-auto max-w-[1200px] space-y-5 py-6"
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+      >
+      <PageShell>
       {/* Header */}
-      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-text">Documents</h1>
-          <p className="text-sm text-text-muted mt-1">Browse all indexed documents.</p>
-        </div>
-        <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-          <Button onClick={() => setUploadModalOpen(true)} size="md">
-            <Upload size={16} />
-            Upload Document
-          </Button>
-        </motion.div>
+      <motion.div variants={staggerItem}>
+        <PageHeader
+          title="Documents"
+          description="Browse all indexed documents."
+          actions={(
+            <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+              <Button onClick={() => setUploadModalOpen(true)} size="md">
+                <Upload size={16} />
+                Upload Document
+              </Button>
+            </motion.div>
+          )}
+        />
       </motion.div>
 
       {/* Upload Area — dashed border with glowing hover */}
@@ -119,7 +122,7 @@ export default function DocumentsBrowsePage() {
       {/* Search & Filters */}
       <motion.div variants={staggerItem} className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1 max-w-md">
-          <AnimatedInput
+          <Input
             placeholder="Search documents..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -168,7 +171,7 @@ export default function DocumentsBrowsePage() {
             />
           </div>
         ) : (
-          filtered.map((doc, i) => (
+          filtered.map((doc) => (
             <motion.div key={doc.id} variants={staggerItem}>
               <Card hover className="p-4">
                 <div className="flex items-start gap-3">
@@ -220,6 +223,8 @@ export default function DocumentsBrowsePage() {
           </div>
         </div>
       </Modal>
-    </motion.div>
+      </PageShell>
+      </motion.div>
+    </div>
   );
 }

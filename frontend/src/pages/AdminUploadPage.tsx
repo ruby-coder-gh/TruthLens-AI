@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, FileText, X, CheckCircle, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { Button, useToast, pageTransition } from '../components/ui';
+import { PageHeader, PageShell } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -221,12 +222,8 @@ export default function AdminUploadPage() {
   const isUploading = files.some((f) => f.status === 'uploading');
 
   return (
-    <motion.div
-      className="space-y-5"
-      variants={pageTransition}
-      initial="initial"
-      animate="animate"
-    >
+    <motion.div variants={pageTransition} initial="initial" animate="animate">
+      <PageShell>
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
@@ -237,10 +234,10 @@ export default function AdminUploadPage() {
         >
           <ArrowLeft size={16} />
         </button>
-        <div>
-          <h1 className="text-2xl font-bold text-text">Upload Documents</h1>
-          <p className="text-sm text-text-muted mt-1">Upload PDF, DOCX, XLSX, TXT, or MD files.</p>
-        </div>
+        <PageHeader
+          title="Upload Documents"
+          description="Upload PDF, DOCX, XLSX, TXT, or MD files."
+        />
       </div>
 
       {/* Workspace Selector */}
@@ -336,6 +333,7 @@ export default function AdminUploadPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </PageShell>
     </motion.div>
   );
 }
