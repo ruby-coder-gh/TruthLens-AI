@@ -115,6 +115,27 @@ export class QueryWebSocket {
     }
   }
 
+  /**
+   * Ask the server to cancel the in-flight query.
+   *
+   * If the socket is already OPEN, sends a `cancel` frame so the server can stop
+   * generation server-side. If the socket is still CONNECTING (or in any other
+   * non-OPEN state), there's no way to deliver the frame — sending it would
+   * silently no-op, and once the socket opens the server would keep streaming,
+   * resurrecting a bubble the user already stopped. In that case we tear the
+   * socket down the same way disconnect() does (null the handlers first so no
+   * queued open/message/close event can fire against this instance) so no
+   * further tokens can land. A new socket is always created on Retry, so this
+   * instance is never reused either way.
+   */
+  cancel(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.send({ type: 'cancel', payload: {} });
+      return;
+    }
+    this.disconnect();
+  }
+
   private send(data: Record<string, unknown>): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));

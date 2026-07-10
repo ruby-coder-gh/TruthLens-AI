@@ -21,8 +21,9 @@ import {
   CheckCircle2,
   PanelRightOpen,
   PanelRightClose,
-  Loader2,
   Layers,
+  Square,
+  RotateCcw,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -68,7 +69,7 @@ interface ChatMessage {
   tokenCount: number | null;
   queryId: string | null;
   error: { code: string; message: string } | null;
-  status: 'pending' | 'streaming' | 'complete' | 'error';
+  status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -123,6 +124,9 @@ export default function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [, setStreamingMessageId] = useState<string | null>(null);
+  // Readable mirror of the in-flight assistant message id — refs avoid stale closures
+  // in event handlers (handleStop) that run outside the WS callback chain.
+  const streamingMsgIdRef = useRef<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState('sources');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
@@ -161,7 +165,12 @@ export default function ChatPage() {
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
     (queryText: string) => {
-      if (!workspaceId || !queryText.trim()) return;
+      if (!workspaceId || !queryText.trim() || isStreaming) return;
+
+      // Tear down any previous socket before creating a new one — otherwise the
+      // old (still-OPEN, still-handler-attached) socket is orphaned and leaks
+      // until unmount, since only wsRef.current gets overwritten below.
+      wsRef.current?.disconnect();
 
       // Generate conversation ID for first message
       let convId = conversationId;
@@ -211,6 +220,7 @@ export default function ChatPage() {
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setStreamingMessageId(assistantMsgId);
+      streamingMsgIdRef.current = assistantMsgId;
       setIsStreaming(true);
 
       // Update textarea key to clear
@@ -274,23 +284,26 @@ export default function ChatPage() {
           );
           setIsStreaming(false);
           setStreamingMessageId(null);
+          streamingMsgIdRef.current = null;
           setPipelinePhase(null);
         },
 
         onError: (code: string, message: string) => {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId
-                ? {
-                    ...m,
-                    status: 'error' as const,
-                    error: { code, message },
-                  }
-                : m,
-            ),
+            prev.map((m) => {
+              if (m.id !== assistantMsgId) return m;
+              // Server echoes a CANCELLED frame after a user-initiated stop — that's
+              // not a failure, so keep (or set) the neutral `cancelled` state instead
+              // of flipping to the red error state.
+              if (code === 'CANCELLED' || m.status === 'cancelled') {
+                return { ...m, status: 'cancelled' as const };
+              }
+              return { ...m, status: 'error' as const, error: { code, message } };
+            }),
           );
           setIsStreaming(false);
           setStreamingMessageId(null);
+          streamingMsgIdRef.current = null;
           setPipelinePhase(null);
         },
 
@@ -302,7 +315,7 @@ export default function ChatPage() {
       wsRef.current = ws;
       ws.connect();
     },
-    [workspaceId, conversationId, genId],
+    [workspaceId, conversationId, genId, isStreaming],
   );
 
   // ─── Submit handler ───────────────────────────────────────────────────────
@@ -337,6 +350,7 @@ export default function ChatPage() {
     setMessages([]);
     setConversationId(null);
     setStreamingMessageId(null);
+    streamingMsgIdRef.current = null;
     setIsStreaming(false);
     setPipelinePhase(null);
     setExpandedSource(null);
@@ -347,6 +361,37 @@ export default function ChatPage() {
     setInputKey(inputKeyRef.current);
     textareaRef.current?.focus();
   }, [isStreaming]);
+
+  // ─── Stop / cancel mid-stream ─────────────────────────────────────────────
+  const handleStop = useCallback(() => {
+    const targetId = streamingMsgIdRef.current;
+    wsRef.current?.cancel();
+    if (targetId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === targetId
+            ? { ...m, status: 'cancelled' as const } // preserves partial `content` as-is
+            : m,
+        ),
+      );
+    }
+    setIsStreaming(false);
+    setStreamingMessageId(null);
+    streamingMsgIdRef.current = null;
+    setPipelinePhase(null);
+  }, []);
+
+  // ─── Retry a cancelled/errored response ───────────────────────────────────
+  const handleRetry = useCallback(
+    (assistantMsgId: string) => {
+      const idx = messages.findIndex((m) => m.id === assistantMsgId);
+      if (idx <= 0) return;
+      const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
+      if (!precedingUser) return;
+      startQuery(precedingUser.content);
+    },
+    [messages, startQuery],
+  );
 
   // ─── Copy response ────────────────────────────────────────────────────────
   const handleCopy = useCallback(
@@ -384,9 +429,15 @@ export default function ChatPage() {
   );
 
   // ─── Compute active message (for sidebar context) ─────────────────────────
+  // Include 'cancelled' so a stopped message's already-streamed sources/guardrail/
+  // trust score still populate the Evidence sidebar instead of going blank.
   const lastAssistantMessage = [...messages]
     .reverse()
-    .find((m) => m.role === 'assistant' && (m.status === 'complete' || m.status === 'error'));
+    .find(
+      (m) =>
+        m.role === 'assistant' &&
+        (m.status === 'complete' || m.status === 'error' || m.status === 'cancelled'),
+    );
 
   const latestSources = lastAssistantMessage?.sources ?? [];
   const latestGuardrail = lastAssistantMessage?.guardrail ?? null;
@@ -511,6 +562,7 @@ export default function ChatPage() {
                           feedbackMutation.mutate({ queryId: msg.queryId, rating });
                         }
                       }}
+                      onRetry={() => handleRetry(msg.id)}
                       onSourceClick={(source, _e, msgId, index) => {
                         const markerId = `cite-${msgId}-${index}`;
                         const targetId = `source-${source.chunk_id}`;
@@ -554,49 +606,65 @@ export default function ChatPage() {
                   className="relative w-full resize-none rounded-xl border border-border/40 bg-bg-soft/90 px-4 py-3 pr-12 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 z-10"
                   aria-label="Type your question"
                 />
-                {/* Breathing glow border */}
+                {/* Breathing glow border — idle + has-text only, never while streaming */}
                 <motion.div
                   className="absolute inset-0 rounded-xl pointer-events-none -z-10"
-                  animate={{
-                    boxShadow: [
-                      '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
-                      '0 0 18px 6px rgba(124,92,255,0.22), inset 0 0 14px 4px rgba(124,92,255,0.06)',
-                      '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
-                    ],
-                  }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                  animate={
+                    inputValue.trim() && !isStreaming
+                      ? {
+                          boxShadow: [
+                            '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
+                            '0 0 18px 6px rgba(124,92,255,0.22), inset 0 0 14px 4px rgba(124,92,255,0.06)',
+                            '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
+                          ],
+                        }
+                      : { boxShadow: 'none' }
+                  }
+                  transition={{ duration: 2.5, repeat: inputValue.trim() && !isStreaming ? Infinity : 0, ease: 'easeInOut' }}
                 />
               </div>
-              <motion.button
-                type="submit"
-                disabled={!inputValue.trim() || isStreaming}
-                className="shrink-0 flex items-center justify-center rounded-xl border border-primary/30 bg-primary px-4 text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-transparent disabled:bg-white/5"
-                style={{ height: '44px', minWidth: '44px' }}
-                animate={
-                  inputValue.trim() && !isStreaming
-                    ? {
-                        boxShadow: [
-                          '0 0 10px 3px rgba(124,92,255,0.3)',
-                          '0 0 22px 8px rgba(124,92,255,0.45)',
-                          '0 0 10px 3px rgba(124,92,255,0.3)',
-                        ],
-                        borderColor: 'rgba(124,92,255,0.6)',
-                      }
-                    : {
-                        boxShadow: 'none',
-                        borderColor: 'rgba(255,255,255,0.08)',
-                      }
-                }
-                transition={{ duration: 2, repeat: inputValue.trim() && !isStreaming ? Infinity : 0, ease: 'easeInOut' }}
-                whileHover={inputValue.trim() && !isStreaming ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(124,92,255,0.5)' } : {}}
-                whileTap={{ scale: 0.95 }}
-              >
-                {isStreaming ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
+              {isStreaming ? (
+                <motion.button
+                  type="button"
+                  onClick={handleStop}
+                  aria-label="Stop generating"
+                  title="Stop generating"
+                  className="shrink-0 flex items-center justify-center rounded-xl border border-red/30 bg-white/5 text-text-muted transition-all duration-150 hover:border-red/50 hover:bg-red/15 hover:text-red"
+                  style={{ height: '44px', minWidth: '44px' }}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Square size={16} fill="currentColor" />
+                </motion.button>
+              ) : (
+                <motion.button
+                  type="submit"
+                  disabled={!inputValue.trim()}
+                  aria-label="Send message"
+                  className="shrink-0 flex items-center justify-center rounded-xl border border-primary/30 bg-primary px-4 text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-transparent disabled:bg-white/5"
+                  style={{ height: '44px', minWidth: '44px' }}
+                  animate={
+                    inputValue.trim()
+                      ? {
+                          boxShadow: [
+                            '0 0 10px 3px rgba(124,92,255,0.3)',
+                            '0 0 22px 8px rgba(124,92,255,0.45)',
+                            '0 0 10px 3px rgba(124,92,255,0.3)',
+                          ],
+                          borderColor: 'rgba(124,92,255,0.6)',
+                        }
+                      : {
+                          boxShadow: 'none',
+                          borderColor: 'rgba(255,255,255,0.08)',
+                        }
+                  }
+                  transition={{ duration: 2, repeat: inputValue.trim() ? Infinity : 0, ease: 'easeInOut' }}
+                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(124,92,255,0.5)' } : {}}
+                  whileTap={{ scale: 0.95 }}
+                >
                   <Send size={18} />
-                )}
-              </motion.button>
+                </motion.button>
+              )}
             </motion.form>
           </div>
         </motion.div>
@@ -855,17 +923,20 @@ function ChatMessageBubble({
   message,
   onCopy,
   onFeedback,
+  onRetry,
   onSourceClick,
 }: {
   message: ChatMessage;
   onCopy: (text: string) => void;
   onFeedback: (rating: number) => void;
+  onRetry: () => void;
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
 }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const isComplete = message.status === 'complete';
   const isError = message.status === 'error';
+  const isCancelled = message.status === 'cancelled';
 
   return (
     <motion.div
@@ -927,6 +998,26 @@ function ChatMessageBubble({
                   transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
                 />
               </div>
+            )}
+
+            {/* Cancelled state — user-initiated stop, not a failure. Keep the partial answer. */}
+            {isCancelled && (
+              <>
+                {message.content && (
+                  <div className="text-sm leading-relaxed text-text">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <Badge color="gray" className="gap-1">
+                    <Square size={9} fill="currentColor" />
+                    Stopped
+                  </Badge>
+                  <RetryButton onClick={onRetry} />
+                </div>
+              </>
             )}
 
             {/* Complete content — full card */}
@@ -1027,14 +1118,17 @@ function ChatMessageBubble({
                 animate={{ opacity: 1, x: 0 }}
               >
                 <AlertCircle size={18} className="mt-0.5 shrink-0 text-red" />
-                <div className="text-sm">
-                  <p className="font-medium text-red">
-                    {message.error.code === 'connection_error'
-                      ? 'Connection lost'
-                      : message.error.code === 'auth_error'
-                        ? 'Authentication error'
-                        : 'Query failed'}
-                  </p>
+                <div className="flex-1 text-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium text-red">
+                      {message.error.code === 'connection_error'
+                        ? 'Connection lost'
+                        : message.error.code === 'auth_error'
+                          ? 'Authentication error'
+                          : 'Query failed'}
+                    </p>
+                    <RetryButton onClick={onRetry} />
+                  </div>
                   <p className="mt-0.5 text-text-muted">{message.error.message}</p>
                   {message.error.code === 'connection_error' && (
                     <p className="mt-1 text-xs text-text-dim">
@@ -1048,6 +1142,25 @@ function ChatMessageBubble({
         )}
       </div>
     </motion.div>
+  );
+}
+
+// ─── Retry button — shown on cancelled/error bubbles, same action-cluster style ─
+
+function RetryButton({ onClick }: { onClick: () => void }) {
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+      aria-label="Retry this question"
+      title="Retry"
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.9 }}
+    >
+      <RotateCcw size={13} />
+      Retry
+    </motion.button>
   );
 }
 
