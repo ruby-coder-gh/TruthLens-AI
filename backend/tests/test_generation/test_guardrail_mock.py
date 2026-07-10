@@ -70,26 +70,37 @@ class TestNliInfer:
     """Test _nli_infer with various model outputs."""
 
     def test_3class_vector(self):
-        """3-class output parsed correctly."""
+        """3-class logit output is softmaxed and reordered to (entail, neutral, contra).
+
+        The real cross-encoder/nli-deberta-v3-base emits raw *logits* in class
+        order [contradiction(0), entailment(1), neutral(2)]. _nli_infer softmaxes
+        them and returns (entailment, neutral, contradiction).
+        """
         model = MagicMock()
         model.predict.return_value = MagicMock()
         model.predict.return_value.shape = (3,)
-        model.predict.return_value.tolist.return_value = [0.8, 0.1, 0.1]
+        # logits [contradiction, entailment, neutral] with entailment dominant
+        model.predict.return_value.tolist.return_value = [0.0, 2.0, 1.0]
 
         entail, neutral, contra = _nli_infer(model, "premise", "hypothesis")
-        assert entail == 0.8
-        assert neutral == 0.1
-        assert contra == 0.1
+        assert entail == pytest.approx(0.665241, abs=1e-4)
+        assert neutral == pytest.approx(0.244728, abs=1e-4)
+        assert contra == pytest.approx(0.090031, abs=1e-4)
+        # entailment is the dominant class and probabilities sum to 1
+        assert entail > contra and entail > neutral
+        assert entail + neutral + contra == pytest.approx(1.0, abs=1e-6)
 
     def test_2d_array(self):
-        """2D output parsed correctly."""
+        """2D logit output (shape (1, 3)) is softmaxed and reordered."""
         model = MagicMock()
         model.predict.return_value = MagicMock()
         model.predict.return_value.shape = (1, 3)
-        model.predict.return_value[0].tolist.return_value = [0.7, 0.2, 0.1]
+        # logits [contradiction, entailment, neutral] with entailment dominant
+        model.predict.return_value[0].tolist.return_value = [0.0, 2.0, 1.0]
 
         entail, neutral, contra = _nli_infer(model, "premise", "hypothesis")
-        assert entail == 0.7
+        assert entail == pytest.approx(0.665241, abs=1e-4)
+        assert entail > contra and entail > neutral
 
     def test_fallback_on_failure(self):
         """Failed inference returns uniform scores."""
@@ -102,14 +113,20 @@ class TestNliInfer:
         assert contra == 0.33
 
     def test_flat_array_extra_dims(self):
-        """Flat array with more than 3 dims handled."""
+        """Flat array with more than 3 elements is flattened, softmaxed, reordered.
+
+        Falls through to the generic branch: softmax over the flattened logits,
+        then take indices [1]=entail, [2]=neutral, [0]=contradiction.
+        """
         model = MagicMock()
         model.predict.return_value = MagicMock()
         model.predict.return_value.shape = (5,)
-        model.predict.return_value.flatten.return_value.tolist.return_value = [0.6, 0.2, 0.1, 0.05, 0.05]
+        # logits [contradiction, entailment, neutral, ...] with entailment dominant
+        model.predict.return_value.flatten.return_value.tolist.return_value = [0.0, 2.0, 1.0, -5.0, -5.0]
 
         entail, neutral, contra = _nli_infer(model, "premise", "hypothesis")
-        assert entail == 0.6
+        assert entail == pytest.approx(0.664435, abs=1e-4)
+        assert entail > contra and entail > neutral
 
 
 class TestGuardrailCheckMockedNLI:
@@ -119,10 +136,11 @@ class TestGuardrailCheckMockedNLI:
     async def test_all_claims_supported(self):
         """All claims entailed by context passes."""
         mock_model = MagicMock()
-        # Return high entailment for all claims
+        # Return logits [contradiction, entailment, neutral] with entailment
+        # dominant for every claim -> entail_ratio ~= 0.88 >= threshold (0.7).
         mock_model.predict.return_value = MagicMock()
         mock_model.predict.return_value.shape = (3,)
-        mock_model.predict.return_value.tolist.return_value = [0.9, 0.05, 0.05]
+        mock_model.predict.return_value.tolist.return_value = [0.0, 2.0, 1.0]
 
         with patch("app.generation.guardrail._load_nli_model", return_value=mock_model):
             result = await check(

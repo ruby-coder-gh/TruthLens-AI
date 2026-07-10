@@ -96,9 +96,17 @@ async def test_get_workspace(client: AsyncClient, auth_headers: dict[str, str]):
 
 @pytest.mark.asyncio
 async def test_get_workspace_not_found(client: AsyncClient, auth_headers: dict[str, str]):
-    """Get non-existent workspace returns 404."""
-    resp = await client.get("/api/workspaces/nonexistent-id", headers=auth_headers)
+    """Get valid-format but non-existent workspace returns 404."""
+    missing_id = "00000000-0000-0000-0000-000000000000"
+    resp = await client.get(f"/api/workspaces/{missing_id}", headers=auth_headers)
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_malformed_id(client: AsyncClient, auth_headers: dict[str, str]):
+    """Get workspace with malformed (non-UUID) id returns 422."""
+    resp = await client.get("/api/workspaces/nonexistent-id", headers=auth_headers)
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

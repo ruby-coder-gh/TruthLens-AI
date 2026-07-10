@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
 
     # Exception handlers
     app.add_exception_handler(AppException, app_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
     # Include API router

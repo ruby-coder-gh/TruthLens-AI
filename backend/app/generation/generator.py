@@ -6,6 +6,7 @@ import time
 from typing import Any, AsyncIterator
 
 from app.config import settings
+from app.generation.citer import cite
 from app.generation.provider import get_chat_llm
 from app.utils.logger import logger
 

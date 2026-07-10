@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,16 +33,18 @@ class TestGetCurrentUser:
         assert user.email == test_user.email
 
     async def test_missing_header(self, test_db: AsyncSession):
-        """Missing authorization raises 401."""
+        """Missing credentials (no header, no cookie) raises 401."""
         with pytest.raises(UnauthorizedException) as exc:
             await self._call(None, test_db)
-        assert "Missing authorization header" in str(exc.value.message)
+        # Cookie-auth refactor: credentials may come from header OR cookie, so the
+        # message refers to the missing auth token rather than the header alone.
+        assert "Missing authentication token" in str(exc.value.message)
 
     async def test_empty_header(self, test_db: AsyncSession):
-        """Empty authorization raises 401."""
+        """Empty authorization (and no cookie) raises 401."""
         with pytest.raises(UnauthorizedException) as exc:
             await self._call("", test_db)
-        assert "Missing authorization header" in str(exc.value.message)
+        assert "Missing authentication token" in str(exc.value.message)
 
     async def test_bad_format(self, test_db: AsyncSession):
         """Non-Bearer format raises 401."""
@@ -165,10 +168,17 @@ class TestCheckWorkspaceAccess:
         assert "don't have access" in str(exc.value.message)
 
     async def test_workspace_not_found(self, test_db: AsyncSession, test_user: User):
-        """Non-existent workspace raises 404."""
+        """Valid-format but non-existent workspace id raises 404."""
+        missing_id = "00000000-0000-0000-0000-000000000000"
         with pytest.raises(NotFoundException) as exc:
-            await check_workspace_access("bad-id", test_user, test_db)
+            await check_workspace_access(missing_id, test_user, test_db)
         assert "not found" in str(exc.value.message)
+
+    async def test_workspace_malformed_id(self, test_db: AsyncSession, test_user: User):
+        """Malformed (non-UUID) workspace id raises 422 before any lookup."""
+        with pytest.raises(HTTPException) as exc:
+            await check_workspace_access("bad-id", test_user, test_db)
+        assert exc.value.status_code == 422
 
 
 # ── check_workspace_owner ───────────────────────────────────────
@@ -209,7 +219,14 @@ class TestCheckWorkspaceOwner:
         assert "Only workspace owner" in str(exc.value.message)
 
     async def test_workspace_not_found(self, test_db: AsyncSession, test_user: User):
-        """Non-existent workspace raises 404."""
+        """Valid-format but non-existent workspace id raises 404."""
+        missing_id = "00000000-0000-0000-0000-000000000000"
         with pytest.raises(NotFoundException) as exc:
-            await check_workspace_owner("bad-id", test_user, test_db)
+            await check_workspace_owner(missing_id, test_user, test_db)
         assert "not found" in str(exc.value.message)
+
+    async def test_workspace_malformed_id(self, test_db: AsyncSession, test_user: User):
+        """Malformed (non-UUID) workspace id raises 422 before any lookup."""
+        with pytest.raises(HTTPException) as exc:
+            await check_workspace_owner("bad-id", test_user, test_db)
+        assert exc.value.status_code == 422

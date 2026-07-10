@@ -116,6 +116,23 @@ async def test_register_weak_password(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_validation_error_uses_custom_envelope(client: AsyncClient):
+    """RequestValidationError is formatted by validation_exception_handler.
+
+    Confirms the handler is registered: the body must use the app's standard
+    error envelope (code INVALID_INPUT + per-field details), not FastAPI's
+    default {"detail": [...]} shape.
+    """
+    response = await client.post("/api/auth/register", json={"email": "not-an-email"})
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "INVALID_INPUT"
+    assert body["error"]["message"] == "Validation failed"
+    # Missing required fields are reported per-location under details.
+    assert "body.password" in body["error"]["details"]
+
+
+@pytest.mark.asyncio
 async def test_refresh_token(client: AsyncClient):
     """Test token refresh."""
     reg = await client.post("/api/auth/register", json={

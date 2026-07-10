@@ -51,7 +51,7 @@ async def get_current_user(
         if len(parts) != 2 or parts[0].lower() != "bearer":
             raise UnauthorizedException(message="Invalid authorization format")
         token = parts[1]
-    elif access_token_cookie:
+    elif isinstance(access_token_cookie, str) and access_token_cookie:
         token = access_token_cookie
     else:
         raise UnauthorizedException(message="Missing authentication token")

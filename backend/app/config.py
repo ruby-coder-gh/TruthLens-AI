@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     OLLAMA_FALLBACK_MODEL: str = "phi3:3b"
     OLLAMA_EMBED_MODEL: str = "bge-base:latest"
     OLLAMA_RERANK_MODEL: str = "bge-reranker:latest"
+    OLLAMA_VISION_MODEL: str = "llava:7b"
     OLLAMA_TIMEOUT: int = 120
     OLLAMA_MAX_TOKENS: int = 2048
     OLLAMA_TEMPERATURE: float = 0.3
