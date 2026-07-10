@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_serializer, field_validator
+
+from app.schemas._datetime import utc_iso
 
 
 class FeedbackCreate(BaseModel):
@@ -26,3 +28,5 @@ class FeedbackResponse(BaseModel):
     rating: int
     comment: str | None = None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)

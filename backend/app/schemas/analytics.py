@@ -1,7 +1,8 @@
 """Analytics schemas for admin dashboard."""
 from __future__ import annotations
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+from app.schemas._datetime import utc_iso
 
 class FlaggedAnswerResponse(BaseModel):
     id: str
@@ -11,6 +12,8 @@ class FlaggedAnswerResponse(BaseModel):
     user_name: str | None = None
     workspace_name: str | None = None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 class UsageStatsResponse(BaseModel):
     date: str
@@ -26,6 +29,8 @@ class UserActivityResponse(BaseModel):
     query_text: str
     trust_score: float | None = None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 class AdminSettingsResponse(BaseModel):
     app_name: str
@@ -53,3 +58,5 @@ class EvalRunResponse(BaseModel):
     answer_correctness: float | None = None
     refusal_accuracy: float | None = None
     golden_set_version: str | None = None
+
+    _serialize_run_at = field_serializer("run_at")(utc_iso)

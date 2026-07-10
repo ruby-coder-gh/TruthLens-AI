@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, field_serializer, field_validator, model_validator
+
+from app.schemas._datetime import utc_iso
 
 
 class WorkspaceCreate(BaseModel):
@@ -34,6 +36,8 @@ class WorkspaceSummary(BaseModel):
     document_count: int = 0
     created_at: datetime
 
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+
 
 class WorkspaceResponse(BaseModel):
     id: str
@@ -44,6 +48,9 @@ class WorkspaceResponse(BaseModel):
     document_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
 
 
 class MemberAdd(BaseModel):
@@ -85,6 +92,8 @@ class MemberResponse(BaseModel):
     email: str | None = None
     joined_at: datetime
 
+    _serialize_joined_at = field_serializer("joined_at")(utc_iso)
+
 
 class ActivityEntry(BaseModel):
     id: str
@@ -93,3 +102,5 @@ class ActivityEntry(BaseModel):
     user_name: str | None = None
     timestamp: datetime
     metadata: dict[str, Any] | None = None
+
+    _serialize_timestamp = field_serializer("timestamp")(utc_iso)

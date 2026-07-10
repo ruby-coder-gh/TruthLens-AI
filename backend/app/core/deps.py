@@ -20,6 +20,7 @@ __all__ = [
     "get_current_user_ws",
     "get_current_admin",
     "check_workspace_access",
+    "check_workspace_access_or_admin",
     "check_workspace_owner",
 ]
 
@@ -113,6 +114,50 @@ async def check_workspace_access(
     workspace = result.scalar_one_or_none()
     if not workspace:
         raise NotFoundException("Workspace", workspace_id)
+
+    # Owner always has access
+    if workspace.owner_id == user.id:
+        return workspace
+
+    # Check membership
+    result = await db.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user.id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if not membership:
+        raise ForbiddenException(message="You don't have access to this workspace")
+
+    return workspace
+
+
+async def check_workspace_access_or_admin(
+    workspace_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Workspace:
+    """Check user has access to workspace (owner, member, or admin). Returns workspace.
+
+    Same as check_workspace_access but with an admin bypass, mirroring the
+    role == "admin" special-case already used by delete_document and
+    reindex_document. Intentionally kept separate from check_workspace_access
+    (rather than adding the bypass there) so routes that must NOT grant
+    admins blanket cross-workspace access (uploads, queries, collections,
+    comparisons, feedback, investigations, etc.) are unaffected.
+    """
+    _validate_uuid(workspace_id)
+    result = await db.execute(
+        select(Workspace).where(Workspace.id == workspace_id)
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise NotFoundException("Workspace", workspace_id)
+
+    # Admins can access any workspace's documents (read-only endpoints only).
+    if user.role == "admin":
+        return workspace
 
     # Owner always has access
     if workspace.owner_id == user.id:

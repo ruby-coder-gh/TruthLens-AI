@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+
+from app.schemas._datetime import utc_iso
 
 
 class DocumentResponse(BaseModel):
@@ -22,6 +24,9 @@ class DocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
+
 
 class ChunkInfo(BaseModel):
     id: str
@@ -29,6 +34,8 @@ class ChunkInfo(BaseModel):
     content: str
     token_count: int
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
 class DocumentDetailResponse(BaseModel):

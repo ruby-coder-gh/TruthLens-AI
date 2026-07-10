@@ -49,6 +49,7 @@ async def list_users(
                 username=u.username,
                 role=u.role,
                 is_active=u.is_active,
+                last_login_at=u.last_login_at,
                 created_at=u.created_at,
                 updated_at=u.updated_at,
             )
@@ -72,6 +73,7 @@ async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

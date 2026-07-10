@@ -8,8 +8,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pydantic import BaseModel, field_validator
-from sqlalchemy import case, func, select
+from pydantic import BaseModel, field_serializer, field_validator
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends
@@ -25,6 +25,7 @@ from app.models.feedback import Feedback
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.schemas._datetime import utc_iso
 from app.schemas.analytics import (
     AdminSettingsResponse,
     AdminSettingsUpdate,
@@ -82,6 +83,10 @@ class UserDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    _serialize_last_login_at = field_serializer("last_login_at")(utc_iso)
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
+
 
 class UserRoleUpdate(BaseModel):
     role: str
@@ -131,9 +136,14 @@ async def get_audit_logs(
     page: int = 1,
     page_size: int = 50,
     action: str | None = None,
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get audit log entries (admin only)."""
+    """Get audit log entries (admin only).
+
+    `q` performs a case-insensitive substring match across the meaningful
+    text columns (action, resource_type, resource_id, details, ip_address).
+    """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
     query = select(AuditLog)
@@ -142,6 +152,18 @@ async def get_audit_logs(
     if action:
         query = query.where(AuditLog.action == action)
         count_query = count_query.where(AuditLog.action == action)
+
+    if q:
+        search_term = f"%{q.strip()}%"
+        search_filter = or_(
+            AuditLog.action.ilike(search_term),
+            AuditLog.resource_type.ilike(search_term),
+            AuditLog.resource_id.ilike(search_term),
+            AuditLog.details.ilike(search_term),
+            AuditLog.ip_address.ilike(search_term),
+        )
+        query = query.where(search_filter)
+        count_query = count_query.where(search_filter)
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -268,6 +290,7 @@ async def list_users(
                 username=u.username,
                 role=u.role,
                 is_active=u.is_active,
+                last_login_at=u.last_login_at,
                 created_at=u.created_at,
                 updated_at=u.updated_at,
             )

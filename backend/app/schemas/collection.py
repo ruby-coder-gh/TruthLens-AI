@@ -1,7 +1,8 @@
 """Collection schemas."""
 from __future__ import annotations
 from datetime import datetime
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_serializer, model_validator
+from app.schemas._datetime import utc_iso
 
 class CollectionCreate(BaseModel):
     name: str
@@ -20,6 +21,9 @@ class CollectionResponse(BaseModel):
     document_count: int = 0
     created_at: datetime
     updated_at: datetime | None = None
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
 
 class CollectionAccessGrant(BaseModel):
     user_id: str | None = None

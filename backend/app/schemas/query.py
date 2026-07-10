@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+
+from app.schemas._datetime import utc_iso
 
 
 class QueryRequest(BaseModel):
@@ -30,6 +32,8 @@ class QueryResponse(BaseModel):
     token_count: int | None = None
     created_at: datetime
 
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+
 
 class QuerySummary(BaseModel):
     id: str
@@ -39,6 +43,8 @@ class QuerySummary(BaseModel):
     guardrail_passed: bool | None = None
     model_used: str | None = None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
 class SourceResponse(BaseModel):
@@ -70,3 +76,5 @@ class QueryDetailResponse(BaseModel):
     latency_ms: int | None = None
     token_count: int | None = None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)

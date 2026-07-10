@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_serializer, field_validator
+
+from app.schemas._datetime import utc_iso
 
 
 class RegisterRequest(BaseModel):
@@ -49,6 +51,8 @@ class UserInfo(BaseModel):
     username: str
     role: str
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
 class AuthResponse(BaseModel):

@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+
+from app.schemas._datetime import utc_iso
 
 T = TypeVar("T")
 
@@ -50,6 +52,8 @@ class AuditLogResponse(BaseModel):
     ip_address: str | None = None
     created_at: datetime
 
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+
 
 class EvaluationResponse(BaseModel):
     faithfulness: float | None = None
@@ -58,6 +62,8 @@ class EvaluationResponse(BaseModel):
     context_recall: float | None = None
     answer_correctness: float | None = None
     last_updated: datetime | None = None
+
+    _serialize_last_updated = field_serializer("last_updated")(utc_iso)
 
 
 # ─── Comparison Schemas ──────────────────────────────────────────────────────
@@ -88,6 +94,8 @@ class ComparisonResultResponse(BaseModel):
     stance: str  # "supports" | "contradicts" | "silent"
     created_at: datetime
 
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+
 
 class ComparisonSummary(BaseModel):
     """Summary item for comparison history list."""
@@ -99,6 +107,8 @@ class ComparisonSummary(BaseModel):
     agreement_score: float | None
     trust_score: float | None
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
 class ComparisonResponse(BaseModel):
@@ -113,6 +123,8 @@ class ComparisonResponse(BaseModel):
     trust_score: float | None
     results: list[ComparisonResultResponse]
     created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
 class ComparisonCreateRequest(BaseModel):

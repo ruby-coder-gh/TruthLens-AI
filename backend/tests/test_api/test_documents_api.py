@@ -172,6 +172,93 @@ async def test_get_document_not_found(client: AsyncClient, auth_headers: dict[st
 
 
 @pytest.mark.asyncio
+async def test_get_document_admin_can_access_foreign_workspace(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    admin_headers: dict[str, str],
+    workspace_id: str,
+):
+    """Admin can GET document detail in a workspace they don't own/belong to (bug #2)."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("admin_get_test.txt", b"admin visible content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id"] == doc_id
+
+
+@pytest.mark.asyncio
+async def test_get_document_status_admin_can_access_foreign_workspace(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    admin_headers: dict[str, str],
+    workspace_id: str,
+):
+    """Admin can GET document status in a workspace they don't own/belong to (bug #2)."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("admin_status_test.txt", b"admin visible status", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}/status",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id"] == doc_id
+
+
+@pytest.mark.asyncio
+async def test_get_document_non_admin_non_member_forbidden(
+    client: AsyncClient,
+    test_db: AsyncSession,
+    auth_headers: dict[str, str],
+    workspace_id: str,
+):
+    """A non-member, non-admin user still gets 403 on document detail (no over-widening)."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("stranger_test.txt", b"not for you", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    stranger = User(
+        email="strangerdoc@example.com",
+        username="strangerdoc",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(stranger)
+    await test_db.commit()
+    await test_db.refresh(stranger)
+    stranger_token = create_access_token(stranger.id, stranger.role)
+    stranger_headers = {"Authorization": f"Bearer {stranger_token}"}
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+        headers=stranger_headers,
+    )
+    assert resp.status_code == 403
+
+    resp_status = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}/status",
+        headers=stranger_headers,
+    )
+    assert resp_status.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_get_document_chunks_capped(
     client: AsyncClient,
     auth_headers: dict[str, str],

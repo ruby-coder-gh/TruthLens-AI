@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, UploadFile, File
 
 from app.config import settings
-from app.core.deps import check_workspace_access, get_current_user, get_db
+from app.core.deps import check_workspace_access, check_workspace_access_or_admin, get_current_user, get_db
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
@@ -226,10 +226,10 @@ async def list_documents(
 async def get_document(
     workspace_id: str,
     doc_id: str,
-    workspace: Workspace = Depends(check_workspace_access),
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get document with its chunks."""
+    """Get document with its chunks. Admins may view any workspace's documents."""
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
     )
@@ -268,10 +268,10 @@ async def get_document(
 async def get_document_status(
     workspace_id: str,
     doc_id: str,
-    workspace: Workspace = Depends(check_workspace_access),
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Poll document processing status."""
+    """Poll document processing status. Admins may view any workspace's documents."""
     result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
     )
