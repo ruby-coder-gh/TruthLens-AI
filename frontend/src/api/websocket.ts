@@ -60,17 +60,20 @@ export class QueryWebSocket {
   private conversationId?: string;
   private callbacks: QueryWebSocketCallbacks;
   private isConnected = false;
+  private topK?: number;
 
   constructor(
     workspaceId: string,
     query: string,
     callbacks: QueryWebSocketCallbacks,
     conversationId?: string,
+    topK?: number,
   ) {
     this.workspaceId = workspaceId;
     this.query = query;
     this.callbacks = callbacks;
     this.conversationId = conversationId;
+    this.topK = topK;
   }
 
   connect(): void {
@@ -154,6 +157,7 @@ export class QueryWebSocket {
             workspace_id: this.workspaceId,
             query: this.query,
             ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
+            ...(this.topK ? { top_k: this.topK } : {}),
           }
         });
         break;

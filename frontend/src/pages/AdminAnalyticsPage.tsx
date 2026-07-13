@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   LineChart,
@@ -16,15 +16,20 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  CheckCircle2,
   Clock3,
   MessageSquare,
+  Play,
   Shield,
   TrendingUp,
+  XCircle,
 } from 'lucide-react';
-import { Badge, Button, Card, Tabs } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Tabs } from '../components/ui';
 import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
+import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
+import type { EvalRunNotes, EvalRunResponse, EvalThresholds } from '../api/types';
 
 type FlaggedAnswer = {
   id: string;
@@ -47,24 +52,46 @@ type TrustDistributionPoint = {
 };
 
 type QualityMetric = {
+  key: string;
   label: string;
-  value: number;
+  value: number | null;
   color: string;
 };
 
 const DISTRIBUTION_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#2dd4bf', '#34d399'];
-const QUALITY_COLORS = ['#34d399', '#2dd4bf', '#38bdf8', '#2d6bff'];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  answerable: 'Answerable',
+  unanswerable: 'Unanswerable',
+  ambiguous: 'Ambiguous',
+};
+
+const CATEGORY_ORDER = ['answerable', 'unanswerable', 'ambiguous'];
+
+const CATEGORY_METRIC_LABELS: Record<string, string> = {
+  faithfulness: 'Faithfulness',
+  trust: 'Trust',
+  context_precision: 'Ctx. Precision',
+  context_recall: 'Ctx. Recall',
+  answer_relevance: 'Relevance',
+  refusal_accuracy: 'Refusal Acc.',
+};
+
+const EVAL_POLL_INTERVAL_MS = 15_000;
+const EVAL_POLL_MAX_TRIES = 4;
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-function clampUnit(value: unknown): number {
-  const num = toFiniteNumber(value, 0);
-  if (num < 0) return 0;
-  if (num > 1) return 1;
-  return num;
+/** Clamp a possibly-null metric to [0,1], preserving null/undefined so the UI
+ * can distinguish "not computed" from "computed as 0". */
+function clampUnitOrNull(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }
 
 function formatDateTime(value: unknown): string {
@@ -89,9 +116,50 @@ function extractData<T>(resp: unknown): T[] {
   return [];
 }
 
-function formatPercent(value: number | null): string {
-  if (value === null) return '—';
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   return `${Math.round(value * 100)}%`;
+}
+
+/** Parse the `notes` JSON blob on an eval run. Guards against absent/invalid
+ * JSON (older rows, or a backend that hasn't populated it yet) — returns
+ * `null` rather than throwing so the rest of the page renders normally. */
+function parseEvalNotes(notes: string | null | undefined): EvalRunNotes | null {
+  if (!notes) return null;
+  try {
+    const parsed: unknown = JSON.parse(notes);
+    if (parsed && typeof parsed === 'object') return parsed as EvalRunNotes;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function shortGoldenSetVersion(version: string | null | undefined): string | null {
+  if (!version) return null;
+  return version.length > 12 ? version.slice(0, 12) : version;
+}
+
+type ThresholdCheck = { pass: boolean; threshold: number } | null;
+
+function checkThreshold(value: number | null | undefined, threshold: number | null | undefined): ThresholdCheck {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  if (threshold === null || threshold === undefined || !Number.isFinite(threshold)) return null;
+  return { pass: value >= threshold, threshold };
+}
+
+function thresholdForMetric(key: string, thresholds: EvalThresholds | undefined): number | null | undefined {
+  if (!thresholds) return undefined;
+  switch (key) {
+    case 'faithfulness':
+      return thresholds.min_faithfulness;
+    case 'context_precision':
+      return thresholds.min_context_precision;
+    case 'refusal_accuracy':
+      return thresholds.refusal_accuracy_min;
+    default:
+      return undefined;
+  }
 }
 
 function tooltipNumber(value: number | string | readonly (number | string)[] | undefined): number {
@@ -134,6 +202,14 @@ export default function AdminAnalyticsPage() {
   const [trustScoreDistributionData, setTrustScoreDistributionData] = useState<TrustDistributionPoint[]>([]);
   const [metrics, setMetrics] = useState<QualityMetric[]>([]);
   const [latestEvalAt, setLatestEvalAt] = useState('—');
+  const [latestEvalRun, setLatestEvalRun] = useState<EvalRunResponse | null>(null);
+  const [evalRunCount, setEvalRunCount] = useState(0);
+  const [ragasUnavailable, setRagasUnavailable] = useState(false);
+
+  const { addToast } = useToast();
+  const [runningEval, setRunningEval] = useState(false);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollAttemptsRef = useRef(0);
 
   const loadAnalytics = useCallback(async (silentRefresh: boolean) => {
     if (silentRefresh) {
@@ -177,39 +253,32 @@ export default function AdminAnalyticsPage() {
       }));
       setTrustScoreDistributionData(normalizedTrust);
 
-      const evalRaw = extractData<Record<string, unknown>>(evalData);
+      const evalRaw = extractData<EvalRunResponse>(evalData);
       let normalizedMetrics: QualityMetric[] = [];
       let latestRun = '—';
+      let latest: EvalRunResponse | null = null;
 
       if (evalRaw.length > 0) {
-        const latest = evalRaw[0];
+        latest = evalRaw[0];
         latestRun = formatDateTime(latest.run_at);
 
-        if (
-          'faithfulness' in latest ||
-          'context_precision' in latest ||
-          'context_recall' in latest ||
-          'answer_relevance' in latest
-        ) {
-          normalizedMetrics = [
-            { label: 'Faithfulness', value: clampUnit(latest.faithfulness), color: '#34d399' },
-            { label: 'Context Precision', value: clampUnit(latest.context_precision), color: '#2dd4bf' },
-            { label: 'Context Recall', value: clampUnit(latest.context_recall), color: '#38bdf8' },
-            { label: 'Answer Relevance', value: clampUnit(latest.answer_relevance), color: '#2d6bff' },
-          ];
-        } else {
-          normalizedMetrics = evalRaw
-            .map((item, idx) => ({
-              label: String(item.label ?? `Metric ${idx + 1}`),
-              value: clampUnit(item.value),
-              color: QUALITY_COLORS[idx] || QUALITY_COLORS[QUALITY_COLORS.length - 1],
-            }))
-            .slice(0, 4);
-        }
+        // Nulls (e.g. context_precision/context_recall when the `ragas`
+        // package isn't installed server-side) are preserved as `null` so the
+        // UI can render "—" instead of a misleading 0%-filled bar.
+        normalizedMetrics = [
+          { key: 'faithfulness', label: 'Faithfulness', value: clampUnitOrNull(latest.faithfulness), color: '#34d399' },
+          { key: 'context_precision', label: 'Context Precision', value: clampUnitOrNull(latest.context_precision), color: '#2dd4bf' },
+          { key: 'context_recall', label: 'Context Recall', value: clampUnitOrNull(latest.context_recall), color: '#38bdf8' },
+          { key: 'answer_relevance', label: 'Answer Relevance', value: clampUnitOrNull(latest.answer_relevance), color: '#2d6bff' },
+          { key: 'refusal_accuracy', label: 'Refusal Accuracy', value: clampUnitOrNull(latest.refusal_accuracy), color: '#a78bfa' },
+        ];
       }
 
       setMetrics(normalizedMetrics);
       setLatestEvalAt(latestRun);
+      setLatestEvalRun(latest);
+      setEvalRunCount(evalRaw.length);
+      setRagasUnavailable(latest !== null && latest.context_precision === null && latest.context_recall === null);
     } catch {
       setError('Unable to load analytics right now.');
       setFlaggedAnswers([]);
@@ -217,6 +286,9 @@ export default function AdminAnalyticsPage() {
       setTrustScoreDistributionData([]);
       setMetrics([]);
       setLatestEvalAt('—');
+      setLatestEvalRun(null);
+      setEvalRunCount(0);
+      setRagasUnavailable(false);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -233,11 +305,15 @@ export default function AdminAnalyticsPage() {
     () => queriesOverTimeData.reduce((sum, point) => sum + point.queries, 0),
     [queriesOverTimeData],
   );
+  const scoredMetrics = useMemo(
+    () => metrics.filter((metric): metric is QualityMetric & { value: number } => metric.value !== null),
+    [metrics],
+  );
   const averageQuality = useMemo(() => {
-    if (metrics.length === 0) return null;
-    const total = metrics.reduce((sum, metric) => sum + metric.value, 0);
-    return total / metrics.length;
-  }, [metrics]);
+    if (scoredMetrics.length === 0) return null;
+    const total = scoredMetrics.reduce((sum, metric) => sum + metric.value, 0);
+    return total / scoredMetrics.length;
+  }, [scoredMetrics]);
   const peakQueryPoint = useMemo(() => {
     if (queriesOverTimeData.length === 0) return null;
     return queriesOverTimeData.reduce((max, current) => (current.queries > max.queries ? current : max));
@@ -251,6 +327,74 @@ export default function AdminAnalyticsPage() {
     [trustScoreDistributionData],
   );
   const lowTrustRatio = trustSampleSize > 0 ? lowTrustCount / trustSampleSize : null;
+
+  const evalNotes = useMemo(() => parseEvalNotes(latestEvalRun?.notes), [latestEvalRun]);
+  const goldenSetVersion = shortGoldenSetVersion(latestEvalRun?.golden_set_version);
+  const thresholds = evalNotes?.thresholds;
+  const categoryRows = useMemo(() => {
+    const perCategory = evalNotes?.per_category;
+    if (!perCategory) return [];
+    const seen = new Set<string>();
+    const ordered = [...CATEGORY_ORDER, ...Object.keys(perCategory)].filter((key) => {
+      if (seen.has(key) || !perCategory[key]) return false;
+      seen.add(key);
+      return true;
+    });
+    return ordered.map((key) => ({ key, label: CATEGORY_LABELS[key] ?? key, data: perCategory[key]! }));
+  }, [evalNotes]);
+
+  // ── Run evaluation (async, queued) ────────────────────────────────────────
+  const stopPolling = useCallback(() => {
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+    pollAttemptsRef.current = 0;
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
+
+  const pollForResults = useCallback(() => {
+    const baselineCount = evalRunCount;
+    const attempt = () => {
+      pollAttemptsRef.current += 1;
+      void (async () => {
+        try {
+          const history = await adminApi.getEvalHistory();
+          const rows = extractData<EvalRunResponse>(history);
+          if (rows.length > baselineCount) {
+            stopPolling();
+            await loadAnalytics(true);
+            addToast('New evaluation results are in.', 'success');
+            return;
+          }
+        } catch {
+          // Ignore transient poll errors — the user can always hit Refresh.
+        }
+        if (pollAttemptsRef.current < EVAL_POLL_MAX_TRIES) {
+          pollTimeoutRef.current = setTimeout(attempt, EVAL_POLL_INTERVAL_MS);
+        } else {
+          stopPolling();
+        }
+      })();
+    };
+    pollTimeoutRef.current = setTimeout(attempt, EVAL_POLL_INTERVAL_MS);
+  }, [evalRunCount, stopPolling, loadAnalytics, addToast]);
+
+  const handleRunEvaluation = useCallback(async () => {
+    if (runningEval) return;
+    setRunningEval(true);
+    stopPolling();
+    try {
+      await adminApi.runEvaluation();
+      addToast('Evaluation queued — a golden-set run can take a few minutes. Refresh to see results.', 'info');
+      pollForResults();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to queue evaluation.', 'error');
+    } finally {
+      setRunningEval(false);
+    }
+  }, [runningEval, stopPolling, addToast, pollForResults]);
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <BarChart3 size={14} /> },
@@ -283,7 +427,7 @@ export default function AdminAnalyticsPage() {
       value: latestEvalAt,
       icon: Clock3,
       tone: 'text-accent',
-      detail: metrics.length > 0 ? `${metrics.length} quality metrics captured` : 'No evaluation history recorded.',
+      detail: scoredMetrics.length > 0 ? `${scoredMetrics.length} quality metrics captured` : 'No evaluation history recorded.',
     },
   ] as const;
 
@@ -310,14 +454,26 @@ export default function AdminAnalyticsPage() {
           description="Monitor demand, trust risk, and answer quality from a single control surface."
           className="flex-1"
           actions={(
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => { void loadAnalytics(true); }}
-              loading={refreshing}
-            >
-              Refresh Data
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => { void loadAnalytics(true); }}
+                loading={refreshing}
+              >
+                Refresh Data
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => { void handleRunEvaluation(); }}
+                loading={runningEval}
+                disabled={runningEval}
+              >
+                <Play size={14} />
+                Run Evaluation
+              </Button>
+            </div>
           )}
         />
       </motion.div>
@@ -344,6 +500,7 @@ export default function AdminAnalyticsPage() {
       >
         {overviewCards.map((card) => {
           const Icon = card.icon;
+          const isLatestEvalCard = card.label === 'Latest Eval Run';
           return (
             <motion.div key={card.label} variants={staggerItem}>
               <Card className="relative h-full overflow-hidden p-4">
@@ -356,6 +513,11 @@ export default function AdminAnalyticsPage() {
                     <p className="text-xs uppercase tracking-[0.08em] text-text-muted">{card.label}</p>
                     <p className="truncate text-lg font-bold text-text tabular-nums">{card.value}</p>
                     <p className="mt-1 text-xs text-text-dim">{card.detail}</p>
+                    {isLatestEvalCard && goldenSetVersion ? (
+                      <p className="mt-1 truncate font-mono text-[11px] text-text-dim">
+                        golden set · {goldenSetVersion}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </Card>
@@ -475,57 +637,121 @@ export default function AdminAnalyticsPage() {
           <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} className="px-4 pt-2" />
           <div className="p-5 lg:p-6">
             {activeTab === 'ragas' ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                {metrics.length === 0 ? (
-                  <div className="col-span-full rounded-2xl border border-border/60 bg-card-2/40 p-6 text-center">
-                    <p className="text-sm font-semibold text-text">No evaluation history available yet.</p>
-                    <p className="mt-1 text-xs text-text-dim">
-                      Run an evaluation from the admin panel to populate RAGAS metrics and quality trend tracking.
-                    </p>
-                    <div className="mt-4">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => { void loadAnalytics(true); }}
-                        loading={refreshing}
-                      >
-                        Check Again
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  metrics.map((metric) => {
-                    const percent = Math.round(metric.value * 100);
-                    const qualityBand = getQualityBand(metric.value);
-                    return (
-                      <Card key={metric.label} className="relative overflow-hidden p-4">
-                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
-                        <div className="relative mb-3 flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-text">{metric.label}</span>
-                          <Badge color={qualityBand.badgeColor}>{qualityBand.label}</Badge>
-                        </div>
-                        <div className="relative mb-2 flex items-baseline justify-between">
-                          <span className="text-2xl font-bold tabular-nums" style={{ color: metric.color }}>{percent}%</span>
-                          <span className="text-xs text-text-dim">target: 85%+</span>
-                        </div>
-                        <div
-                          className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
-                          role="progressbar"
-                          aria-valuenow={percent}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-label={`${metric.label}: ${percent}%`}
-                        >
+              evalRunCount === 0 ? (
+                <EmptyState
+                  icon={<Shield size={24} />}
+                  title="No evaluation runs yet"
+                  description="Click Run evaluation to score the golden dataset and populate RAGAS metrics."
+                  action={(
+                    <Button onClick={() => { void handleRunEvaluation(); }} loading={runningEval} disabled={runningEval}>
+                      <Play size={16} />
+                      Run evaluation
+                    </Button>
+                  )}
+                />
+              ) : (
+                <div className="space-y-5">
+                  {ragasUnavailable ? (
+                    <StateBlock tone="neutral" role="status" className="flex items-center gap-2">
+                      <AlertTriangle size={14} className="shrink-0 text-orange" />
+                      RAGAS metrics unavailable — install ragas on the server to compute Context Precision and Context Recall.
+                    </StateBlock>
+                  ) : null}
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {metrics.map((metric) => {
+                      const value = metric.value;
+                      const isNull = value === null;
+                      const percent = value === null ? 0 : Math.round(value * 100);
+                      const qualityBand = value === null ? null : getQualityBand(value);
+                      const thresholdValue = thresholdForMetric(metric.key, thresholds);
+                      const check = value === null ? null : checkThreshold(value, thresholdValue);
+                      return (
+                        <Card key={metric.key} className="relative overflow-hidden p-4">
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
+                          <div className="relative mb-3 flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium text-text">{metric.label}</span>
+                            <div className="flex items-center gap-1.5">
+                              {check ? (
+                                <Badge color={check.pass ? 'green' : 'red'} className="inline-flex items-center gap-1">
+                                  {check.pass ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                                  {check.pass ? 'Pass' : 'Below threshold'}
+                                </Badge>
+                              ) : null}
+                              {qualityBand ? <Badge color={qualityBand.badgeColor}>{qualityBand.label}</Badge> : null}
+                            </div>
+                          </div>
+                          <div className="relative mb-2 flex items-baseline justify-between">
+                            <span
+                              className="text-2xl font-bold tabular-nums"
+                              style={{ color: isNull ? undefined : metric.color }}
+                            >
+                              {isNull ? '—' : `${percent}%`}
+                            </span>
+                            <span className="text-xs text-text-dim">
+                              {isNull ? 'n/a' : check ? `threshold: ${Math.round(check.threshold * 100)}%` : 'target: 85%+'}
+                            </span>
+                          </div>
                           <div
-                            className="h-full rounded-full transition-all duration-700 ease-out"
-                            style={{ width: `${percent}%`, background: `linear-gradient(90deg, ${metric.color}, ${metric.color}88)` }}
-                          />
-                        </div>
-                      </Card>
-                    );
-                  })
-                )}
-              </div>
+                            className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
+                            role="progressbar"
+                            aria-valuenow={isNull ? undefined : percent}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={isNull ? `${metric.label}: not available` : `${metric.label}: ${percent}%`}
+                          >
+                            {isNull ? null : (
+                              <div
+                                className="h-full rounded-full transition-all duration-700 ease-out"
+                                style={{ width: `${percent}%`, background: `linear-gradient(90deg, ${metric.color}, ${metric.color}88)` }}
+                              />
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {categoryRows.length > 0 ? (
+                    <div className="rounded-2xl border border-border/60 bg-card-2/35 p-4">
+                      <h4 className="mb-3 text-sm font-semibold text-text">Per-Category Breakdown</h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[420px] text-left text-xs">
+                          <thead>
+                            <tr className="text-text-dim">
+                              <th className="pb-2 pr-3 font-medium uppercase tracking-[0.06em]">Category</th>
+                              <th className="pb-2 pr-3 font-medium uppercase tracking-[0.06em]">Count</th>
+                              {Object.keys(categoryRows[0].data)
+                                .filter((key) => key !== 'count')
+                                .map((key) => (
+                                  <th key={key} className="pb-2 pr-3 font-medium uppercase tracking-[0.06em]">
+                                    {CATEGORY_METRIC_LABELS[key] ?? key}
+                                  </th>
+                                ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {categoryRows.map((row) => {
+                              const metricKeys = Object.keys(row.data).filter((key) => key !== 'count');
+                              return (
+                                <tr key={row.key} className="border-t border-border/50">
+                                  <td className="py-2 pr-3 font-medium text-text">{row.label}</td>
+                                  <td className="py-2 pr-3 tabular-nums text-text-muted">{row.data.count ?? '—'}</td>
+                                  {metricKeys.map((key) => (
+                                    <td key={key} className="py-2 pr-3 tabular-nums text-text-muted">
+                                      {formatPercent(row.data[key] as number | null | undefined)}
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">

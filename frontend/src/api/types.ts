@@ -338,3 +338,54 @@ export interface ActivityEntry {
   timestamp: string;
   metadata: Record<string, unknown> | null;
 }
+
+// ─── Evaluation (RAGAS / golden-set) ─────────────────────────────────────────
+export interface EvalRunResponse {
+  id: string;
+  run_at: string;
+  faithfulness: number | null;
+  context_precision: number | null;
+  context_recall: number | null;
+  answer_relevance: number | null;
+  answer_correctness: number | null;
+  refusal_accuracy: number | null;
+  golden_set_version: string | null;
+  // JSON-encoded string; may be absent on older rows. Parse defensively —
+  // shape is `{ per_category?: {...}, thresholds?: {...} }`.
+  notes?: string | null;
+}
+
+export interface EvalRunQueuedResponse {
+  status: 'queued';
+  message: string;
+  limit?: number;
+}
+
+export interface EvalCategoryBreakdown {
+  count: number;
+  faithfulness?: number | null;
+  trust?: number | null;
+  context_precision?: number | null;
+  context_recall?: number | null;
+  answer_relevance?: number | null;
+  refusal_accuracy?: number | null;
+  [key: string]: number | null | undefined;
+}
+
+export interface EvalThresholds {
+  min_faithfulness?: number | null;
+  min_trust?: number | null;
+  min_context_precision?: number | null;
+  refusal_accuracy_min?: number | null;
+}
+
+export interface EvalRunNotes {
+  per_category?: {
+    answerable?: EvalCategoryBreakdown;
+    unanswerable?: EvalCategoryBreakdown;
+    ambiguous?: EvalCategoryBreakdown;
+    [category: string]: EvalCategoryBreakdown | undefined;
+  };
+  thresholds?: EvalThresholds;
+  [key: string]: unknown;
+}

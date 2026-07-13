@@ -3,6 +3,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -310,13 +311,69 @@ interface ModalProps {
   className?: string;
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ open, onClose, title, children, className }: ModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Escape to close.
   useEffect(() => {
     if (!open) return;
     const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
   }, [open, onClose]);
+
+  // Focus trap + return-focus: on open, remember the trigger and move focus
+  // into the panel; on close, restore focus to the trigger. Tab/Shift+Tab is
+  // constrained to the panel's focusable elements while open.
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+
+    const panel = panelRef.current;
+    const focusFirst = () => {
+      const focusable = panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      (focusable && focusable.length > 0 ? focusable[0] : panel)?.focus();
+    };
+    // Defer one tick so the panel has finished mounting/animating in.
+    const raf = requestAnimationFrame(focusFirst);
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      if (focusable.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey) {
+        if (active === first || !panelRef.current.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !panelRef.current.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleTab);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleTab);
+      previouslyFocusedRef.current?.focus?.();
+      previouslyFocusedRef.current = null;
+    };
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -340,6 +397,8 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
           {/* Panel */}
           <motion.div
+            ref={panelRef}
+            tabIndex={-1}
             initial={{ opacity: 0.99 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -347,6 +406,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             className={clsx(
               'relative z-10 w-full max-w-lg glass rounded-2xl p-6 shadow-2xl shadow-black/40',
               'border border-glass-border',
+              'focus:outline-none',
               className,
             )}
             role="dialog"

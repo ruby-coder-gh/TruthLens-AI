@@ -211,54 +211,78 @@ async def get_evaluation(db: AsyncSession = Depends(get_db)):
         return EvaluationResponse()
 
 
-@router.post("/evaluation/run", status_code=202)
-async def run_evaluation(db: AsyncSession = Depends(get_db)):
-    """Trigger RAGAS evaluation on golden dataset (admin only)."""
-    from app.evaluation.ragas_eval import ragas_evaluate
+DEFAULT_EVAL_SMOKE_LIMIT = 5
 
-    result = await db.execute(
-        select(Query).where(
-            Query.response_text.isnot(None),
-            Query.trust_score.isnot(None),
-        ).order_by(func.random()).limit(20)
-    )
-    queries = result.scalars().all()
 
-    if not queries:
-        return {"message": "No queries with responses found for evaluation"}
+def _write_evaluation_snapshot(summary: dict[str, Any]) -> None:
+    """Write `data/evaluation_results.json` from a pipeline summary.
 
-    q_texts = [q.query_text for q in queries]
-    answers = [q.response_text or "" for q in queries]
-    contexts = []
-    for q in queries:
-        try:
-            sources = json.loads(q.response_sources or "[]")
-            ctx = [s.get("excerpt", s.get("content", "")) for s in sources]
-        except (json.JSONDecodeError, TypeError):
-            ctx = []
-        contexts.append(ctx)
+    Shared by the background golden-set run so `GET /admin/evaluation` (the
+    file snapshot) keeps reflecting the most recent run. Best-effort: a
+    write failure must not affect the already-persisted `EvalRun` row.
+    """
+    from pathlib import Path
 
-    scores = await ragas_evaluate(q_texts, answers, contexts)
-
-    import json as json_mod
-
+    ragas_scores = summary.get("ragas_scores") or {}
     results_data = {
-        "faithfulness": scores.faithfulness,
-        "answer_relevance": scores.answer_relevance,
-        "context_precision": scores.context_precision,
-        "context_recall": scores.context_recall,
-        "answer_correctness": scores.answer_correctness,
+        "faithfulness": ragas_scores.get("faithfulness", summary.get("avg_guardrail_score")),
+        "answer_relevance": ragas_scores.get("answer_relevance", summary.get("avg_word_f1")),
+        "context_precision": ragas_scores.get("context_precision"),
+        "context_recall": ragas_scores.get("context_recall"),
+        "answer_correctness": ragas_scores.get("answer_correctness"),
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
-    from pathlib import Path
-    eval_path = Path("data/evaluation_results.json")
-    eval_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(eval_path, "w") as f:
-        json_mod.dump(results_data, f)
+    try:
+        eval_path = Path("data/evaluation_results.json")
+        eval_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(eval_path, "w") as f:
+            json.dump(results_data, f)
+    except OSError as e:  # noqa: BLE001 — best-effort snapshot
+        logger.warning("evaluation_snapshot_write_failed", error=str(e))
 
-    logger.info("evaluation_run_complete", scores=vars(scores))
-    return {"message": "Evaluation complete", "scores": vars(scores)}
+
+async def _run_golden_eval_background(limit: int) -> None:
+    """Background task: run the golden-set pipeline and persist an EvalRun row.
+
+    Fire-and-forget (see `comparisons.py` for the same pattern). Must never
+    raise into the event loop — a missing Ollama server or the `ragas`
+    package not being installed should degrade gracefully (the pipeline and
+    `_persist_eval_run` already tolerate both), but this wrapper is a final
+    backstop so an unhandled exception never surfaces as a bare task error.
+    """
+    from evaluation.evaluate import evaluate_pipeline
+
+    try:
+        summary = await evaluate_pipeline(
+            ollama_url=settings.OLLAMA_BASE_URL,
+            model=settings.OLLAMA_PRIMARY_MODEL,
+            limit=limit,
+        )
+        _write_evaluation_snapshot(summary)
+        logger.info("evaluation_run_complete", limit=limit, completed=summary.get("completed"))
+    except Exception as e:  # noqa: BLE001 — background task must never crash the loop
+        logger.error("evaluation_run_failed", limit=limit, error=str(e))
+
+
+@router.post("/evaluation/run", status_code=202)
+async def run_evaluation(limit: int = DEFAULT_EVAL_SMOKE_LIMIT):
+    """Trigger a golden-set evaluation run in the background (admin only).
+
+    Runs the full golden-set pipeline (LLM generation + guardrail + RAGAS)
+    against `data/evaluation_results.json` and a new `EvalRun` row. Defaults
+    to a small smoke run (`limit=5`) so the endpoint stays fast to trigger;
+    pass `?limit=` for a larger (or full, `limit=0`/omit to use default)
+    pass. The run itself is slow (LLM calls per entry) so it's dispatched as
+    a fire-and-forget background task — this endpoint returns immediately.
+    """
+    asyncio.create_task(_run_golden_eval_background(limit))
+
+    return {
+        "status": "queued",
+        "message": f"Golden-set evaluation queued ({limit} entries).",
+        "limit": limit,
+    }
 
 
 # ─── User Management ────────────────────────────────────────────────
@@ -642,6 +666,7 @@ async def get_evaluation_history(
                 answer_correctness=r.answer_correctness,
                 refusal_accuracy=r.refusal_accuracy,
                 golden_set_version=r.golden_set_version,
+                notes=r.notes,
             )
             for r in runs
         ],

@@ -26,6 +26,8 @@ import type {
   ComparisonDetail,
   ComparisonCreateRequest,
   ComparisonCreateResponse,
+  EvalRunResponse,
+  EvalRunQueuedResponse,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -383,7 +385,12 @@ export const adminApi = {
   evaluation: <T = unknown>(): Promise<T> =>
     request('/admin/evaluation'),
 
-  runEvaluation: <T = unknown>(): Promise<T> =>
+  // Kicks off an async golden-set run; the server responds 202 with a
+  // `{ status: "queued", ... }` payload immediately. Results land later in
+  // `getEvalHistory` — callers should not expect metrics back synchronously.
+  // Generic defaults to the queued-response shape but stays overridable for
+  // existing call sites written against the old (synchronous) contract.
+  runEvaluation: <T = EvalRunQueuedResponse>(): Promise<T> =>
     request('/admin/evaluation/run', { method: 'POST' }),
 
   // ── User management ──────────────────────────────────────────────────────
@@ -419,7 +426,7 @@ export const adminApi = {
     request('/admin/analytics/trust-score-distribution'),
 
   // ── Evaluation ───────────────────────────────────────────────────────────
-  getEvalHistory: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<unknown>> =>
+  getEvalHistory: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<EvalRunResponse>> =>
     request(`/admin/evaluation/history${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   // ── Settings ─────────────────────────────────────────────────────────────

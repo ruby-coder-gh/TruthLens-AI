@@ -58,5 +58,6 @@ class EvalRunResponse(BaseModel):
     answer_correctness: float | None = None
     refusal_accuracy: float | None = None
     golden_set_version: str | None = None
+    notes: str | None = None
 
     _serialize_run_at = field_serializer("run_at")(utc_iso)

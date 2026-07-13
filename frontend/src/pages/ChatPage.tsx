@@ -37,6 +37,7 @@ import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
 import type { Source } from '../api/types';
 import { getRelevanceMeta, getTrustBadgeColor, getTrustColorVar, getTrustConfidenceLabel, relevancePercent } from '../utils/relevance';
+import { useMediaQuery } from '../utils/useMediaQuery';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -47,6 +48,9 @@ const EXAMPLE_QUESTIONS = [
 ];
 
 const MAX_TEXTAREA_ROWS = 6;
+// Retrieval window for the "Expand search scope" action — wider than the
+// default (5). Backend clamps to its own MAX_TOP_K, so overshooting is safe.
+const WIDE_SEARCH_TOP_K = 12;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -165,7 +169,7 @@ export default function ChatPage() {
 
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
-    (queryText: string) => {
+    (queryText: string, topK?: number) => {
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       // Tear down any previous socket before creating a new one — otherwise the
@@ -311,13 +315,45 @@ export default function ChatPage() {
         onProgress: (phase: string) => {
           setPipelinePhase(phase);
         },
-      }, convId);
+      }, convId, topK);
 
       wsRef.current = ws;
       ws.connect();
     },
     [workspaceId, conversationId, genId, isStreaming],
   );
+
+  // ─── Evidence panel quick-actions (empty state) ───────────────────────────
+  const lastUserQuestion = useCallback(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'user' && messages[i].content.trim()) {
+        return messages[i].content.trim();
+      }
+    }
+    return '';
+  }, [messages]);
+
+  const handleUploadDocuments = useCallback(() => {
+    navigate('/documents');
+  }, [navigate]);
+
+  const handleRephrase = useCallback(() => {
+    const last = lastUserQuestion();
+    if (last) setInputValue(last);
+    textareaRef.current?.focus();
+  }, [lastUserQuestion]);
+
+  // Re-run the last question with a wider retrieval window (more chunks) —
+  // streams live into the panel just like a normal query.
+  const handleExpandScope = useCallback(() => {
+    if (isStreaming) return;
+    const last = lastUserQuestion();
+    if (last) {
+      startQuery(last, WIDE_SEARCH_TOP_K);
+    } else {
+      textareaRef.current?.focus();
+    }
+  }, [isStreaming, lastUserQuestion, startQuery]);
 
   // ─── Submit handler ───────────────────────────────────────────────────────
   const handleSubmit = useCallback(
@@ -471,7 +507,10 @@ export default function ChatPage() {
   const latestTrustComponents = lastAssistantHasError ? {} : lastAssistantMessage?.trustComponents ?? {};
 
   // ─── Responsive sidebar toggle ────────────────────────────────────────────
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
+  // Reactive to viewport resize/rotation (unlike a one-shot `window.innerWidth`
+  // read), so the evidence-sidebar/drawer logic below doesn't get stuck on
+  // whatever breakpoint was true at first render.
+  const isMobile = useMediaQuery('(max-width: 1023px)');
   const effectiveSidebarOpen = sidebarOpen;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -485,7 +524,7 @@ export default function ChatPage() {
       <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
       <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
 
-      <PageShell className="space-y-0">
+      <PageShell className="h-full space-y-0">
       <motion.div
         className="flex h-full -m-4 lg:-m-6 relative z-10"
         {...pageTransition}
@@ -728,6 +767,9 @@ export default function ChatPage() {
           expandedSourceId={expandedSource}
           onToggleSource={setExpandedSource}
           highlightedSourceId={highlightedSourceId}
+          onUploadDocuments={handleUploadDocuments}
+          onRephrase={handleRephrase}
+          onExpandScope={handleExpandScope}
         />
       </motion.div>
       </PageShell>
@@ -981,6 +1023,7 @@ function ChatMessageBubble({
   const isComplete = message.status === 'complete';
   const isError = message.status === 'error';
   const isCancelled = message.status === 'cancelled';
+  const isMessageStreaming = message.status === 'pending' || message.status === 'streaming';
 
   return (
     <motion.div
@@ -1015,7 +1058,13 @@ function ChatMessageBubble({
 
         {/* ─── ASSISTANT MESSAGE ─────────────────────────────────────── */}
         {isAssistant && (
-          <div className="glass rounded-2xl bg-card/60 border border-white/10 p-5 flex flex-col gap-4 shadow-xl">
+          <div
+            className="glass rounded-2xl bg-card/60 border border-white/10 p-5 flex flex-col gap-4 shadow-xl"
+            role="log"
+            aria-live="polite"
+            aria-atomic="false"
+            aria-busy={isMessageStreaming}
+          >
             {/* Pending state */}
             {message.status === 'pending' && (
               <div className="flex items-center gap-2 py-2">
@@ -1110,11 +1159,11 @@ function ChatMessageBubble({
                     )}
                     <span>{formatTimestamp(message.timestamp)}</span>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center -mr-2">
                     <motion.button
                       type="button"
                       onClick={() => onCopy(message.content)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                      className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
                       aria-label="Copy response"
                       title="Copy response"
                       whileHover={{ scale: 1.1 }}
@@ -1127,7 +1176,7 @@ function ChatMessageBubble({
                         <motion.button
                           type="button"
                           onClick={() => onFeedback(5)}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-green"
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-green"
                           aria-label="Thumbs up"
                           title="Helpful"
                           whileHover={{ scale: 1.1 }}
@@ -1138,7 +1187,7 @@ function ChatMessageBubble({
                         <motion.button
                           type="button"
                           onClick={() => onFeedback(1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-red"
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-red"
                           aria-label="Thumbs down"
                           title="Not helpful"
                           whileHover={{ scale: 1.1 }}
@@ -1149,7 +1198,7 @@ function ChatMessageBubble({
                         <motion.button
                           type="button"
                           onClick={() => onExport()}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-text"
                           aria-label="Export as Markdown"
                           title="Export .md"
                           whileHover={{ scale: 1.1 }}
@@ -1207,7 +1256,7 @@ function RetryButton({ onClick }: { onClick: () => void }) {
     <motion.button
       type="button"
       onClick={onClick}
-      className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-dim transition-colors hover:bg-card-2 hover:text-text"
+      className="flex h-10 shrink-0 items-center gap-1 rounded-md px-3 text-xs font-medium text-text-dim transition-colors hover:bg-card-2 hover:text-text"
       aria-label="Retry this question"
       title="Retry"
       whileHover={{ scale: 1.05 }}

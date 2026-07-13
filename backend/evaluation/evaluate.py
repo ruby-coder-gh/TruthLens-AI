@@ -36,6 +36,57 @@ def _golden_set_version() -> str | None:
         return None
 
 
+def _mean(values: list[float]) -> float | None:
+    """Mean of a list, or None when empty (never divide by zero)."""
+    return sum(values) / len(values) if values else None
+
+
+def _per_category_breakdown(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate count + mean faithfulness/relevance + refusal rate per category.
+
+    ``category`` (answerable / unanswerable / ambiguous) is stamped onto each
+    per-entry result by ``evaluate_pipeline``. Entries that errored (no
+    ``metrics``) are counted but excluded from the metric means.
+
+    Key names (``faithfulness``, ``answer_relevance``, ``refusal_accuracy``)
+    match the frontend's ``EvalCategoryBreakdown`` contract (see
+    frontend/src/api/types.ts + AdminAnalyticsPage.tsx's
+    ``CATEGORY_METRIC_LABELS``) so the per-category table renders friendly
+    labels instead of falling back to raw key names.
+    """
+    buckets: dict[str, dict[str, Any]] = {}
+    for r in results:
+        category = r.get("category") or "unknown"
+        bucket = buckets.setdefault(
+            category,
+            {"count": 0, "word_f1": [], "guardrail_score": [], "unanswerable_total": 0, "refused_total": 0},
+        )
+        bucket["count"] += 1
+
+        metrics = r.get("metrics")
+        if metrics:
+            bucket["word_f1"].append(metrics.get("word_f1", 0.0))
+            bucket["guardrail_score"].append(metrics.get("guardrail_score", 0.0))
+
+        if r.get("expected_grounding") is False:
+            bucket["unanswerable_total"] += 1
+            if r.get("guardrail_passed") is False or "cannot" in (r.get("answer", "") or "").lower():
+                bucket["refused_total"] += 1
+
+    summary: dict[str, Any] = {}
+    for category, bucket in buckets.items():
+        unanswerable_total = bucket["unanswerable_total"]
+        summary[category] = {
+            "count": bucket["count"],
+            "faithfulness": _mean(bucket["guardrail_score"]),
+            "answer_relevance": _mean(bucket["word_f1"]),
+            "refusal_accuracy": (
+                bucket["refused_total"] / unanswerable_total if unanswerable_total else None
+            ),
+        }
+    return summary
+
+
 async def _persist_eval_run(summary: dict[str, Any]) -> str | None:
     """Insert one EvalRun row from a pipeline summary.
 
@@ -45,6 +96,7 @@ async def _persist_eval_run(summary: dict[str, Any]) -> str | None:
     that already produced its JSON output). Returns the new row id or None.
     """
     try:
+        from app.config import settings
         from app.database import async_session_factory, engine
         from app.models.eval_run import EvalRun
 
@@ -66,24 +118,46 @@ async def _persist_eval_run(summary: dict[str, Any]) -> str | None:
         )
         refusal_accuracy = refused / len(unanswerable) if unanswerable else None
 
+        ragas_scores = summary.get("ragas_scores") or {}
+
         breakdown = {
             "model": summary.get("model"),
-            "total_entries": summary.get("total_entries"),
+            "total": summary.get("total_entries"),
             "completed": summary.get("completed"),
             "failed": summary.get("failed"),
             "avg_word_f1": summary.get("avg_word_f1"),
             "guardrail_pass_rate": summary.get("guardrail_pass_rate"),
             "unanswerable_total": len(unanswerable),
             "refused_total": refused,
+            "ragas_scores": ragas_scores,
+            "per_category": _per_category_breakdown(results),
+            "thresholds": {
+                "min_faithfulness": settings.EVAL_MIN_FAITHFULNESS,
+                "min_trust": settings.EVAL_MIN_TRUST,
+                "min_context_precision": settings.EVAL_MIN_CONTEXT_PRECISION,
+                "refusal_accuracy_min": settings.EVAL_REFUSAL_ACCURACY_MIN,
+            },
         }
+
+        # Ragas faithfulness supersedes the guardrail-derived value when present
+        # (a "better" signal per the eval contract); fall back to the
+        # word-F1/guardrail metrics otherwise (graceful degradation when the
+        # `ragas` package is absent).
+        faithfulness = ragas_scores.get("faithfulness")
+        if faithfulness is None:
+            faithfulness = summary.get("avg_guardrail_score")
+
+        answer_relevance = ragas_scores.get("answer_relevance")
+        if answer_relevance is None:
+            answer_relevance = summary.get("avg_word_f1")
 
         async with async_session_factory() as session:
             row = EvalRun(
-                faithfulness=summary.get("avg_guardrail_score"),
-                context_precision=None,
-                context_recall=None,
-                answer_relevance=summary.get("avg_word_f1"),
-                answer_correctness=None,
+                faithfulness=faithfulness,
+                context_precision=ragas_scores.get("context_precision"),
+                context_recall=ragas_scores.get("context_recall"),
+                answer_relevance=answer_relevance,
+                answer_correctness=ragas_scores.get("answer_correctness"),
                 refusal_accuracy=refusal_accuracy,
                 golden_set_version=_golden_set_version(),
                 notes=json.dumps(breakdown, default=str),
@@ -298,6 +372,9 @@ async def evaluate_pipeline(
                 "answer": gen_result.text[:500],
                 "guardrail_passed": guardrail.passed,
                 "expected_grounding": entry.expected_grounding,
+                "category": entry.category,
+                "ground_truth": ground_truth,
+                "full_answer": gen_result.text,
                 "metrics": {
                     "word_f1": round(f1, 4),
                     "word_precision": round(precision, 4),
@@ -312,7 +389,13 @@ async def evaluate_pipeline(
             print(f"{status} f1={f1:.3f} guardrail={guardrail.score:.3f} ({entry_time:.1f}s)")
 
         except Exception as e:
-            results.append({"id": entry_id, "query": query, "error": str(e)})
+            results.append({
+                "id": entry_id,
+                "query": query,
+                "category": entry.category,
+                "expected_grounding": entry.expected_grounding,
+                "error": str(e),
+            })
             print(f"✗ ERROR: {e}")
 
     total_time = time.time() - total_start
@@ -322,6 +405,29 @@ async def evaluate_pipeline(
     avg_f1 = sum(r["metrics"]["word_f1"] for r in valid_results) / n
     avg_guardrail = sum(r["metrics"]["guardrail_score"] for r in valid_results) / n
     pass_rate = sum(1 for r in valid_results if r["guardrail_passed"]) / n
+
+    # RAGAS metrics: computed once over the answerable entries that produced
+    # an answer (unanswerable entries have no meaningful "ground truth
+    # context" to score context precision/recall against). Degrades to all
+    # None when the `ragas` package is missing or errors — never raises.
+    ragas_scores: dict[str, float | None] = {}
+    answerable_valid = [r for r in valid_results if r.get("category") == "answerable"]
+    if answerable_valid:
+        from app.evaluation.ragas_eval import ragas_evaluate
+
+        ragas_result = await ragas_evaluate(
+            queries=[r["query"] for r in answerable_valid],
+            answers=[r.get("full_answer", r["answer"]) for r in answerable_valid],
+            contexts=[[r.get("ground_truth", "")] for r in answerable_valid],
+            ground_truth=[r.get("ground_truth", "") for r in answerable_valid],
+        )
+        ragas_scores = {
+            "faithfulness": ragas_result.faithfulness,
+            "answer_relevance": ragas_result.answer_relevance,
+            "context_precision": ragas_result.context_precision,
+            "context_recall": ragas_result.context_recall,
+            "answer_correctness": ragas_result.answer_correctness,
+        }
 
     summary = {
         "model": model,
@@ -334,6 +440,7 @@ async def evaluate_pipeline(
         "total_time_s": round(total_time, 2),
         "avg_time_per_entry_s": round(total_time / len(dataset), 2) if dataset else 0,
         "results": results,
+        "ragas_scores": ragas_scores,
         "timestamp": datetime.now().isoformat(),
     }
 

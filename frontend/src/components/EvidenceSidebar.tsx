@@ -8,6 +8,7 @@
  * Design tokens: glassmorphism, purple-blue glow, backdrop blur, Framer Motion.
  */
 
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -16,9 +17,12 @@ import {
   Brain,
   MessageSquare,
   ChevronDown,
+  ChevronRight,
   Download,
   Eye,
   Target,
+  Upload,
+  RefreshCw,
   Quote,
   CheckCircle2,
   AlertTriangle,
@@ -65,6 +69,10 @@ interface EvidenceSidebarProps {
   expandedSourceId?: string | null;
   onToggleSource?: (id: string | null) => void;
   highlightedSourceId?: string | null;
+  /** Empty-state quick actions. */
+  onUploadDocuments?: () => void;
+  onRephrase?: () => void;
+  onExpandScope?: () => void;
 }
 
 function getRelevanceLevel(score: number) {
@@ -685,49 +693,166 @@ function AIReasoningTab({
 
 // ─── Empty State ─────────────────────────────────────────────────────────────
 
-function EvidenceEmptyState() {
+/**
+ * Animated document "constellation" — nodes represent document chunks drifting
+ * around a central query core, waiting to be connected by a question. Canvas is
+ * used (not hand-authored SVG) for the ambient motion. Honors reduced-motion.
+ */
+function ConstellationCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const dpr = window.devicePixelRatio || 1;
+    let W = 0;
+    let H = 0;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      W = rect.width;
+      H = rect.height;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const N = 9;
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const nodes = Array.from({ length: N }, (_, i) => {
+      const a = (i / N) * Math.PI * 2 + rnd() * 0.6;
+      const rad = 42 + rnd() * 42;
+      return {
+        x: W / 2 + Math.cos(a) * rad,
+        y: H / 2 + Math.sin(a) * rad,
+        vx: (rnd() - 0.5) * 0.12,
+        vy: (rnd() - 0.5) * 0.12,
+        r: 1.8 + rnd() * 2.2,
+      };
+    });
+
+    let raf = 0;
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H);
+      const cx = W / 2;
+      const cy = H / 2;
+      for (let i = 0; i < N; i++) {
+        const n = nodes[i];
+        const d = Math.hypot(n.x - cx, n.y - cy);
+        ctx.strokeStyle = `rgba(124,140,248,${Math.max(0, 0.28 - d / 900)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(n.x, n.y);
+        ctx.stroke();
+        for (let j = i + 1; j < N; j++) {
+          const m = nodes[j];
+          const dd = Math.hypot(n.x - m.x, n.y - m.y);
+          if (dd < 58) {
+            ctx.strokeStyle = `rgba(56,224,208,${0.16 * (1 - dd / 58)})`;
+            ctx.beginPath();
+            ctx.moveTo(n.x, n.y);
+            ctx.lineTo(m.x, m.y);
+            ctx.stroke();
+          }
+        }
+      }
+      for (let k = 0; k < N; k++) {
+        const p = nodes[k];
+        ctx.beginPath();
+        ctx.fillStyle = k % 3 === 0 ? 'rgba(56,224,208,0.9)' : 'rgba(150,163,240,0.85)';
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+        if (!reduce) {
+          p.x += p.vx;
+          p.y += p.vy;
+          const dc = Math.hypot(p.x - cx, p.y - cy);
+          if (dc > 82 || dc < 34) {
+            p.vx *= -1;
+            p.vy *= -1;
+          }
+        }
+      }
+      if (!reduce) raf = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return () => {
+      window.removeEventListener('resize', resize);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="block h-40 w-full" aria-hidden="true" />;
+}
+
+function EvidenceEmptyState({
+  onUploadDocuments,
+  onRephrase,
+  onExpandScope,
+}: {
+  onUploadDocuments?: () => void;
+  onRephrase?: () => void;
+  onExpandScope?: () => void;
+}) {
+  const actions = [
+    { icon: <Upload size={14} />, text: 'Upload more documents', onClick: onUploadDocuments },
+    { icon: <RefreshCw size={14} />, text: 'Rephrase your question', onClick: onRephrase },
+    { icon: <Target size={14} />, text: 'Expand search scope', onClick: onExpandScope },
+  ];
+
   return (
     <motion.div
       variants={staggerItem}
-      className="flex flex-col items-center justify-center py-16 px-6 text-center"
+      className="flex flex-col items-center px-1 py-6 text-center"
     >
+      {/* Knowledge constellation */}
       <motion.div
-        initial={{ scale: 0.9, opacity: 0.99 }}
+        initial={{ scale: 0.94, opacity: 0.99 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="relative mb-6"
+        className="relative mb-4 w-full"
       >
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20">
-          <Search size={28} className="text-primary-soft" />
+        <ConstellationCanvas />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(56,224,208,0.4)]">
+          <Sparkles size={18} className="text-[#05121a]" />
         </div>
-        <motion.div
-          className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-accent/30"
-          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
-          transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
-        />
       </motion.div>
 
-      <h3 className="text-sm font-semibold text-text mb-1">No supporting evidence found</h3>
-      <p className="text-xs text-text-dim max-w-xs mb-5">
-        Ask a question to search your documents. Evidence will appear here with relevance scores and source details.
+      <h3 className="mb-1 text-sm font-semibold text-text">Ready to connect the dots</h3>
+      <p className="mb-5 max-w-[15rem] text-xs text-text-dim">
+        Ask a question to link relevant passages across your documents.
       </p>
 
-      <div className="space-y-1.5 w-full max-w-xs">
-        {[
-          { icon: <FileText size={12} />, text: 'Upload more documents' },
-          { icon: <Search size={12} />, text: 'Rephrase your question' },
-          { icon: <Target size={12} />, text: 'Expand search scope' },
-        ].map((tip, i) => (
-          <motion.div
-            key={i}
+      <div className="w-full space-y-2">
+        {actions.map((a, i) => (
+          <motion.button
+            key={a.text}
+            type="button"
+            onClick={a.onClick}
             initial={{ opacity: 0.99, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 + i * 0.08 }}
-            className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-text-dim"
+            transition={{ delay: 0.15 + i * 0.08 }}
+            whileTap={{ scale: 0.98 }}
+            className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5 text-left text-xs font-medium text-text-muted transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-primary/[0.07] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            <span className="text-primary-soft">{tip.icon}</span>
-            {tip.text}
-          </motion.div>
+            <span className="text-primary-soft">{a.icon}</span>
+            {a.text}
+            <ChevronRight
+              size={13}
+              className="ml-auto text-text-dim transition-colors group-hover:text-primary-soft"
+            />
+          </motion.button>
         ))}
       </div>
     </motion.div>
@@ -743,6 +868,9 @@ function SourcesPanel({
   expandedSourceId,
   onToggleSource,
   highlightedSourceId,
+  onUploadDocuments,
+  onRephrase,
+  onExpandScope,
 }: {
   sources: Source[];
   isLoading: boolean;
@@ -750,6 +878,9 @@ function SourcesPanel({
   expandedSourceId: string | null;
   onToggleSource: (id: string | null) => void;
   highlightedSourceId: string | null;
+  onUploadDocuments?: () => void;
+  onRephrase?: () => void;
+  onExpandScope?: () => void;
 }) {
   // Skeletons while retrieving with nothing to show yet.
   if (isLoading && sources.length === 0) {
@@ -764,7 +895,13 @@ function SourcesPanel({
 
   // Empty state once idle and no evidence was found.
   if (sources.length === 0) {
-    return <EvidenceEmptyState />;
+    return (
+      <EvidenceEmptyState
+        onUploadDocuments={onUploadDocuments}
+        onRephrase={onRephrase}
+        onExpandScope={onExpandScope}
+      />
+    );
   }
 
   return (
@@ -816,12 +953,14 @@ export default function EvidenceSidebar({
   sidebarOpen,
   onToggleSidebar,
   pipelinePhase,
-  isMobile,
   activeTab,
   onTabChange,
   expandedSourceId,
   onToggleSource,
   highlightedSourceId,
+  onUploadDocuments,
+  onRephrase,
+  onExpandScope,
 }: EvidenceSidebarProps) {
   const effectiveTrust = trustScore ?? 0;
   const currentTab = activeTab ?? 'sources';
@@ -831,30 +970,19 @@ export default function EvidenceSidebar({
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          initial={isMobile ? { x: '100%' } : { opacity: 0.99, y: -8 }}
-          animate={isMobile ? { x: 0 } : { opacity: 1, y: 0 }}
-          exit={isMobile ? { x: '100%' } : { opacity: 0, y: -6 }}
-          transition={{ duration: 0.12, ease: 'easeOut' }}
+          initial={{ x: '100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '100%' }}
+          transition={{ type: 'spring', damping: 30, stiffness: 300, mass: 0.8 }}
           className={clsx(
-            'flex flex-col',
-            'lg:w-72',
-            'fixed z-30',
-            isMobile
-              ? 'inset-y-0 right-0 w-full'
-              : 'max-h-[60vh]',
-            isMobile && !sidebarOpen ? 'translate-x-full' : 'translate-x-0',
+            'fixed inset-y-0 right-0 z-30 flex flex-col',
+            'w-full sm:w-[22rem] lg:w-80',
           )}
-          style={isMobile ? {} : { right: 16, bottom: 96 }}
-          drag={isMobile ? false : true}
-          dragMomentum={false}
-          dragElastic={0.1}
-          dragConstraints={{ left: -300, right: 100, top: -80, bottom: 200 }}
-          whileDrag={{ scale: 1.03, boxShadow: '0 0 50px rgba(124,92,255,0.2)' }}
         >
-          {/* Floating glass card */}
-          <div className="flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[rgba(8,11,18,0.7)] backdrop-blur-2xl shadow-2xl shadow-primary/5">
+          {/* Docked glass panel — slides in from the right */}
+          <div className="flex h-full flex-col overflow-hidden border-l border-white/[0.08] bg-[rgba(8,11,18,0.92)] backdrop-blur-2xl shadow-2xl shadow-primary/10">
             {/* ─── Drag Handle / Header ──────────────────────────────────── */}
-            <div className="shrink-0 px-4 py-3 cursor-grab active:cursor-grabbing">
+            <div className="shrink-0 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <motion.div
@@ -882,7 +1010,7 @@ export default function EvidenceSidebar({
               </div>
 
               {/* ─── Tab bar ─────────────────────────────────────────────── */}
-              <div className="mt-3 flex gap-1 rounded-xl bg-white/[0.03] p-1" role="tablist">
+              <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-white/[0.05] bg-white/[0.03] p-1" role="tablist">
                 {SIDEBAR_TABS.map((tab) => {
                   const isActive = tab.id === currentTab;
                   return (
@@ -893,15 +1021,15 @@ export default function EvidenceSidebar({
                       aria-selected={isActive}
                       onClick={() => onTabChange?.(tab.id)}
                       className={clsx(
-                        'relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
-                        isActive ? 'text-primary-soft' : 'text-text-dim hover:text-text',
+                        'relative flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                        isActive ? 'text-primary-soft' : 'text-text-dim hover:bg-white/[0.03] hover:text-text',
                       )}
                       whileTap={{ scale: 0.97 }}
                     >
                       {isActive && (
                         <motion.div
                           layoutId="sidebarActiveTab"
-                          className="absolute inset-0 rounded-lg border border-primary/20 bg-primary/10"
+                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(124,92,255,0.18)]"
                           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                         />
                       )}
@@ -921,7 +1049,7 @@ export default function EvidenceSidebar({
             </div>
 
             {/* ─── Tab content ───────────────────────────────────────────── */}
-            <div className="overflow-y-auto overflow-x-hidden px-4 pb-4 max-h-[60vh]">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pb-4">
               {currentTab === 'sources' ? (
                 <SourcesPanel
                   sources={sources}
@@ -930,6 +1058,9 @@ export default function EvidenceSidebar({
                   expandedSourceId={expandedSourceId ?? null}
                   onToggleSource={onToggleSource ?? (() => {})}
                   highlightedSourceId={highlightedSourceId ?? null}
+                  onUploadDocuments={onUploadDocuments}
+                  onRephrase={onRephrase}
+                  onExpandScope={onExpandScope}
                 />
               ) : (
                 <AIReasoningTab

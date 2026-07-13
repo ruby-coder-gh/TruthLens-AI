@@ -22,7 +22,10 @@
   --color-border-light: rgba(121, 159, 222, 0.28);
   --color-text: #eaf0ff;
   --color-text-muted: #9db0d4;
-  --color-text-dim: #6881aa;
+  /* was #6881aa — under 4.5:1 against card/glass surfaces (~3.9–4.2:1); bumped
+     to clear AA contrast (~5.8–7.5:1) on the app's dark surfaces while staying
+     visually distinct from --color-text-muted. */
+  --color-text-dim: #8aa1c4;
   --color-glass: rgba(14, 22, 39, 0.68);
   --color-glass-border: rgba(115, 149, 214, 0.18);
   --color-glass-hover: rgba(23, 35, 59, 0.78);
@@ -52,6 +55,22 @@ h5,
 h6 {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
+}
+
+/* ─── Global keyboard focus fallback ───
+   Many interactive elements in this app are hand-rolled (motion.button, Link,
+   plain <button>) without an explicit focus-visible class. This gives every
+   one of them a visible ring on keyboard focus without touching each call
+   site. Primitives in ui.tsx additionally declare their own focus-visible
+   classes for component-level control; this rule is the catch-all. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* ─── Animated Background ─── */
