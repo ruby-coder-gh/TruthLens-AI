@@ -4,10 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 from app.config import settings
 from app.utils.logger import logger
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_reasoning(content: Any) -> str:
+    """Strip ``<think>…</think>`` reasoning blocks emitted by reasoning models.
+
+    Models such as qwen3 wrap their chain-of-thought in ``<think>`` tags before
+    the real answer, and sometimes return only the reasoning. Remove complete
+    blocks, drop any unterminated leading block, and return the remaining text.
+    """
+    if isinstance(content, list):
+        content = " ".join(
+            str(part.get("text", "")) if isinstance(part, dict) else str(part)
+            for part in content
+        )
+    text = _THINK_RE.sub("", str(content))
+    if "<think>" in text and "</think>" not in text:
+        text = text.split("<think>", 1)[0]
+    return text.strip()
 
 
 async def rewrite(
@@ -52,7 +73,13 @@ async def rewrite(
         messages.append(("human", query))
 
         response = await asyncio.to_thread(llm.invoke, messages)
-        rewritten = response.content.strip().strip('"').strip("'")
+        rewritten = _strip_reasoning(response.content).strip('"').strip("'").strip()
+
+        # Reasoning models can return an empty string once <think> blocks are
+        # stripped. Never hand an empty query downstream — fall back to the original.
+        if not rewritten:
+            logger.info("query_rewrite_empty_fallback", original_length=len(query))
+            return query
 
         logger.info(
             "query_rewritten",
@@ -97,13 +124,14 @@ async def expand(
         )
 
         response = await asyncio.to_thread(llm.invoke, [("human", prompt.format(query=query))])
-        content = response.content.strip()
+        content = _strip_reasoning(response.content)
 
-        # Try to parse JSON
-        if content.startswith("["):
-            parsed = json.loads(content)
+        # Extract the JSON array even if the model wraps it in prose/reasoning.
+        start, end = content.find("["), content.rfind("]")
+        if start != -1 and end > start:
+            parsed = json.loads(content[start : end + 1])
             if isinstance(parsed, list):
-                variations.extend(parsed[:n_variations])
+                variations.extend(str(v) for v in parsed[:n_variations])
 
         logger.info("query_expanded", original=query[:100], variations=len(variations))
     except Exception as e:

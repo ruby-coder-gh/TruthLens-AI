@@ -8,6 +8,20 @@ BASE = "http://localhost:8000"
 PASS = 0
 FAIL = 0
 RESULTS = []
+COOKIES = {}  # last-seen cookie name->value; auth tokens are issued as HttpOnly cookies
+
+
+def _update_cookies(headers):
+    """Capture Set-Cookie values so we can reuse the JWT the API issues as a cookie."""
+    try:
+        raw = headers.get_all("Set-Cookie") or []
+    except Exception:
+        raw = []
+    for item in raw:
+        first = item.split(";", 1)[0].strip()
+        if "=" in first:
+            k, v = first.split("=", 1)
+            COOKIES[k.strip()] = v.strip()
 
 def req(method, path, data=None, headers=None, files=None, raw_url=False):
     url = f"{BASE}{path}" if not raw_url else path
@@ -37,6 +51,7 @@ def req(method, path, data=None, headers=None, files=None, raw_url=False):
         opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
         resp = opener.open(r, timeout=15)
         code = resp.status
+        _update_cookies(resp.headers)
         ct = resp.headers.get("Content-Type", "")
         if "application/json" in ct or "text/plain" in ct:
             raw = resp.read().decode()
@@ -46,6 +61,7 @@ def req(method, path, data=None, headers=None, files=None, raw_url=False):
                 return code, raw
         return code, resp.read()
     except urllib.error.HTTPError as e:
+        _update_cookies(e.headers)
         ct = e.headers.get("Content-Type", "")
         raw = e.read().decode(errors='replace')
         try:
@@ -93,6 +109,7 @@ WORKSPACE_ID = None
 DOC_ID = None
 COLLECTION_ID = None
 COMPARISON_ID = None
+ACCESS_ID = None
 ADMIN_TOKEN = None
 
 print("=" * 70)
@@ -109,8 +126,8 @@ code, body = test("Register new user", "POST", "/api/auth/register", 201, {
     "email": EMAIL, "username": USERNAME, "password": PASSWORD
 })
 if code == 201:
-    ACCESS_TOKEN = body.get("access_token")
-    REFRESH_TOKEN = body.get("refresh_token")
+    ACCESS_TOKEN = COOKIES.get("access_token")
+    REFRESH_TOKEN = COOKIES.get("refresh_token")
 else:
     print("[FATAL] Registration failed\n")
 
@@ -125,8 +142,8 @@ if ACCESS_TOKEN:
         "email": EMAIL, "password": PASSWORD
     })
     if code == 200:
-        ACCESS_TOKEN = body.get("access_token", ACCESS_TOKEN)
-        REFRESH_TOKEN = body.get("refresh_token", REFRESH_TOKEN)
+        ACCESS_TOKEN = COOKIES.get("access_token", ACCESS_TOKEN)
+        REFRESH_TOKEN = COOKIES.get("refresh_token", REFRESH_TOKEN)
     test("Login wrong password", "POST", "/api/auth/login", 401, {
         "email": EMAIL, "password": "WrongPassword1!"
     })
@@ -140,8 +157,8 @@ if ACCESS_TOKEN:
     code, body = test("Refresh token", "POST", "/api/auth/refresh", 200,
         data={"refresh_token": REFRESH_TOKEN})
     if code == 200:
-        ACCESS_TOKEN = body.get("access_token", ACCESS_TOKEN)
-        REFRESH_TOKEN = body.get("refresh_token", REFRESH_TOKEN)
+        ACCESS_TOKEN = COOKIES.get("access_token", ACCESS_TOKEN)
+        REFRESH_TOKEN = COOKIES.get("refresh_token", REFRESH_TOKEN)
 
     # Change password
     test("Change password (correct)", "POST", "/api/auth/change-password", 200,
@@ -180,8 +197,8 @@ if ACCESS_TOKEN:
     # Re-login
     code, body = req("POST", "/api/auth/login", data={"email": EMAIL, "password": PASSWORD})
     if code == 200:
-        ACCESS_TOKEN = body.get("access_token")
-        REFRESH_TOKEN = body.get("refresh_token")
+        ACCESS_TOKEN = COOKIES.get("access_token")
+        REFRESH_TOKEN = COOKIES.get("refresh_token")
         print("[INFO] Re-logged in\n")
 
     # ─── 3. WORKSPACE CRUD ───
@@ -204,13 +221,17 @@ if ACCESS_TOKEN:
 
     # ─── 4. WORKSPACE MEMBERS ───
     print("\n─── 4. WORKSPACE MEMBERS ───")
+    # Register a real invitee for membership / collection-access tests
+    INVITEE_EMAIL = f"invitee{ts}@test.com"
+    req("POST", "/api/auth/register",
+        data={"email": INVITEE_EMAIL, "username": f"invitee{ts}", "password": "InvitePass123!"})
     if WORKSPACE_ID:
         test("List workspace members", "GET", f"/api/workspaces/{WORKSPACE_ID}/members", 200,
             headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
         # Add member
         code, body = test("Add member to workspace", "POST",
             f"/api/workspaces/{WORKSPACE_ID}/members", 201,
-            data={"email": "demo@truthlens.ai", "role": "viewer"},
+            data={"email": INVITEE_EMAIL, "role": "viewer"},
             headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
     test("Members on non-existent workspace", "GET",
         "/api/workspaces/99999999-9999-9999-9999-999999999999/members", 404,
@@ -298,10 +319,13 @@ if ACCESS_TOKEN:
                 f"/api/workspaces/{WORKSPACE_ID}/collections/{COLLECTION_ID}/access", 200,
                 headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
             # Grant access
-            test("Grant collection access", "POST",
+            code, body = test("Grant collection access", "POST",
                 f"/api/workspaces/{WORKSPACE_ID}/collections/{COLLECTION_ID}/access", 201,
-                data={"email": "demo@truthlens.ai"},
+                data={"email": INVITEE_EMAIL},
                 headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+            if code == 201:
+                # DELETE route is /access/{user_id}, so revoke by user_id (not the access-row id)
+                ACCESS_ID = body.get("user_id") or body.get("id")
 
         # ─── 8. COMPARISONS ───
         print("\n─── 8. COMPARISONS ───")
@@ -309,7 +333,8 @@ if ACCESS_TOKEN:
         code, body = test("Create comparison", "POST",
             f"/api/workspaces/{WORKSPACE_ID}/comparisons", 202,
             data={"question": "What is TruthLens?", "document_ids": []},
-            headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
+            headers={"Authorization": f"Bearer {ACCESS_TOKEN}"},
+            expected_status_alt=400)  # 400 when workspace has <2 documents
         if code in (200, 201, 202):
             COMPARISON_ID = body.get("id") or body.get("comparison_id")
         test("List comparisons", "GET",
@@ -325,7 +350,7 @@ if ACCESS_TOKEN:
     code, body = req("POST", "/api/auth/login",
         data={"email": "admintest1@truthlens.ai", "password": "AdminPass123!"})
     if code == 200:
-        ADMIN_TOKEN = body.get("access_token")
+        ADMIN_TOKEN = COOKIES.get("access_token")
         print("[INFO] Admin login OK\n")
     else:
         print(f"[WARN] Admin login failed: {code}\n")
@@ -389,16 +414,16 @@ if ACCESS_TOKEN:
     test("Access non-existent workspace", "GET",
         "/api/workspaces/00000000-0000-0000-0000-000000000000", 404,
         headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
-    # Backend treats invalid UUID as 404 not 422
+    # Backend validates UUID format and returns 422 for malformed IDs
     test("Invalid workspace ID format", "GET",
-        "/api/workspaces/not-a-uuid", 404,
+        "/api/workspaces/not-a-uuid", 422,
         headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
     # Try accessing someone else's workspace — register new user with own workspace
     new_email = f"other{ts}@test.com"
     code2, body2 = req("POST", "/api/auth/register", data={
         "email": new_email, "username": f"other{ts}", "password": "OtherPass123!"
     })
-    other_token = body2.get("access_token") if code2 == 201 else None
+    other_token = COOKIES.get("access_token") if code2 == 201 else None
     if other_token:
         # Get the workspace list to find our original workspace ID
         test("Other user sees empty workspaces", "GET", "/api/workspaces", 200,
@@ -422,10 +447,9 @@ if ACCESS_TOKEN:
             headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
 
     # ─── COLLECTION ACCESS DELETE ───
-    if WORKSPACE_ID and COLLECTION_ID:
+    if WORKSPACE_ID and COLLECTION_ID and ACCESS_ID:
         test("Delete collection access", "DELETE",
-            f"/api/workspaces/{WORKSPACE_ID}/collections/{COLLECTION_ID}/access/"
-            f"{'6b28ae19-e84'}", 204,
+            f"/api/workspaces/{WORKSPACE_ID}/collections/{COLLECTION_ID}/access/{ACCESS_ID}", 204,
             headers={"Authorization": f"Bearer {ACCESS_TOKEN}"})
 
     # ─── COLLECTION DELETE ───
@@ -498,10 +522,11 @@ if ACCESS_TOKEN:
     # Re-login since we deleted our account
     code, body = req("POST", "/api/auth/login", data={"email": f"other{ts}@test.com", "password": "OtherPass123!"})
     if code == 200:
-        tok = body.get("access_token")
-        test("List users directory", "GET", "/api/users", 200,
+        tok = COOKIES.get("access_token")
+        # /users is admin-only; a non-admin user is correctly forbidden (403)
+        test("List users (admin-only → 403 for non-admin)", "GET", "/api/users", 403,
             headers={"Authorization": f"Bearer {tok}"})
-        test("Get user by ID", "GET", f"/api/users/{body.get('user',{}).get('id','')}", 200,
+        test("Get user by ID (admin-only → 403 for non-admin)", "GET", f"/api/users/{body.get('user',{}).get('id','')}", 403,
             headers={"Authorization": f"Bearer {tok}"})
 
 # ─── SUMMARY ───

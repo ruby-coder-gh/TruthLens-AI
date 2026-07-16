@@ -7,7 +7,7 @@ Offline-first RAG platform (TruthLens AI/VeritasRAG) with local LLMs. No paid AP
 - **Stack**: Python FastAPI backend + React TypeScript frontend + Vite + Tailwind v4 + Framer Motion v12
 - **WAAPI fix**: Framer Motion v12 uses Web Animations API — `initial={{ opacity: 0 }}` gets stuck on some browsers. Fix: use `opacity: 0.99` + CSS transitions for hover/active states
 - **Routing**: React Router v7, Layout uses `<Outlet />` for child routes
-- **Auth**: JWT tokens stored in localStorage, AuthContext with login/register/logout
+- **Auth**: JWT in HttpOnly cookies (access + refresh) set by the API on login/register; AuthContext resolves the user via `/api/auth/me` (not localStorage — avoids XSS token theft)
 - **UI**: Dark cinematic theme, glassmorphism, ambient blobs, gradient accents
 
 ## Task Board
