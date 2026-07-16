@@ -37,7 +37,7 @@ export default function Logo({
       {/* Iris */}
       <circle cx="16" cy="16" r="6" fill="url(#logoGrad)" opacity="0.85" />
       {/* Pupil */}
-      <circle cx="16" cy="16" r="3" fill="#060a13" />
+      <circle cx="16" cy="16" r="3" fill="#14150f" />
       {/* Specular highlight (lens flare) */}
       <ellipse cx="13" cy="12.5" rx="2.5" ry="1.5" fill="white" opacity="0.6" transform="rotate(-20 13 12.5)" />
       {/* Subtle inner glow ring */}
@@ -51,9 +51,9 @@ export default function Logo({
 
       <defs>
         <linearGradient id="logoGrad" x1="2" y1="4" x2="30" y2="28" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#95bcff" />
-          <stop offset="0.5" stopColor="#2d6bff" />
-          <stop offset="1" stopColor="#14c5a0" />
+          <stop stopColor="#f1d689" />
+          <stop offset="0.5" stopColor="#e8c15a" />
+          <stop offset="1" stopColor="#5bb98a" />
         </linearGradient>
       </defs>
     </svg>

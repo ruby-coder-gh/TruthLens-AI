@@ -21,7 +21,7 @@ function AuthPanel() {
     navigator.clipboard.writeText('trl_eyJhbGciOiJIUzI1NiIs...').then(() => {
       setCopiedToken(true);
       setTimeout(() => setCopiedToken(false), 1500);
-    });
+    }).catch(() => {});
   };
 
   return (

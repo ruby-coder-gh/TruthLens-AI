@@ -45,7 +45,7 @@ function EndpointItem({ endpoint, onSelectEndpoint }: { endpoint: ApiEndpoint; o
     navigator.clipboard.writeText(endpoint.path).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }).catch(() => {});
   };
 
   const authIcon = endpoint.auth === 'Admin'
@@ -57,10 +57,17 @@ function EndpointItem({ endpoint, onSelectEndpoint }: { endpoint: ApiEndpoint; o
     : null;
 
   return (
-    <motion.button
-      type="button"
+    <motion.div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelectEndpoint(endpoint)}
-      className="relative w-full flex items-center gap-3 px-4 py-2.5 text-left rounded-xl transition-all duration-150 group hover:bg-white/[0.03] active:scale-[0.99]"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelectEndpoint(endpoint);
+        }
+      }}
+      className="relative w-full flex items-center gap-3 px-4 py-2.5 text-left rounded-xl transition-all duration-150 group hover:bg-white/[0.03] active:scale-[0.99] cursor-pointer"
     >
       {/* Method badge */}
       <span
@@ -93,7 +100,7 @@ function EndpointItem({ endpoint, onSelectEndpoint }: { endpoint: ApiEndpoint; o
       >
         {copied ? <Check size={14} className="text-green" /> : <Copy size={13} />}
       </button>
-    </motion.button>
+    </motion.div>
   );
 }
 
@@ -108,7 +115,7 @@ export default function EndpointGroup({ group, defaultOpen = false, onSelectEndp
     <motion.div
       initial={{ opacity: 0.99, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-xl glass border border-glass-border overflow-hidden transition-all duration-200 hover:border-primary/20 hover:shadow-[0_0_30px_rgba(124,92,255,0.05)]"
+      className="rounded-xl glass border border-glass-border overflow-hidden transition-all duration-200 hover:border-primary/20 hover:shadow-[0_0_30px_rgba(232,193,90,0.05)]"
     >
       {/* Header */}
       <button

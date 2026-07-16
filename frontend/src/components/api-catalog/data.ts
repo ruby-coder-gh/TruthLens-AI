@@ -6,7 +6,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Authentication',
     description: 'User registration, login, token management, and session handling',
     icon: 'LogIn',
-    color: '#7c5cff',
+    color: '#e8c15a',
     endpoints: [
       {
         method: 'POST',
@@ -73,7 +73,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Users',
     description: 'User management and administration — admin only',
     icon: 'Users',
-    color: '#38bdf8',
+    color: '#c89f3c',
     endpoints: [
       {
         method: 'GET',
@@ -116,7 +116,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Workspaces',
     description: 'Workspace CRUD, member management, and collaboration',
     icon: 'LayoutDashboard',
-    color: '#2dd4bf',
+    color: '#5bb98a',
     endpoints: [
       {
         method: 'GET',
@@ -257,7 +257,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Queries',
     description: 'RAG query execution, history, and streaming responses',
     icon: 'MessageSquare',
-    color: '#a78bfa',
+    color: '#d98a4e',
     endpoints: [
       {
         method: 'POST',
@@ -397,7 +397,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'WebSocket',
     description: 'Real-time streaming pipeline for RAG query execution',
     icon: 'Radio',
-    color: '#2dd4bf',
+    color: '#d6553b',
     endpoints: [
       {
         method: 'WS',
@@ -429,9 +429,9 @@ export const CATALOG_STATS: CatalogStats = {
 
 export const METHOD_COLORS: Record<string, string> = {
   GET: 'bg-green-500/15 text-green-400 border-green-500/30',
-  POST: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  POST: 'bg-primary/15 text-primary border-primary/30',
   PUT: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   PATCH: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   DELETE: 'bg-red-500/15 text-red-400 border-red-500/30',
-  WS: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  WS: 'bg-accent/15 text-accent border-accent/30',
 };

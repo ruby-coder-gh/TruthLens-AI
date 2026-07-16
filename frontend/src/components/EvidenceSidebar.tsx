@@ -5,7 +5,7 @@
  * with a unified, premium sidebar experience inspired by:
  *   ChatGPT Deep Research · Perplexity · Glean · Linear · Notion AI
  *
- * Design tokens: glassmorphism, purple-blue glow, backdrop blur, Framer Motion.
+ * Design tokens: Case File warm archival glass, manila evidence tags, backdrop blur, Framer Motion.
  */
 
 import { useEffect, useRef } from 'react';
@@ -110,6 +110,14 @@ function trustScoreColor(score: number | undefined): 'green' | 'orange' | 'red' 
   return 'red';
 }
 
+// Trust verdict → wax-seal stamp thresholds. Mirrors ChatPage's per-message
+// stamp (0.7 / 0.4) so the verdict reads identically in the bubble and here.
+function trustStampMeta(score: number): { label: string; colorClass: string } {
+  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-accent' };
+  if (score >= 0.4) return { label: 'Review', colorClass: 'text-primary' };
+  return { label: 'Flagged', colorClass: 'text-accent-2' };
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -117,7 +125,7 @@ function formatDate(iso: string): string {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-/** Highlight matched terms in excerpt with purple glow */
+/** Highlight matched terms in excerpt with the manila evidence-mark treatment */
 function HighlightedExcerpt({ text, query }: { text: string; query?: string }) {
   if (!query || !text) return <>{text}</>;
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -130,7 +138,7 @@ function HighlightedExcerpt({ text, query }: { text: string; query?: string }) {
     <>
       {parts.map((part, i) =>
         words.includes(part.toLowerCase()) ? (
-          <mark key={i} className="bg-purple-500/20 text-purple-200 rounded px-0.5 font-medium">
+          <mark key={i} className="evidence-mark font-medium">
             {part}
           </mark>
         ) : (
@@ -151,44 +159,19 @@ function fileTypeIcon(mime?: string) {
   return <FileText size={16} />;
 }
 
-/** Overall status badge at top */
+/** Overall status badge at top — a wax-seal stamp once a real trust score exists. */
 function StatusBadge({ trustScore, isLoading, hasError }: { trustScore: number | null; isLoading: boolean; hasError?: boolean }) {
   if (hasError) return <Badge color="red"><XCircle size={10} className="mr-1" /> GENERATION FAILED</Badge>;
   if (isLoading) return <Badge color="gray"><Loader2 size={10} className="animate-spin mr-1" /> ANALYZING</Badge>;
   if (trustScore === null) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
 
-  const trust = trustScore;
+  const stamp = trustStampMeta(trustScore);
 
-  if (trust >= 0.7) {
-    return (
-      <Badge color="green">
-        <span className="relative flex h-2 w-2 mr-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-        </span>
-        VERIFIED
-      </Badge>
-    );
-  }
-  if (trust >= 0.4) {
-    return (
-      <Badge color="orange">
-        <span className="relative flex h-2 w-2 mr-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500" />
-        </span>
-        PARTIAL EVIDENCE
-      </Badge>
-    );
-  }
   return (
-    <Badge color="red">
-      <span className="relative flex h-2 w-2 mr-1.5">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-      </span>
-      LOW CONFIDENCE
-    </Badge>
+    <span className="inline-flex items-center gap-1.5">
+      <span className={clsx('wax-seal text-[9px]', stamp.colorClass)}>{stamp.label}</span>
+      <span className="font-mono text-[10px] tabular-nums text-text-dim">{Math.round(trustScore * 100)}%</span>
+    </span>
   );
 }
 
@@ -265,7 +248,7 @@ function SourceCard({
       className={clsx(
         'group relative rounded-2xl border transition-all duration-300 cursor-pointer overflow-hidden',
         isHighlighted
-          ? 'border-primary/60 shadow-[0_0_24px_rgba(124,92,255,0.2)] bg-primary/5'
+          ? 'border-primary/60 shadow-[0_0_24px_rgba(232,193,90,0.2)] bg-primary/5'
           : 'border-border/40 bg-card/60 hover:border-primary/30 hover:bg-card-hover',
       )}
       whileHover={{ y: -2, scale: 1.01 }}
@@ -285,23 +268,28 @@ function SourceCard({
       )}
 
       <div className="p-4 space-y-3">
-        {/* Row 1: Icon + Name + Type */}
+        {/* Row 1: Icon + Exhibit tag + Name + Type */}
         <div className="flex items-start gap-3">
           <div className={clsx(
             'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-            'bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20',
+            'bg-gradient-to-br from-primary/20 to-primary-dark/20 border border-primary/20',
           )}>
             {fileTypeIcon(source.file_type)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium text-text truncate">{docName}</p>
+            <div className="mb-1 flex items-center gap-1.5">
+              <span className="inline-flex items-center rounded-[3px] bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-bg">
+                Exhibit {String(index + 1).padStart(2, '0')}
+              </span>
               <Badge color="gray" className="shrink-0 text-[10px]">{fileExt}</Badge>
             </div>
-            <p className="text-xs text-text-dim mt-0.5">
-              {source.page_number ? `p. ${source.page_number}` : ''}
-              {source.updated_at ? ` · Updated ${formatDate(source.updated_at)}` : ''}
+            <p className="truncate font-mono text-sm font-medium text-primary">
+              {docName}
+              {source.page_number ? <span className="font-sans font-normal text-text-dim"> · p.{source.page_number}</span> : null}
             </p>
+            {source.updated_at && (
+              <p className="mt-0.5 text-xs text-text-dim">Updated {formatDate(source.updated_at)}</p>
+            )}
           </div>
           <motion.div
             animate={{ rotate: isExpanded ? 180 : 0 }}
@@ -316,7 +304,7 @@ function SourceCard({
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="text-text-dim">Relevance</span>
-            <span className={clsx('font-medium tabular-nums', relevance.color.text)}>
+            <span className={clsx('font-mono font-medium tabular-nums', relevance.color.text)}>
               {relevancePct}%
             </span>
           </div>
@@ -334,7 +322,7 @@ function SourceCard({
         </div>
 
         {/* Row 3: Metadata chips */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 font-mono tabular-nums">
           <div className="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-text-dim">
             <Shield size={10} /> {confidencePct}%
           </div>
@@ -358,7 +346,7 @@ function SourceCard({
             </span>
           </Badge>
           {source.rerank_score !== undefined && (
-            <span className="text-[11px] text-text-dim tabular-nums">
+            <span className="font-mono text-[11px] text-text-dim tabular-nums">
               Score: {(source.rerank_score * 100).toFixed(0)}%
             </span>
           )}
@@ -411,7 +399,7 @@ function SourceCard({
               {source.relevance_score !== undefined && (
                 <div className="rounded-lg bg-white/5 px-3 py-2">
                   <p className="text-[10px] text-text-dim">Vector Similarity</p>
-                  <p className="text-sm font-semibold text-text tabular-nums">
+                  <p className="font-mono text-sm font-semibold text-text tabular-nums">
                     {relevancePercent(source.relevance_score)}%
                   </p>
                 </div>
@@ -419,7 +407,7 @@ function SourceCard({
               {source.rerank_score !== undefined && (
                 <div className="rounded-lg bg-white/5 px-3 py-2">
                   <p className="text-[10px] text-text-dim">Rerank Score</p>
-                  <p className="text-sm font-semibold text-text tabular-nums">
+                  <p className="font-mono text-sm font-semibold text-text tabular-nums">
                     {(source.rerank_score * 100).toFixed(1)}%
                   </p>
                 </div>
@@ -431,7 +419,7 @@ function SourceCard({
               <div className="rounded-lg bg-white/5 px-3 py-2">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-text-dim">Chunk Confidence</span>
-                  <span className="text-text font-medium">
+                  <span className="font-mono font-medium text-text tabular-nums">
                     {chunkConfidencePct}%
                   </span>
                 </div>
@@ -672,8 +660,8 @@ function AIReasoningTab({
                     />
                     <defs>
                       <linearGradient id="trustGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#a78bfa" />
-                        <stop offset="100%" stopColor="#2dd4bf" />
+                        <stop offset="0%" stopColor="var(--color-primary)" />
+                        <stop offset="100%" stopColor="var(--color-accent)" />
                       </linearGradient>
                     </defs>
                   </svg>
@@ -749,7 +737,7 @@ function ConstellationCanvas() {
       for (let i = 0; i < N; i++) {
         const n = nodes[i];
         const d = Math.hypot(n.x - cx, n.y - cy);
-        ctx.strokeStyle = `rgba(124,140,248,${Math.max(0, 0.28 - d / 900)})`;
+        ctx.strokeStyle = `rgba(232,193,90,${Math.max(0, 0.28 - d / 900)})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
@@ -759,7 +747,7 @@ function ConstellationCanvas() {
           const m = nodes[j];
           const dd = Math.hypot(n.x - m.x, n.y - m.y);
           if (dd < 58) {
-            ctx.strokeStyle = `rgba(56,224,208,${0.16 * (1 - dd / 58)})`;
+            ctx.strokeStyle = `rgba(91,185,138,${0.16 * (1 - dd / 58)})`;
             ctx.beginPath();
             ctx.moveTo(n.x, n.y);
             ctx.lineTo(m.x, m.y);
@@ -770,7 +758,7 @@ function ConstellationCanvas() {
       for (let k = 0; k < N; k++) {
         const p = nodes[k];
         ctx.beginPath();
-        ctx.fillStyle = k % 3 === 0 ? 'rgba(56,224,208,0.9)' : 'rgba(150,163,240,0.85)';
+        ctx.fillStyle = k % 3 === 0 ? 'rgba(91,185,138,0.9)' : 'rgba(232,193,90,0.85)';
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
         if (!reduce) {
@@ -824,8 +812,8 @@ function EvidenceEmptyState({
         className="relative mb-4 w-full"
       >
         <ConstellationCanvas />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(56,224,208,0.4)]">
-          <Sparkles size={18} className="text-[#05121a]" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(91,185,138,0.4)]">
+          <Sparkles size={18} className="text-bg" />
         </div>
       </motion.div>
 
@@ -980,7 +968,7 @@ export default function EvidenceSidebar({
           )}
         >
           {/* Docked glass panel — slides in from the right */}
-          <div className="flex h-full flex-col overflow-hidden border-l border-white/[0.08] bg-[rgba(8,11,18,0.92)] backdrop-blur-2xl shadow-2xl shadow-primary/10">
+          <div className="flex h-full flex-col overflow-hidden border-l border-white/[0.08] bg-bg/92 backdrop-blur-2xl shadow-2xl shadow-primary/10">
             {/* ─── Drag Handle / Header ──────────────────────────────────── */}
             <div className="shrink-0 px-4 py-3">
               <div className="flex items-center justify-between">
@@ -1029,7 +1017,7 @@ export default function EvidenceSidebar({
                       {isActive && (
                         <motion.div
                           layoutId="sidebarActiveTab"
-                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(124,92,255,0.18)]"
+                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(232,193,90,0.18)]"
                           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                         />
                       )}

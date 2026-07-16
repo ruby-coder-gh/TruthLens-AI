@@ -76,7 +76,7 @@ const steps = [
 
 const trustSignals = [
   { label: 'Faithfulness', value: 96, barColor: 'bg-emerald-400' },
-  { label: 'Retrieval quality', value: 92, barColor: 'bg-sky-400' },
+  { label: 'Retrieval quality', value: 92, barColor: 'bg-primary' },
   { label: 'Citation coverage', value: 98, barColor: 'bg-amber-400' },
 ];
 

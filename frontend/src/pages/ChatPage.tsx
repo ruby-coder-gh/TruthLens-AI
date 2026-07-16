@@ -36,7 +36,7 @@ import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket } from '../api/websocket';
 import type { Source } from '../api/types';
-import { getRelevanceMeta, getTrustBadgeColor, getTrustColorVar, getTrustConfidenceLabel, relevancePercent } from '../utils/relevance';
+import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -112,6 +112,15 @@ function parseGuardrailDetails(details: string): string[] {
   } catch {
     return details ? [details] : [];
   }
+}
+
+// Trust verdict → wax-seal stamp. Mirrors the Evidence sidebar's own
+// thresholds (0.7 / 0.4) so the same message reads identically whether you're
+// looking at the bubble or the panel.
+function getTrustStampMeta(score: number): { label: string; colorClass: string } {
+  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-accent' };
+  if (score >= 0.4) return { label: 'Review', colorClass: 'text-primary' };
+  return { label: 'Flagged', colorClass: 'text-accent-2' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -693,9 +702,9 @@ export default function ChatPage() {
                     inputValue.trim() && !isStreaming
                       ? {
                           boxShadow: [
-                            '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
-                            '0 0 18px 6px rgba(124,92,255,0.22), inset 0 0 14px 4px rgba(124,92,255,0.06)',
-                            '0 0 10px 2px rgba(124,92,255,0.12), inset 0 0 10px 2px rgba(124,92,255,0.03)',
+                            '0 0 10px 2px rgba(232,193,90,0.12), inset 0 0 10px 2px rgba(232,193,90,0.03)',
+                            '0 0 18px 6px rgba(232,193,90,0.22), inset 0 0 14px 4px rgba(232,193,90,0.06)',
+                            '0 0 10px 2px rgba(232,193,90,0.12), inset 0 0 10px 2px rgba(232,193,90,0.03)',
                           ],
                         }
                       : { boxShadow: 'none' }
@@ -727,11 +736,11 @@ export default function ChatPage() {
                     inputValue.trim()
                       ? {
                           boxShadow: [
-                            '0 0 10px 3px rgba(124,92,255,0.3)',
-                            '0 0 22px 8px rgba(124,92,255,0.45)',
-                            '0 0 10px 3px rgba(124,92,255,0.3)',
+                            '0 0 10px 3px rgba(232,193,90,0.3)',
+                            '0 0 22px 8px rgba(232,193,90,0.45)',
+                            '0 0 10px 3px rgba(232,193,90,0.3)',
                           ],
-                          borderColor: 'rgba(124,92,255,0.6)',
+                          borderColor: 'rgba(232,193,90,0.6)',
                         }
                       : {
                           boxShadow: 'none',
@@ -739,7 +748,7 @@ export default function ChatPage() {
                         }
                   }
                   transition={{ duration: 2, repeat: inputValue.trim() ? Infinity : 0, ease: 'easeInOut' }}
-                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(124,92,255,0.5)' } : {}}
+                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(232,193,90,0.5)' } : {}}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Send size={18} />
@@ -787,7 +796,7 @@ export default function ChatPage() {
               onClick={() => setSourcesModalOpen(false)}
             />
             <motion.div
-              className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-2xl max-h-[70vh] overflow-y-auto rounded-2xl border border-border/40 bg-[rgba(8,11,18,0.97)] backdrop-blur-2xl shadow-2xl"
+              className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-2xl max-h-[70vh] overflow-y-auto rounded-2xl border border-border/40 bg-bg/97 backdrop-blur-2xl shadow-2xl"
               initial={{ opacity: 0.99, scale: 0.93, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -832,20 +841,27 @@ export default function ChatPage() {
                         whileHover={{ y: -2, scale: 1.005 }}
                       >
                         <div className="space-y-3">
-                          {/* Row 1: Icon + Name + Type */}
+                          {/* Row 1: Icon + Exhibit tag + Name + Type */}
                           <div className="flex items-start gap-3">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-purple-500/20 border border-primary/20">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary-dark/20 border border-primary/20">
                               <FileText size={16} className="text-primary-soft" />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm font-medium text-text truncate">{docName}</p>
+                              <div className="mb-1 flex items-center gap-1.5">
+                                <span className="inline-flex items-center rounded-[3px] bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-bg">
+                                  Exhibit {String(i + 1).padStart(2, '0')}
+                                </span>
                                 <Badge color="gray" className="shrink-0 text-[10px]">{fileExt}</Badge>
                               </div>
-                              <p className="text-xs text-text-dim mt-0.5">
-                                {source.page_number ? `p. ${source.page_number}` : ''}
-                                {source.updated_at ? ` · Updated ${new Date(source.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}
+                              <p className="truncate font-mono text-sm font-medium text-primary">
+                                {docName}
+                                {source.page_number ? <span className="font-sans font-normal text-text-dim"> · p.{source.page_number}</span> : null}
                               </p>
+                              {source.updated_at && (
+                                <p className="mt-0.5 text-xs text-text-dim">
+                                  Updated {new Date(source.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -853,7 +869,7 @@ export default function ChatPage() {
                           <div className="space-y-1">
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-text-dim">Relevance</span>
-                              <span className={clsx('font-medium tabular-nums', relevance.colors.text)}>
+                              <span className={clsx('font-mono font-medium tabular-nums', relevance.colors.text)}>
                                 {relevancePct}%
                               </span>
                             </div>
@@ -873,12 +889,12 @@ export default function ChatPage() {
                           </p>
 
                           {/* Row 4: Confidence + Meta */}
-                          <div className="flex items-center gap-3 text-[11px] text-text-dim">
-                            <span className="flex items-center gap-1">
+                          <div className="flex items-center gap-3 font-mono text-[11px] text-text-dim">
+                            <span className="flex items-center gap-1 tabular-nums">
                               <Shield size={10} /> {confidencePct}%
                             </span>
                             {source.matched_chunks !== undefined && (
-                              <span className="flex items-center gap-1">
+                              <span className="flex items-center gap-1 tabular-nums">
                                 <Layers size={10} /> {source.matched_chunks} chunk{source.matched_chunks !== 1 ? 's' : ''}
                               </span>
                             )}
@@ -1024,6 +1040,7 @@ function ChatMessageBubble({
   const isError = message.status === 'error';
   const isCancelled = message.status === 'cancelled';
   const isMessageStreaming = message.status === 'pending' || message.status === 'streaming';
+  const trustStamp = message.trustScore !== null ? getTrustStampMeta(message.trustScore) : null;
 
   return (
     <motion.div
@@ -1121,14 +1138,14 @@ function ChatMessageBubble({
                   {message.guardrail && (
                     <GuardrailBadge guardrail={message.guardrail} />
                   )}
-                  {message.trustScore !== null && (
+                  {message.trustScore !== null && trustStamp && (
                     <div className="flex items-center gap-2">
                       <TrustScoreRing score={message.trustScore} />
-                      <span
-                        className="text-xs font-medium"
-                        style={{ color: getTrustColorVar(message.trustScore) }}
-                      >
-                        {getTrustConfidenceLabel(message.trustScore)}
+                      <span className={clsx('wax-seal text-[9px]', trustStamp.colorClass)}>
+                        {trustStamp.label}
+                      </span>
+                      <span className="font-mono text-xs tabular-nums text-text-dim">
+                        {(message.trustScore * 100).toFixed(0)}%
                       </span>
                     </div>
                   )}
@@ -1344,15 +1361,15 @@ function CitationHoverCard({ source, children }: { source: Source; children: Rea
           transition={{ duration: 0.15, ease: 'easeOut' }}
           onMouseEnter={showCard}
           onMouseLeave={hideCard}
-          className="fixed z-[70] w-80 rounded-2xl border border-glass-border bg-[#0e121d]/95 backdrop-blur-2xl shadow-2xl shadow-black/60 overflow-hidden"
+          className="fixed z-[70] w-80 rounded-2xl border border-glass-border bg-bg-soft/95 backdrop-blur-2xl shadow-2xl shadow-black/60 overflow-hidden"
           style={{ top: pos.top, left: pos.left }}
         >
           {/* Header */}
           <div className="px-4 pt-3 pb-2 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
               <FileText size={14} className="text-primary-soft shrink-0" />
-              <span className="text-sm font-medium text-text truncate">{docName}</span>
-              <span className="ml-auto text-[10px] text-text-dim tabular-nums">{relevancePct}%</span>
+              <span className="truncate font-mono text-sm font-medium text-primary">{docName}</span>
+              <span className="ml-auto font-mono text-[10px] text-text-dim tabular-nums">{relevancePct}%</span>
             </div>
           </div>
 
@@ -1393,9 +1410,12 @@ function renderMessageWithCitations(
   sources: Source[],
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void,
 ): React.ReactNode {
-  // Split on citation patterns like [1], [2], etc.
-  const parts = content.split(/(\[\d+\])/g);
-  // No citations — render full markdown
+  // Backend cites sources inline as literal `[source:N]` markers (1-indexed —
+  // see backend/app/generation/citer.py / generator.py). Split on that exact
+  // token so each citation renders as a real, clickable footnote instead of
+  // leaking through ReactMarkdown as raw bracketed text.
+  const parts = content.split(/(\[source:\d+\])/gi);
+  // No citation markers — render full markdown untouched (raw-text fallback).
   if (parts.length <= 1) {
     return (
       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1404,31 +1424,39 @@ function renderMessageWithCitations(
     );
   }
 
-  // Has citations — render text parts as markdown, citation parts as buttons
+  // Has citations — render text parts as markdown, citation parts as footnote buttons.
   return (
     <>
       {parts.map((part, i) => {
-        const match = part.match(/\[(\d+)\]/);
+        const match = part.match(/\[source:(\d+)\]/i);
         if (match) {
           const idx = parseInt(match[1], 10) - 1;
           const source = sources[idx];
           if (source) {
+            const docName = source.document_name || `Source ${idx + 1}`;
             return (
               <CitationHoverCard key={i} source={source}>
                 <motion.button
                   id={`cite-${messageId}-${idx}`}
                   type="button"
                   onClick={(e) => onSourceClick(source, e, messageId, idx)}
-                  className="inline-flex items-center justify-center rounded bg-primary/20 px-1 text-xs font-medium text-primary-soft transition-colors hover:bg-primary/30 relative"
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
+                  aria-label={`View source ${idx + 1}: ${docName}`}
+                  className="inline-flex items-center bg-transparent border-0 p-0 m-0 align-baseline rounded-sm cursor-pointer transition-[filter] duration-150 hover:brightness-125 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                  whileHover={{ scale: 1.15 }}
+                  whileTap={{ scale: 0.9 }}
                 >
-                  {match[0]}
+                  <sup className="footnote-ref">{idx + 1}</sup>
                 </motion.button>
               </CitationHoverCard>
             );
           }
-          return <sup key={i} className="text-primary-soft font-medium">{match[0]}</sup>;
+          // Citation number has no matching retrieved source (e.g. still mid-stream) —
+          // keep a marker in place, just dimmed since it isn't clickable yet.
+          return (
+            <sup key={i} className="footnote-ref !text-text-dim" title="Source unavailable">
+              {idx + 1}
+            </sup>
+          );
         }
         return (
           <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
@@ -1532,7 +1560,7 @@ function TrustScoreRing({ score }: { score: number }) {
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(60,75,110,0.3)"
+          stroke="rgba(160,146,104,0.28)"
           strokeWidth={strokeWidth}
         />
         <motion.circle
