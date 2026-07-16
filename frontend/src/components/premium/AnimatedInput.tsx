@@ -37,7 +37,7 @@ export function InputActionButton({
         'border backdrop-blur-sm overflow-hidden',
         active
           ? 'border-primary/40 bg-primary/15 text-primary-soft'
-          : 'border-glass-border bg-[#14150f]/60 text-text-dim hover:text-text hover:border-primary/30',
+          : 'border-glass-border bg-[#0b0f17]/60 text-text-dim hover:text-text hover:border-primary/30',
       )}
       whileHover={{ scale: 1.08 }}
       whileTap={{ scale: 0.92 }}
@@ -45,16 +45,16 @@ export function InputActionButton({
         active
           ? {
               boxShadow: [
-                '0 0 4px rgba(232,193,90,0.2)',
-                '0 0 10px rgba(232,193,90,0.4)',
-                '0 0 4px rgba(232,193,90,0.2)',
+                '0 0 4px rgba(99,102,241,0.2)',
+                '0 0 10px rgba(99,102,241,0.4)',
+                '0 0 4px rgba(99,102,241,0.2)',
               ],
             }
           : {
               boxShadow: [
-                '0 0 0px rgba(232,193,90,0)',
-                '0 0 4px rgba(232,193,90,0.1)',
-                '0 0 0px rgba(232,193,90,0)',
+                '0 0 0px rgba(99,102,241,0)',
+                '0 0 4px rgba(99,102,241,0.1)',
+                '0 0 0px rgba(99,102,241,0)',
               ],
             }
       }
@@ -103,7 +103,7 @@ export default function AnimatedInput({
         <motion.label
           htmlFor={inputId}
           className="block text-sm font-medium text-text-muted"
-          animate={focused ? { color: 'rgba(232,193,90,0.9)' } : {}}
+          animate={focused ? { color: 'rgba(99,102,241,0.9)' } : {}}
           transition={{ duration: 0.2 }}
         >
           {label}
@@ -118,7 +118,7 @@ export default function AnimatedInput({
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
             style={{
-              background: 'linear-gradient(135deg, rgba(232,193,90,0.3), rgba(91,185,138,0.15))',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(52,211,153,0.15))',
               filter: 'blur(4px)',
             }}
           />
@@ -129,7 +129,7 @@ export default function AnimatedInput({
           {icon && (
             <motion.span
               className="pointer-events-none absolute left-3 flex items-center justify-center text-text-dim z-10"
-              animate={focused ? { color: 'rgba(232,193,90,0.8)' } : {}}
+              animate={focused ? { color: 'rgba(99,102,241,0.8)' } : {}}
               transition={{ duration: 0.2 }}
             >
               {icon}
@@ -142,9 +142,9 @@ export default function AnimatedInput({
             onBlur={() => setFocused(false)}
             className={clsx(
               'w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all duration-300',
-              'bg-[#14150f]/70 backdrop-blur-sm border',
+              'bg-[#0b0f17]/70 backdrop-blur-sm border',
               focused
-                ? 'border-primary/40 bg-[#14150f]/90'
+                ? 'border-primary/40 bg-[#0b0f17]/90'
                 : error
                   ? 'border-red/50'
                   : 'border-glass-border hover:border-primary/20',

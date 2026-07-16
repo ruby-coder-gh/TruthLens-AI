@@ -193,7 +193,7 @@ export default function DocumentsBrowsePage() {
             <EmptyState
               icon={<FileText size={24} />}
               title={search ? 'No documents match your search' : 'No documents available'}
-              description={search ? 'Try modifying your search or filters.' : 'Documents will appear here once uploaded by an administrator.'}
+              description={search ? 'Try modifying your search or filters.' : 'Upload a document to start asking questions.'}
               action={
                 <Button onClick={() => setUploadModalOpen(true)} size="sm">
                   <Upload size={14} />

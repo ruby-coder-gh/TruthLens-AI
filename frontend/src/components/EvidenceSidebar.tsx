@@ -248,7 +248,7 @@ function SourceCard({
       className={clsx(
         'group relative rounded-2xl border transition-all duration-300 cursor-pointer overflow-hidden',
         isHighlighted
-          ? 'border-primary/60 shadow-[0_0_24px_rgba(232,193,90,0.2)] bg-primary/5'
+          ? 'border-primary/60 shadow-[0_0_24px_rgba(99,102,241,0.2)] bg-primary/5'
           : 'border-border/40 bg-card/60 hover:border-primary/30 hover:bg-card-hover',
       )}
       whileHover={{ y: -2, scale: 1.01 }}
@@ -737,7 +737,7 @@ function ConstellationCanvas() {
       for (let i = 0; i < N; i++) {
         const n = nodes[i];
         const d = Math.hypot(n.x - cx, n.y - cy);
-        ctx.strokeStyle = `rgba(232,193,90,${Math.max(0, 0.28 - d / 900)})`;
+        ctx.strokeStyle = `rgba( 99, 102, 241,${Math.max(0, 0.28 - d / 900)})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
@@ -747,7 +747,7 @@ function ConstellationCanvas() {
           const m = nodes[j];
           const dd = Math.hypot(n.x - m.x, n.y - m.y);
           if (dd < 58) {
-            ctx.strokeStyle = `rgba(91,185,138,${0.16 * (1 - dd / 58)})`;
+            ctx.strokeStyle = `rgba( 52, 211, 153,${0.16 * (1 - dd / 58)})`;
             ctx.beginPath();
             ctx.moveTo(n.x, n.y);
             ctx.lineTo(m.x, m.y);
@@ -758,7 +758,7 @@ function ConstellationCanvas() {
       for (let k = 0; k < N; k++) {
         const p = nodes[k];
         ctx.beginPath();
-        ctx.fillStyle = k % 3 === 0 ? 'rgba(91,185,138,0.9)' : 'rgba(232,193,90,0.85)';
+        ctx.fillStyle = k % 3 === 0 ? 'rgba(52,211,153,0.9)' : 'rgba(99,102,241,0.85)';
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
         if (!reduce) {
@@ -812,7 +812,7 @@ function EvidenceEmptyState({
         className="relative mb-4 w-full"
       >
         <ConstellationCanvas />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(91,185,138,0.4)]">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(52,211,153,0.4)]">
           <Sparkles size={18} className="text-bg" />
         </div>
       </motion.div>
@@ -1017,7 +1017,7 @@ export default function EvidenceSidebar({
                       {isActive && (
                         <motion.div
                           layoutId="sidebarActiveTab"
-                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(232,193,90,0.18)]"
+                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(99,102,241,0.18)]"
                           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                         />
                       )}

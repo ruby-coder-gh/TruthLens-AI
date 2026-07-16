@@ -58,7 +58,7 @@ type QualityMetric = {
   color: string;
 };
 
-const DISTRIBUTION_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#5bb98a', '#34d399'];
+const DISTRIBUTION_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#38bdf8', '#34d399'];
 
 const CATEGORY_LABELS: Record<string, string> = {
   answerable: 'Answerable',
@@ -267,10 +267,10 @@ export default function AdminAnalyticsPage() {
         // UI can render "—" instead of a misleading 0%-filled bar.
         normalizedMetrics = [
           { key: 'faithfulness', label: 'Faithfulness', value: clampUnitOrNull(latest.faithfulness), color: '#34d399' },
-          { key: 'context_precision', label: 'Context Precision', value: clampUnitOrNull(latest.context_precision), color: '#5bb98a' },
-          { key: 'context_recall', label: 'Context Recall', value: clampUnitOrNull(latest.context_recall), color: '#d98a4e' },
-          { key: 'answer_relevance', label: 'Answer Relevance', value: clampUnitOrNull(latest.answer_relevance), color: '#e8c15a' },
-          { key: 'refusal_accuracy', label: 'Refusal Accuracy', value: clampUnitOrNull(latest.refusal_accuracy), color: '#c89f3c' },
+          { key: 'context_precision', label: 'Context Precision', value: clampUnitOrNull(latest.context_precision), color: '#38bdf8' },
+          { key: 'context_recall', label: 'Context Recall', value: clampUnitOrNull(latest.context_recall), color: '#fb923c' },
+          { key: 'answer_relevance', label: 'Answer Relevance', value: clampUnitOrNull(latest.answer_relevance), color: '#6366f1' },
+          { key: 'refusal_accuracy', label: 'Refusal Accuracy', value: clampUnitOrNull(latest.refusal_accuracy), color: '#4f46e5' },
         ];
       }
 
@@ -550,18 +550,18 @@ export default function AdminAnalyticsPage() {
                     <defs>
                       <linearGradient id="queriesLineGradient" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stopColor="#4f8dff" />
-                        <stop offset="100%" stopColor="#e8c15a" />
+                        <stop offset="100%" stopColor="#6366f1" />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(160,146,104, 0.24)" />
-                    <XAxis dataKey="label" stroke="#9a9179" fontSize={12} tickMargin={8} />
-                    <YAxis stroke="#9a9179" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(122,136,162,0.24)" />
+                    <XAxis dataKey="label" stroke="#7d8ba3" fontSize={12} tickMargin={8} />
+                    <YAxis stroke="#7d8ba3" fontSize={12} tickMargin={8} allowDecimals={false} />
                     <Tooltip
                       formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
                       contentStyle={{
-                        backgroundColor: 'rgba(19, 26, 39, 0.96)',
+                        backgroundColor: 'rgba(19,26,39,0.96)',
                         backdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(117, 150, 207, 0.22)',
+                        border: '1px solid rgba(117,150,207,0.22)',
                         borderRadius: '12px',
                         color: '#eaf0ff',
                       }}
@@ -573,7 +573,7 @@ export default function AdminAnalyticsPage() {
                       dataKey="queries"
                       stroke="url(#queriesLineGradient)"
                       strokeWidth={3}
-                      dot={{ fill: '#e8c15a', r: 3.5, strokeWidth: 0 }}
+                      dot={{ fill: '#6366f1', r: 3.5, strokeWidth: 0 }}
                       activeDot={{ r: 6 }}
                     />
                   </LineChart>
@@ -601,15 +601,15 @@ export default function AdminAnalyticsPage() {
               ) : (
                 <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
                   <BarChart data={trustScoreDistributionData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(160,146,104, 0.24)" />
-                    <XAxis dataKey="range" stroke="#9a9179" fontSize={12} tickMargin={8} />
-                    <YAxis stroke="#9a9179" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(122,136,162,0.24)" />
+                    <XAxis dataKey="range" stroke="#7d8ba3" fontSize={12} tickMargin={8} />
+                    <YAxis stroke="#7d8ba3" fontSize={12} tickMargin={8} allowDecimals={false} />
                     <Tooltip
                       formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
                       contentStyle={{
-                        backgroundColor: 'rgba(19, 26, 39, 0.96)',
+                        backgroundColor: 'rgba(19,26,39,0.96)',
                         backdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(117, 150, 207, 0.22)',
+                        border: '1px solid rgba(117,150,207,0.22)',
                         borderRadius: '12px',
                         color: '#eaf0ff',
                       }}

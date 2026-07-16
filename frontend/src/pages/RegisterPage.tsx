@@ -82,7 +82,7 @@ export default function RegisterPage() {
       <motion.div
         className="absolute inset-0 opacity-30"
         style={{
-          background: 'linear-gradient(135deg, rgba(232,193,90,0.15), rgba(91,185,138,0.08), rgba(232,193,90,0.12), rgba(232,193,90,0.15))',
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
           backgroundSize: '400% 400%',
         }}
         animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
@@ -152,7 +152,7 @@ export default function RegisterPage() {
           <Card className="relative overflow-hidden p-6 lg:p-8">
             <div
               className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30"
-              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(232,193,90,0.15), transparent)' }}
+              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15), transparent)' }}
               aria-hidden="true"
             />
 
@@ -243,7 +243,7 @@ export default function RegisterPage() {
                             className="flex items-center gap-2 text-xs"
                           >
                             <motion.span
-                              animate={{ scale: req.met ? [1, 1.3, 1] : 1, backgroundColor: req.met ? 'rgba(52, 211, 153, 0.2)' : 'transparent' }}
+                              animate={{ scale: req.met ? [1, 1.3, 1] : 1, backgroundColor: req.met ? 'rgba(52,211,153,0.2)' : 'transparent' }}
                               transition={{ duration: 0.3 }}
                               className={'flex h-4 w-4 items-center justify-center rounded-full ' + (req.met ? 'bg-green/20 text-green' : 'text-text-dim')}
                             >

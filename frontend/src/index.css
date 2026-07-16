@@ -1,47 +1,43 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════════════════
-   CASE FILE — forensic dossier design system
-   Warm archival ink, manila evidence tags, verification green, redaction
-   vermilion. Signature: highlighter source-spans, margin footnotes, a
-   wax-seal "verified" stamp. Documentary serif display over an official
-   humanist body (Public Sans), with mono for evidence data.
+   MIDNIGHT — clean pro dark
+   Cool near-black surfaces, a single indigo accent, disciplined spacing, and
+   tight modern type (Space Grotesk display over Inter). Minimal by default;
+   colour carries meaning (indigo = interactive, green/amber/red = status).
    ═══════════════════════════════════════════════════════════════════════ */
 
 @theme {
-  /* Evidence-tag manila is the interactive brand accent. */
-  --color-primary: #e8c15a;
-  --color-primary-soft: #f1d689;
-  --color-primary-dark: #c89f3c;
-  --color-primary-glow: rgba(232, 193, 90, 0.22);
-  /* Verified green + redaction vermilion carry meaning, not decoration. */
-  --color-accent: #5bb98a;
-  --color-accent-2: #d6553b;
-  --color-accent-glow: rgba(91, 185, 138, 0.22);
-  --color-gold: #e8c15a;
-  --color-green: #5bb98a;
-  --color-red: #d6553b;
-  --color-orange: #d98a4e;
-  /* Warm ink surfaces — archival, not blue-tech. */
-  --color-bg: #14150f;
-  --color-bg-soft: #1c1e16;
-  --color-card: rgba(29, 31, 22, 0.74);
-  --color-card-2: rgba(38, 40, 29, 0.62);
-  --color-card-hover: rgba(48, 50, 36, 0.86);
-  --color-border: rgba(160, 146, 104, 0.32);
-  --color-border-light: rgba(196, 178, 130, 0.26);
-  --color-text: #f3efe4;
-  --color-text-muted: #bcb39c;
-  /* --color-text-dim tuned to clear AA (~4.6:1) on the warm card surfaces
-     while staying quieter than text-muted. */
-  --color-text-dim: #9a9179;
-  --color-glass: rgba(26, 28, 20, 0.72);
-  --color-glass-border: rgba(190, 172, 122, 0.16);
-  --color-glass-hover: rgba(40, 42, 30, 0.82);
-  --font-sans: 'Public Sans', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
-  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  --color-primary: #6366f1;
+  --color-primary-soft: #a5b4fc;
+  --color-primary-dark: #4f46e5;
+  --color-primary-glow: rgba(99, 102, 241, 0.22);
+  --color-accent: #38bdf8;
+  --color-accent-2: #818cf8;
+  --color-accent-glow: rgba(56, 189, 248, 0.20);
+  --color-gold: #fbbf24;
+  --color-green: #34d399;
+  --color-red: #f87171;
+  --color-orange: #fb923c;
+  --color-bg: #0b0f17;
+  --color-bg-soft: #121824;
+  --color-card: rgba(20, 26, 38, 0.74);
+  --color-card-2: rgba(28, 35, 50, 0.60);
+  --color-card-hover: rgba(36, 44, 62, 0.86);
+  --color-border: rgba(122, 136, 162, 0.24);
+  --color-border-light: rgba(140, 155, 185, 0.20);
+  --color-text: #e6eaf2;
+  --color-text-muted: #9aa6bc;
+  /* text-dim tuned to clear AA (~4.6:1) on the cool card surfaces while
+     staying quieter than text-muted. */
+  --color-text-dim: #7d8ba3;
+  --color-glass: rgba(17, 22, 33, 0.72);
+  --color-glass-border: rgba(130, 145, 175, 0.14);
+  --color-glass-hover: rgba(28, 36, 52, 0.82);
+  --font-sans: 'Inter', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', monospace;
 }
 
 /* ─── Base ─── */
@@ -50,8 +46,8 @@ html {
 }
 
 body {
-  background: radial-gradient(125% 125% at 12% 0%, #2a2c1d 0%, #191a12 42%, #121309 100%);
-  color: #f3efe4;
+  background: radial-gradient(125% 125% at 15% -5%, #16203a 0%, #0d121e 45%, #080b12 100%);
+  color: #e6eaf2;
   font-family: var(--font-sans);
   min-height: 100vh;
   overflow-x: hidden;
@@ -65,7 +61,7 @@ h5,
 h6 {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 
 /* ─── Global keyboard focus fallback ───
@@ -83,19 +79,12 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* ─── Ruled paper grid ─── */
+/* ─── Grid removed per request — kept as a no-op so existing markup is inert ─── */
 .bg-grid {
-  background-image:
-    linear-gradient(rgba(176, 158, 110, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(176, 158, 110, 0.06) 1px, transparent 1px);
-  background-size: 56px 56px;
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
+  display: none;
 }
 
-/* Ambient floating blobs — warm evidence lamps */
+/* Ambient floating blobs — cool halos */
 .ambient-blob {
   position: fixed;
   border-radius: 50%;
@@ -108,7 +97,7 @@ select:focus-visible {
 .ambient-blob-1 {
   width: 540px;
   height: 540px;
-  background: radial-gradient(circle, rgba(232, 193, 90, 0.16), transparent 70%);
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.20), transparent 70%);
   top: -10%;
   right: -5%;
   animation: blobFloat1 20s ease-in-out infinite;
@@ -117,7 +106,7 @@ select:focus-visible {
 .ambient-blob-2 {
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(91, 185, 138, 0.12), transparent 70%);
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.14), transparent 70%);
   bottom: -5%;
   left: -5%;
   animation: blobFloat2 25s ease-in-out infinite;
@@ -126,7 +115,7 @@ select:focus-visible {
 .ambient-blob-3 {
   width: 350px;
   height: 350px;
-  background: radial-gradient(circle, rgba(214, 85, 59, 0.09), transparent 70%);
+  background: radial-gradient(circle, rgba(129, 140, 248, 0.12), transparent 70%);
   top: 40%;
   left: 50%;
   animation: blobFloat3 18s ease-in-out infinite;
@@ -165,32 +154,32 @@ select:focus-visible {
 }
 .glass-hover:hover {
   background: var(--color-glass-hover);
-  border-color: rgba(232, 193, 90, 0.32);
-  box-shadow: 0 8px 32px rgba(232, 193, 90, 0.08);
+  border-color: rgba(99, 102, 241, 0.34);
+  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.10);
   transform: translateY(-2px);
 }
 
 .glass-input {
-  background: rgba(20, 22, 15, 0.6);
+  background: rgba(15, 20, 30, 0.6);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--color-glass-border);
   transition: all 0.3s ease;
 }
 .glass-input:focus {
-  border-color: rgba(232, 193, 90, 0.55);
-  box-shadow: 0 0 0 3px rgba(232, 193, 90, 0.14);
-  background: rgba(28, 30, 20, 0.7);
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  background: rgba(22, 28, 40, 0.7);
 }
 
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(120, 110, 78, 0.4);
+  background: rgba(90, 104, 136, 0.4);
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(120, 110, 78, 0.6); }
+::-webkit-scrollbar-thumb:hover { background: rgba(90, 104, 136, 0.6); }
 
 /* ─── Animations ─── */
 @keyframes fadeIn {
@@ -226,8 +215,8 @@ select:focus-visible {
   100% { background-position: 200% 0; }
 }
 @keyframes borderGlow {
-  0%, 100% { border-color: rgba(232, 193, 90, 0.24); }
-  50% { border-color: rgba(232, 193, 90, 0.52); }
+  0%, 100% { border-color: rgba(99, 102, 241, 0.24); }
+  50% { border-color: rgba(99, 102, 241, 0.52); }
 }
 @keyframes gradientShift {
   0% { background-position: 0% 50%; }
@@ -261,17 +250,17 @@ select:focus-visible {
 .shimmer {
   background: linear-gradient(
     90deg,
-    rgba(40, 42, 30, 0.4) 25%,
-    rgba(58, 60, 44, 0.6) 50%,
-    rgba(40, 42, 30, 0.4) 75%
+    rgba(28, 35, 50, 0.4) 25%,
+    rgba(44, 54, 76, 0.6) 50%,
+    rgba(28, 35, 50, 0.4) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
-/* ─── Gradient Text — evidence → verified ─── */
+/* ─── Gradient Text — indigo → sky ─── */
 .gradient-text {
-  background: linear-gradient(135deg, #f1d689, #e8c15a 42%, #5bb98a);
+  background: linear-gradient(135deg, #a5b4fc, #6366f1 45%, #38bdf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -286,7 +275,7 @@ select:focus-visible {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(232, 193, 90, 0.5), rgba(91, 185, 138, 0.32), rgba(214, 85, 59, 0.4));
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(56, 189, 248, 0.32), rgba(129, 140, 248, 0.4));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -294,28 +283,24 @@ select:focus-visible {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   SIGNATURE — Case File evidence marks
+   Answer evidence marks — kept minimal for the Midnight look
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* Highlighter over a verified source span. Manila marker with a slightly
-   uneven baseline, as if swiped by hand. box-decoration-break keeps the
-   mark continuous across line wraps. */
+/* Indigo highlight over a verified source span. */
 .evidence-mark {
-  background-image: linear-gradient(120deg, rgba(232, 193, 90, 0.32), rgba(232, 193, 90, 0.22));
+  background-image: linear-gradient(120deg, rgba(99, 102, 241, 0.26), rgba(99, 102, 241, 0.18));
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  padding: 0.02em 0.18em;
-  margin: 0 -0.04em;
-  border-radius: 0.12em;
-  box-shadow: inset 0 -0.42em 0 rgba(232, 193, 90, 0.12);
+  padding: 0.02em 0.16em;
+  margin: 0 -0.02em;
+  border-radius: 0.2em;
   color: inherit;
   cursor: pointer;
   transition: background-image 0.2s ease;
 }
 .evidence-mark:hover {
-  background-image: linear-gradient(120deg, rgba(232, 193, 90, 0.46), rgba(232, 193, 90, 0.34));
+  background-image: linear-gradient(120deg, rgba(99, 102, 241, 0.4), rgba(99, 102, 241, 0.3));
 }
-/* Animated swipe used when an answer reveals its supported spans. */
 @keyframes markSweep {
   from { background-size: 0% 100%; }
   to { background-size: 100% 100%; }
@@ -325,48 +310,38 @@ select:focus-visible {
   animation: markSweep 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Footnote superscript for margin citations. */
+/* Footnote superscript for inline citations. */
 .footnote-ref {
   font-family: var(--font-mono);
-  font-size: 0.62em;
+  font-size: 0.64em;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-primary-soft);
   vertical-align: super;
   line-height: 0;
   padding: 0 0.1em;
 }
 
-/* Wax-seal / clearance stamp for the trust verdict. Double ring, letterpress
-   feel, tilted like it was pressed by hand. */
+/* Trust verdict — a clean flat status chip (no vintage stamp for Midnight). */
 .wax-seal {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.4em;
   font-family: var(--font-mono);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  border: 1.5px solid currentColor;
-  border-radius: 999px;
-  padding: 0.3em 0.75em;
-  transform: rotate(-4deg);
-  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.18);
-  opacity: 0.94;
-}
-.wax-seal::before {
-  content: '';
-  position: absolute;
-  inset: 3px;
   border: 1px solid currentColor;
-  border-radius: 999px;
-  opacity: 0.4;
+  border-radius: 0.5rem;
+  padding: 0.28em 0.6em;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-/* Case-file ruled section divider with a punched hole, like a folder tab. */
+/* Hairline section divider. */
 .file-rule {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(160, 146, 104, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(122, 136, 162, 0.4), transparent);
 }
 
 /* ─── Glow Sweep for Citation Trace ─── */
@@ -376,7 +351,7 @@ select:focus-visible {
 }
 
 .animate-glow-sweep {
-  background: linear-gradient(90deg, transparent, rgba(91, 185, 138, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.4), transparent);
   background-size: 200% 100%;
   animation: glowSweep 1.5s ease-out forwards;
 }
@@ -387,7 +362,7 @@ select:focus-visible {
   width: 400px;
   height: 400px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(232, 193, 90, 0.07), transparent 70%);
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.08), transparent 70%);
   pointer-events: none;
   z-index: 9999;
   transform: translate(-50%, -50%);
@@ -395,14 +370,14 @@ select:focus-visible {
   will-change: transform;
 }
 
-/* ─── Paper grain ─── */
+/* ─── Noise ─── */
 .noise-overlay::after {
   content: '';
   position: fixed;
   inset: 0;
   z-index: 9998;
   pointer-events: none;
-  opacity: 0.02;
+  opacity: 0.015;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-repeat: repeat;
   background-size: 256px 256px;
@@ -413,17 +388,17 @@ select:focus-visible {
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .glass-card-glow:hover {
-  border-color: rgba(232, 193, 90, 0.3);
+  border-color: rgba(99, 102, 241, 0.3);
   box-shadow:
-    0 0 20px rgba(232, 193, 90, 0.07),
-    0 8px 32px rgba(20, 16, 6, 0.4);
+    0 0 20px rgba(99, 102, 241, 0.08),
+    0 8px 32px rgba(4, 8, 18, 0.5);
   transform: translateY(-2px);
 }
 
 /* ─── Subtle pulse border ─── */
 @keyframes borderPulse {
-  0%, 100% { border-color: rgba(232, 193, 90, 0.16); }
-  50% { border-color: rgba(232, 193, 90, 0.36); }
+  0%, 100% { border-color: rgba(99, 102, 241, 0.16); }
+  50% { border-color: rgba(99, 102, 241, 0.36); }
 }
 .animate-border-pulse {
   animation: borderPulse 3s ease-in-out infinite;
@@ -431,7 +406,7 @@ select:focus-visible {
 
 /* ─── Hero text glow ─── */
 .hero-glow {
-  text-shadow: 0 0 34px rgba(232, 193, 90, 0.18), 0 0 70px rgba(91, 185, 138, 0.07);
+  text-shadow: 0 0 34px rgba(99, 102, 241, 0.2), 0 0 70px rgba(56, 189, 248, 0.08);
 }
 
 /* ─── Reduced Motion ─── */
@@ -447,6 +422,6 @@ select:focus-visible {
 
 /* ─── Selection ─── */
 ::selection {
-  background: rgba(232, 193, 90, 0.32);
-  color: #f3efe4;
+  background: rgba(99, 102, 241, 0.34);
+  color: #e6eaf2;
 }

@@ -15,7 +15,7 @@ import AnimatedInput, { InputActionButton } from '../components/premium/Animated
 import ParticleField from '../components/premium/ParticleField';
 
 // ─── Aurora background for cards ───────────────────────────────────────────
-function AuroraBg({ color1 = '#e8c15a', color2 = '#e8c15a' }: { color1?: string; color2?: string }) {
+function AuroraBg({ color1 = '#6366f1', color2 = '#6366f1' }: { color1?: string; color2?: string }) {
   return (
     <div className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none" aria-hidden="true">
       <motion.div
@@ -40,7 +40,7 @@ function ScanningLine() {
       <motion.div
         className="absolute left-0 right-0 h-[1px]"
         style={{
-          background: 'linear-gradient(90deg, transparent, rgba(91,185,138,0.4), transparent)',
+          background: 'linear-gradient(90deg, transparent, rgba(52,211,153,0.4), transparent)',
           filter: 'blur(1px)',
         }}
         animate={{ top: ['0%', '100%', '0%'] }}
@@ -51,7 +51,7 @@ function ScanningLine() {
 }
 
 // ─── Animated Icon wrapper ──────────────────────────────────────────────────
-function AnimatedIcon({ icon, color = '#e8c15a' }: { icon: React.ReactNode; color?: string }) {
+function AnimatedIcon({ icon, color = '#6366f1' }: { icon: React.ReactNode; color?: string }) {
   return (
     <motion.span
       className="relative flex items-center justify-center"
@@ -70,7 +70,7 @@ function AnimatedIcon({ icon, color = '#e8c15a' }: { icon: React.ReactNode; colo
 }
 
 // ─── Floating neon border ──────────────────────────────────────────────────
-function FloatingBorder({ color = '#e8c15a', active = true }: { color?: string; active?: boolean }) {
+function FloatingBorder({ color = '#6366f1', active = true }: { color?: string; active?: boolean }) {
   if (!active) return null;
   return (
     <motion.div
@@ -86,7 +86,7 @@ function FloatingBorder({ color = '#e8c15a', active = true }: { color?: string; 
 }
 
 // ─── Section Header ────────────────────────────────────────────────────────
-function SectionHeader({ icon, title, color = '#e8c15a' }: { icon: React.ReactNode; title: string; color?: string }) {
+function SectionHeader({ icon, title, color = '#6366f1' }: { icon: React.ReactNode; title: string; color?: string }) {
   return (
     <div className="flex items-center gap-2.5 mb-5">
       <AnimatedIcon icon={icon} color={color} />
@@ -190,7 +190,7 @@ export default function SettingsPage() {
     <>
       {/* Global particle background */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <ParticleField count={25} color="#e8c15a" />
+        <ParticleField count={25} color="#6366f1" />
       </div>
 
       <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
@@ -218,11 +218,11 @@ export default function SettingsPage() {
           {/* ═══ PROFILE CARD ═════════════════════════════════════════════════ */}
           <motion.div variants={staggerItem} ref={profileCardRef}>
             <div className="relative overflow-hidden rounded-xl glass border border-glass-border p-5 lg:p-6">
-              <AuroraBg color1="#e8c15a" color2="#e8c15a" />
-              <FloatingBorder color="#e8c15a" />
+              <AuroraBg color1="#6366f1" color2="#6366f1" />
+              <FloatingBorder color="#6366f1" />
 
               <div className="relative z-10">
-                <SectionHeader icon={<User size={16} className="text-primary-soft" />} title="Profile" color="#e8c15a" />
+                <SectionHeader icon={<User size={16} className="text-primary-soft" />} title="Profile" color="#6366f1" />
 
                 <form onSubmit={handleProfileSave} className="space-y-4">
                   <AnimatedInput
@@ -257,12 +257,12 @@ export default function SettingsPage() {
           {/* ═══ PASSWORD CARD ════════════════════════════════════════════════ */}
           <motion.div variants={staggerItem} ref={passwordCardRef}>
             <div className="relative overflow-hidden rounded-xl glass border border-glass-border p-5 lg:p-6">
-              <AuroraBg color1="#5bb98a" color2="#0891B2" />
-              <FloatingBorder color="#5bb98a" />
+              <AuroraBg color1="#34d399" color2="#0891B2" />
+              <FloatingBorder color="#34d399" />
               <ScanningLine />
 
               <div className="relative z-10">
-                <SectionHeader icon={<Lock size={16} className="text-accent" />} title="Password" color="#5bb98a" />
+                <SectionHeader icon={<Lock size={16} className="text-accent" />} title="Password" color="#34d399" />
 
                 <form onSubmit={handlePasswordChange} className="space-y-4">
                   <AnimatedInput

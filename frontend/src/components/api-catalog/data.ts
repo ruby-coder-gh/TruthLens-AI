@@ -6,7 +6,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Authentication',
     description: 'User registration, login, token management, and session handling',
     icon: 'LogIn',
-    color: '#e8c15a',
+    color: '#6366f1',
     endpoints: [
       {
         method: 'POST',
@@ -73,7 +73,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Users',
     description: 'User management and administration — admin only',
     icon: 'Users',
-    color: '#c89f3c',
+    color: '#4f46e5',
     endpoints: [
       {
         method: 'GET',
@@ -116,7 +116,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Workspaces',
     description: 'Workspace CRUD, member management, and collaboration',
     icon: 'LayoutDashboard',
-    color: '#5bb98a',
+    color: '#34d399',
     endpoints: [
       {
         method: 'GET',
@@ -257,7 +257,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Queries',
     description: 'RAG query execution, history, and streaming responses',
     icon: 'MessageSquare',
-    color: '#d98a4e',
+    color: '#fb923c',
     endpoints: [
       {
         method: 'POST',
@@ -397,7 +397,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'WebSocket',
     description: 'Real-time streaming pipeline for RAG query execution',
     icon: 'Radio',
-    color: '#d6553b',
+    color: '#f87171',
     endpoints: [
       {
         method: 'WS',
