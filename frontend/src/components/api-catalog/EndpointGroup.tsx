@@ -115,7 +115,7 @@ export default function EndpointGroup({ group, defaultOpen = false, onSelectEndp
     <motion.div
       initial={{ opacity: 0.99, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-xl glass border border-glass-border overflow-hidden transition-all duration-200 hover:border-primary/20 hover:shadow-[0_0_30px_rgba(232,193,90,0.05)]"
+      className="rounded-xl glass border border-glass-border overflow-hidden transition-all duration-200 hover:border-primary/20 hover:shadow-[0_0_30px_rgba(99,102,241,0.05)]"
     >
       {/* Header */}
       <button

@@ -65,7 +65,7 @@ export default function LoginPage() {
       <motion.div
         className="absolute inset-0 opacity-30"
         style={{
-          background: 'linear-gradient(135deg, rgba(232,193,90,0.15), rgba(91,185,138,0.08), rgba(232,193,90,0.12), rgba(232,193,90,0.15))',
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
           backgroundSize: '400% 400%',
         }}
         animate={{
@@ -147,7 +147,7 @@ export default function LoginPage() {
           <Card className="relative overflow-hidden p-6 lg:p-8">
             <div
               className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30"
-              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(232,193,90,0.15), transparent)' }}
+              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15), transparent)' }}
               aria-hidden="true"
             />
 

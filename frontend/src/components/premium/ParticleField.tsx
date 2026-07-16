@@ -6,7 +6,7 @@ interface ParticleFieldProps {
   className?: string;
 }
 
-export default function ParticleField({ count = 30, color = '#e8c15a', className }: ParticleFieldProps) {
+export default function ParticleField({ count = 30, color = '#6366f1', className }: ParticleFieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -64,13 +64,13 @@ export default function ParticleField({ count = 30, color = '#e8c15a', className
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(232, 193, 90, ${pulseAlpha})`;
+        ctx.fillStyle = `rgba( 99,  102,  241, ${pulseAlpha})`;
         ctx.fill();
 
         // Glow
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(232, 193, 90, ${pulseAlpha * 0.15})`;
+        ctx.fillStyle = `rgba( 99,  102,  241, ${pulseAlpha * 0.15})`;
         ctx.fill();
 
         // Connections to nearby particles
@@ -82,7 +82,7 @@ export default function ParticleField({ count = 30, color = '#e8c15a', className
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(other.x, other.y);
-            ctx.strokeStyle = `rgba(232, 193, 90, ${0.04 * (1 - dist / 80)})`;
+            ctx.strokeStyle = `rgba( 99,  102,  241, ${0.04 * (1 - dist / 80)})`;
             ctx.lineWidth = 0.5;
             ctx.stroke();
           }

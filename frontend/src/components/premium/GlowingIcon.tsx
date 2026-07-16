@@ -41,7 +41,7 @@ function ParticleBurst({ color }: { color: string }) {
 export default function GlowingIcon({
   icon,
   active = false,
-  color = '#e8c15a',
+  color = '#6366f1',
   size = 'md',
   className,
   onClick,

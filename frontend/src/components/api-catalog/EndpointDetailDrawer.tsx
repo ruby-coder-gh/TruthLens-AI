@@ -86,7 +86,7 @@ export default function EndpointDetailDrawer({ endpoint, onClose }: EndpointDeta
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 320 }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-[#14150f]/95 backdrop-blur-2xl border-l border-white/[0.06] shadow-2xl flex flex-col"
+            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-[#0b0f17]/95 backdrop-blur-2xl border-l border-white/[0.06] shadow-2xl flex flex-col"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">

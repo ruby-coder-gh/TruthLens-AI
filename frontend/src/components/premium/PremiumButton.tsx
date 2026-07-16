@@ -34,12 +34,12 @@ function BorderBeam() {
       <motion.span
         className="absolute inset-0 rounded-xl"
         style={{
-          background: 'conic-gradient(from 0deg, transparent, rgba(232,193,90,0.55), rgba(91,185,138,0.5), rgba(214,85,59,0.4), transparent)',
+          background: 'conic-gradient(from 0deg, transparent, rgba(99,102,241,0.55), rgba(52,211,153,0.5), rgba(248,113,113,0.4), transparent)',
         }}
         animate={{ rotate: 360 }}
         transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
       />
-      <span className="absolute inset-[1px] rounded-[11px] bg-[#14150f]" />
+      <span className="absolute inset-[1px] rounded-[11px] bg-[#0b0f17]" />
     </motion.span>
   );
 }
@@ -134,12 +134,12 @@ export default function PremiumButton({
       style={
         variant === 'primary' && !loading && !success
           ? {
-              background: 'linear-gradient(135deg, #f1d689, #e8c15a, #c89f3c)',
+              background: 'linear-gradient(135deg, #a5b4fc, #6366f1, #4f46e5)',
               backgroundSize: '200% 200%',
-              boxShadow: '0 4px 24px rgba(232,193,90,0.3)',
+              boxShadow: '0 4px 24px rgba(99,102,241,0.3)',
             }
           : variant === 'primary' && loading
-          ? { background: 'linear-gradient(135deg, #f1d689, #e8c15a)' }
+          ? { background: 'linear-gradient(135deg, #a5b4fc, #6366f1)' }
           : {}
       }
     >
@@ -148,7 +148,7 @@ export default function PremiumButton({
         <motion.span
           className="absolute inset-0 rounded-xl"
           style={{
-            background: 'linear-gradient(135deg, #f1d689, #e8c15a, #c89f3c, #f1d689)',
+            background: 'linear-gradient(135deg, #a5b4fc, #6366f1, #4f46e5, #a5b4fc)',
             backgroundSize: '300% 300%',
           }}
           animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
@@ -202,7 +202,7 @@ export default function PremiumButton({
         <motion.span
           className="absolute inset-0 rounded-xl opacity-0"
           style={{
-            boxShadow: '0 0 30px rgba(232,193,90,0.4), 0 0 60px rgba(91,185,138,0.2)',
+            boxShadow: '0 0 30px rgba(99,102,241,0.4), 0 0 60px rgba(52,211,153,0.2)',
           }}
           whileHover={{ opacity: 1 }}
           transition={{ duration: 0.3 }}

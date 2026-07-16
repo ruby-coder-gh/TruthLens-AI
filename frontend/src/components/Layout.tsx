@@ -107,7 +107,7 @@ function NavItemLink({ item, active, collapsed, onClick }: { item: NavItem; acti
         <motion.div
           className="absolute inset-0 rounded-xl"
           style={{
-            background: 'radial-gradient(circle at 30% 50%, rgba(232,193,90,0.12), transparent)',
+            background: 'radial-gradient(circle at 30% 50%, rgba(99,102,241,0.12), transparent)',
           }}
           animate={{ opacity: [0.5, 1, 0.5] }}
           transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
@@ -137,7 +137,7 @@ function NavItemLink({ item, active, collapsed, onClick }: { item: NavItem; acti
             size={18}
             strokeWidth={active ? 2.5 : 1.5}
             style={{
-              filter: active ? 'drop-shadow(0 0 6px rgba(232,193,90,0.5))' : 'none',
+              filter: active ? 'drop-shadow(0 0 6px rgba(99,102,241,0.5))' : 'none',
             }}
           />
         </motion.span>
@@ -215,7 +215,7 @@ export default function Layout() {
         )}
       >
         {/* Glass sidebar */}
-        <div className="absolute inset-0 bg-[#14150f]/90 backdrop-blur-2xl border-r border-white/[0.06]" />
+        <div className="absolute inset-0 bg-[#0b0f17]/90 backdrop-blur-2xl border-r border-white/[0.06]" />
 
         {/* Brand — click to toggle collapse */}
         <div
@@ -308,16 +308,16 @@ export default function Layout() {
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-accent/30 border border-white/[0.08] transition-transform duration-150"
                   animate={{
                     boxShadow: [
-                      '0 0 6px 2px rgba(232,193,90,0.15)',
-                      '0 0 12px 5px rgba(232,193,90,0.25)',
-                      '0 0 6px 2px rgba(232,193,90,0.15)',
+                      '0 0 6px 2px rgba(99,102,241,0.15)',
+                      '0 0 12px 5px rgba(99,102,241,0.25)',
+                      '0 0 6px 2px rgba(99,102,241,0.15)',
                     ],
                   }}
                   transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
                   whileHover={{ scale: 1.1 }}
                 >
                   <motion.span
-                    animate={{ filter: ['drop-shadow(0 0 3px rgba(232,193,90,0.3))', 'drop-shadow(0 0 8px rgba(232,193,90,0.5))', 'drop-shadow(0 0 3px rgba(232,193,90,0.3))'] }}
+                    animate={{ filter: ['drop-shadow(0 0 3px rgba(99,102,241,0.3))', 'drop-shadow(0 0 8px rgba(99,102,241,0.5))', 'drop-shadow(0 0 3px rgba(99,102,241,0.3))'] }}
                     transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
                   >
                     <User size={16} className="text-text-muted" />

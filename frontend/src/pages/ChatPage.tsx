@@ -702,9 +702,9 @@ export default function ChatPage() {
                     inputValue.trim() && !isStreaming
                       ? {
                           boxShadow: [
-                            '0 0 10px 2px rgba(232,193,90,0.12), inset 0 0 10px 2px rgba(232,193,90,0.03)',
-                            '0 0 18px 6px rgba(232,193,90,0.22), inset 0 0 14px 4px rgba(232,193,90,0.06)',
-                            '0 0 10px 2px rgba(232,193,90,0.12), inset 0 0 10px 2px rgba(232,193,90,0.03)',
+                            '0 0 10px 2px rgba(99,102,241,0.12), inset 0 0 10px 2px rgba(99,102,241,0.03)',
+                            '0 0 18px 6px rgba(99,102,241,0.22), inset 0 0 14px 4px rgba(99,102,241,0.06)',
+                            '0 0 10px 2px rgba(99,102,241,0.12), inset 0 0 10px 2px rgba(99,102,241,0.03)',
                           ],
                         }
                       : { boxShadow: 'none' }
@@ -736,11 +736,11 @@ export default function ChatPage() {
                     inputValue.trim()
                       ? {
                           boxShadow: [
-                            '0 0 10px 3px rgba(232,193,90,0.3)',
-                            '0 0 22px 8px rgba(232,193,90,0.45)',
-                            '0 0 10px 3px rgba(232,193,90,0.3)',
+                            '0 0 10px 3px rgba(99,102,241,0.3)',
+                            '0 0 22px 8px rgba(99,102,241,0.45)',
+                            '0 0 10px 3px rgba(99,102,241,0.3)',
                           ],
-                          borderColor: 'rgba(232,193,90,0.6)',
+                          borderColor: 'rgba(99,102,241,0.6)',
                         }
                       : {
                           boxShadow: 'none',
@@ -748,7 +748,7 @@ export default function ChatPage() {
                         }
                   }
                   transition={{ duration: 2, repeat: inputValue.trim() ? Infinity : 0, ease: 'easeInOut' }}
-                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(232,193,90,0.5)' } : {}}
+                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(99,102,241,0.5)' } : {}}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Send size={18} />
@@ -1560,7 +1560,7 @@ function TrustScoreRing({ score }: { score: number }) {
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(160,146,104,0.28)"
+          stroke="rgba(122,136,162,0.28)"
           strokeWidth={strokeWidth}
         />
         <motion.circle

@@ -50,7 +50,7 @@ function ParticleField() {
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(232, 193, 90, ${p.alpha})`;
+        ctx.fillStyle = `rgba( 99,  102,  241, ${p.alpha})`;
         ctx.fill();
 
         // Draw connections
@@ -62,7 +62,7 @@ function ParticleField() {
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = `rgba(232, 193, 90, ${0.06 * (1 - dist / 120)})`;
+            ctx.strokeStyle = `rgba( 99,  102,  241, ${0.06 * (1 - dist / 120)})`;
             ctx.lineWidth = 0.5;
             ctx.stroke();
           }
@@ -98,12 +98,12 @@ function FloatingCube() {
     >
       {/* Cube faces */}
       {[
-        { translate: 'translateZ(40px)', bg: 'rgba(232,193,90,0.15)', border: 'rgba(232,193,90,0.4)' },
-        { translate: 'translateZ(-40px)', bg: 'rgba(91,185,138,0.1)', border: 'rgba(91,185,138,0.3)' },
-        { translate: 'rotateY(90deg) translateZ(40px)', bg: 'rgba(232,193,90,0.12)', border: 'rgba(232,193,90,0.35)' },
-        { translate: 'rotateY(90deg) translateZ(-40px)', bg: 'rgba(232,193,90,0.1)', border: 'rgba(232,193,90,0.35)' },
-        { translate: 'rotateX(90deg) translateZ(40px)', bg: 'rgba(91,185,138,0.12)', border: 'rgba(91,185,138,0.35)' },
-        { translate: 'rotateX(90deg) translateZ(-40px)', bg: 'rgba(232,193,90,0.1)', border: 'rgba(232,193,90,0.3)' },
+        { translate: 'translateZ(40px)', bg: 'rgba(99,102,241,0.15)', border: 'rgba(99,102,241,0.4)' },
+        { translate: 'translateZ(-40px)', bg: 'rgba(52,211,153,0.1)', border: 'rgba(52,211,153,0.3)' },
+        { translate: 'rotateY(90deg) translateZ(40px)', bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.35)' },
+        { translate: 'rotateY(90deg) translateZ(-40px)', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.35)' },
+        { translate: 'rotateX(90deg) translateZ(40px)', bg: 'rgba(52,211,153,0.12)', border: 'rgba(52,211,153,0.35)' },
+        { translate: 'rotateX(90deg) translateZ(-40px)', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.3)' },
       ].map((face, i) => (
         <div
           key={i}
@@ -121,7 +121,7 @@ function FloatingCube() {
       <div
         className="absolute inset-0 rounded-xl"
         style={{
-          background: 'radial-gradient(circle, rgba(232,193,90,0.2), transparent)',
+          background: 'radial-gradient(circle, rgba(99,102,241,0.2), transparent)',
           transform: 'translateZ(20px)',
           filter: 'blur(4px)',
         }}
@@ -140,7 +140,7 @@ export default function HeroSection() {
         className="absolute inset-0 opacity-30"
         style={{
           background:
-            'radial-gradient(ellipse 80% 60% at 30% 30%, rgba(232,193,90,0.15), transparent), radial-gradient(ellipse 60% 80% at 70% 70%, rgba(91,185,138,0.1), transparent), radial-gradient(ellipse 50% 50% at 50% 50%, rgba(232,193,90,0.08), transparent)',
+            'radial-gradient(ellipse 80% 60% at 30% 30%, rgba(99,102,241,0.15), transparent), radial-gradient(ellipse 60% 80% at 70% 70%, rgba(52,211,153,0.1), transparent), radial-gradient(ellipse 50% 50% at 50% 50%, rgba(99,102,241,0.08), transparent)',
         }}
       />
 
