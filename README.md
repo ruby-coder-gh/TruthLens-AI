@@ -27,7 +27,7 @@ Offline-first, enterprise-grade RAG platform. Ask natural-language questions ove
 
 ### Prerequisites
 - Python 3.11+
-- [Ollama](https://ollama.ai) with llama3.1:8b (or phi3:3b for 8GB RAM)
+- [Ollama](https://ollama.ai) with qwen3:4b (default; any Ollama chat model works — set in `.env`)
 - 8GB+ RAM (16GB recommended)
 
 ### 1. Setup
@@ -54,9 +54,8 @@ cp ../.env.example .env
 ### 3. Pull LLM models
 
 ```bash
-ollama pull llama3.1:8b     # primary model
-ollama pull phi3:3b         # fallback (optional)
-ollama pull bge-base:latest # embeddings (optional — uses sentence-transformers)
+ollama pull qwen3:4b         # primary + fallback chat model (matches .env)
+ollama pull nomic-embed-text # embeddings/rerank fallback (optional — sentence-transformers used by default)
 ```
 
 ### 4. Start server
@@ -86,7 +85,7 @@ This starts:
 
 Wait for Ollama to be healthy, then pull models:
 ```bash
-docker exec veritasrag-ollama ollama pull llama3.1:8b
+docker exec veritasrag-ollama ollama pull qwen3:4b
 ```
 
 ## API
@@ -122,7 +121,7 @@ PDF, DOCX, TXT, MD, CSV
 | Framework | FastAPI (Python 3.11) |
 | Database | SQLite + SQLAlchemy (async) |
 | Vector store | ChromaDB |
-| LLM | Ollama (llama3.1:8b / phi3:3b) |
+| LLM | Ollama (qwen3:4b default) |
 | Search | BM25 + vector hybrid (RRF fusion) |
 | Reranker | Cross-encoder (BGE-reranker) |
 | Guardrail | NLI (DeBERTa) |

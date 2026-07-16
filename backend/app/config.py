@@ -40,10 +40,10 @@ class Settings(BaseSettings):
 
     # ─── Ollama ────────────────────────────────
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_PRIMARY_MODEL: str = "llama3.1:8b"
-    OLLAMA_FALLBACK_MODEL: str = "phi3:3b"
-    OLLAMA_EMBED_MODEL: str = "bge-base:latest"
-    OLLAMA_RERANK_MODEL: str = "bge-reranker:latest"
+    OLLAMA_PRIMARY_MODEL: str = "qwen3:4b"
+    OLLAMA_FALLBACK_MODEL: str = "qwen3:4b"
+    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
+    OLLAMA_RERANK_MODEL: str = "nomic-embed-text"
     OLLAMA_VISION_MODEL: str = "llava:7b"
     OLLAMA_TIMEOUT: int = 120
     OLLAMA_MAX_TOKENS: int = 2048

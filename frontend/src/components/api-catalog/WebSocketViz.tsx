@@ -32,7 +32,7 @@ function PipelineNode({ stage }: { stage: WebSocketStage }) {
         <motion.div
           className={clsx(
             'flex items-center justify-center w-8 h-8 rounded-xl border transition-all duration-300 shrink-0',
-            isActive && 'border-primary/40 bg-primary/15 shadow-[0_0_15px_rgba(124,92,255,0.15)]',
+            isActive && 'border-primary/40 bg-primary/15 shadow-[0_0_15px_rgba(232,193,90,0.15)]',
             isCompleted && 'border-accent/30 bg-accent/10',
             !isActive && !isCompleted && 'border-border bg-card-2',
           )}
@@ -80,7 +80,7 @@ function ConnectionLine({ active }: { active: boolean }) {
         )}
         {active && (
           <motion.div
-            className="absolute -left-0.5 -top-1 w-2 h-2 rounded-full bg-primary shadow-[0_0_6px_rgba(124,92,255,0.5)]"
+            className="absolute -left-0.5 -top-1 w-2 h-2 rounded-full bg-primary shadow-[0_0_6px_rgba(232,193,90,0.5)]"
             animate={{ top: ['0%', '100%'] }}
             transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
           />

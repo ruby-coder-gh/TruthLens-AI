@@ -818,7 +818,7 @@ function ReasoningStep({ index, step }: { index: number; step: string }) {
   return (
     <motion.div
       className="rounded-lg border border-border bg-bg-soft overflow-hidden"
-      whileHover={{ borderColor: 'rgba(124,92,255,0.3)' }}
+      whileHover={{ borderColor: 'rgba(232,193,90,0.3)' }}
       transition={{ duration: 0.2 }}
     >
       <motion.button

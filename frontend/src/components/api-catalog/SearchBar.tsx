@@ -32,7 +32,7 @@ export default function SearchBar({ searchQuery, onSearchChange, activeMethod, o
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search endpoints, routes, descriptions..."
-          className="w-full glass-input rounded-xl pl-10 pr-10 py-3 text-sm text-text placeholder-text-dim transition-all focus:outline-none focus:border-primary/40 focus:shadow-[0_0_20px_rgba(124,92,255,0.08)]"
+          className="w-full glass-input rounded-xl pl-10 pr-10 py-3 text-sm text-text placeholder-text-dim transition-all focus:outline-none focus:border-primary/40 focus:shadow-[0_0_20px_rgba(232,193,90,0.08)]"
           aria-label="Search API endpoints"
         />
         {searchQuery && (

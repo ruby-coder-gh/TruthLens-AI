@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from app.config import settings
 from app.generation.generator import GenerationInput
+from app.generation.provider import get_provider_name
 from app.utils.logger import logger
 
 
@@ -28,7 +30,8 @@ async def stream_tokens(
 
     full_text: list[str] = []
     token_index = 0
-    model_used = "unknown"
+    provider = get_provider_name()
+    model_used = settings.OPENAI_MODEL if provider == "api" else settings.OLLAMA_PRIMARY_MODEL
 
     try:
         async for token in stream(input):

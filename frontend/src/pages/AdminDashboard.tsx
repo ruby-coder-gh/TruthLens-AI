@@ -408,19 +408,19 @@ function ChartsSection({
                   <YAxis stroke="#6b7888" fontSize={12} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                      backgroundColor: 'rgba(29,31,22, 0.85)',
                       backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(100, 120, 170, 0.15)',
+                      border: '1px solid rgba(160,146,104, 0.15)',
                       borderRadius: '8px',
-                      color: '#e6edf3',
+                      color: '#f3efe4',
                     }}
                   />
                   <Line
                     type="monotone"
                     dataKey="queries"
-                    stroke="#7c5cff"
+                    stroke="#e8c15a"
                     strokeWidth={2}
-                    dot={{ fill: '#7c5cff', r: 4 }}
+                    dot={{ fill: '#e8c15a', r: 4 }}
                     activeDot={{ r: 6 }}
                   />
                 </LineChart>
@@ -467,16 +467,16 @@ function ChartsSection({
                   <YAxis stroke="#6b7888" fontSize={12} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: 'rgba(27, 34, 48, 0.85)',
+                      backgroundColor: 'rgba(29,31,22, 0.85)',
                       backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(100, 120, 170, 0.15)',
+                      border: '1px solid rgba(160,146,104, 0.15)',
                       borderRadius: '8px',
-                      color: '#e6edf3',
+                      color: '#f3efe4',
                     }}
                   />
                   <Bar
                     dataKey="count"
-                    fill="#2dd4bf"
+                    fill="#e8c15a"
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>

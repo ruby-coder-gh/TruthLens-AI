@@ -34,12 +34,12 @@ function BorderBeam() {
       <motion.span
         className="absolute inset-0 rounded-xl"
         style={{
-          background: 'conic-gradient(from 0deg, transparent, rgba(139,92,246,0.5), rgba(34,211,238,0.5), rgba(59,130,246,0.5), transparent)',
+          background: 'conic-gradient(from 0deg, transparent, rgba(232,193,90,0.55), rgba(91,185,138,0.5), rgba(214,85,59,0.4), transparent)',
         }}
         animate={{ rotate: 360 }}
         transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
       />
-      <span className="absolute inset-[1px] rounded-[11px] bg-[#0a0e17]" />
+      <span className="absolute inset-[1px] rounded-[11px] bg-[#14150f]" />
     </motion.span>
   );
 }
@@ -122,7 +122,9 @@ export default function PremiumButton({
         'disabled:cursor-not-allowed disabled:opacity-50',
         sizeStyles[size],
         variant === 'primary' && [
-          'text-white',
+          // PremiumButton insets an ink panel (BorderBeam) over the manila
+          // gradient, so its visible surface is dark — use light text, not ink.
+          'text-text',
           !loading && !success && 'shadow-lg',
         ],
         variant === 'secondary' && 'glass text-text hover:bg-card-hover',
@@ -132,12 +134,12 @@ export default function PremiumButton({
       style={
         variant === 'primary' && !loading && !success
           ? {
-              background: 'linear-gradient(135deg, #8B5CF6, #3B82F6, #22D3EE)',
+              background: 'linear-gradient(135deg, #f1d689, #e8c15a, #c89f3c)',
               backgroundSize: '200% 200%',
-              boxShadow: '0 4px 24px rgba(139,92,246,0.3)',
+              boxShadow: '0 4px 24px rgba(232,193,90,0.3)',
             }
           : variant === 'primary' && loading
-          ? { background: 'linear-gradient(135deg, #8B5CF6, #3B82F6)' }
+          ? { background: 'linear-gradient(135deg, #f1d689, #e8c15a)' }
           : {}
       }
     >
@@ -146,7 +148,7 @@ export default function PremiumButton({
         <motion.span
           className="absolute inset-0 rounded-xl"
           style={{
-            background: 'linear-gradient(135deg, #8B5CF6, #3B82F6, #22D3EE, #8B5CF6)',
+            background: 'linear-gradient(135deg, #f1d689, #e8c15a, #c89f3c, #f1d689)',
             backgroundSize: '300% 300%',
           }}
           animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
@@ -200,7 +202,7 @@ export default function PremiumButton({
         <motion.span
           className="absolute inset-0 rounded-xl opacity-0"
           style={{
-            boxShadow: '0 0 30px rgba(139,92,246,0.4), 0 0 60px rgba(59,130,246,0.2)',
+            boxShadow: '0 0 30px rgba(232,193,90,0.4), 0 0 60px rgba(91,185,138,0.2)',
           }}
           whileHover={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
