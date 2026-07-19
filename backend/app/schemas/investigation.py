@@ -1,47 +1,63 @@
-"""Investigation schemas."""
+"""Schemas for durable investigation cases and analyst review."""
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_serializer
+
+from app.schemas._datetime import utc_iso
 
 
 class InvestigationRequest(BaseModel):
-    """Request to run an investigation."""
-    query: str
-    workspace_id: str
-    top_k: int = 10
+    """Body for an investigation; workspace identity is always supplied by the URL."""
+
+    query: str = Field(min_length=1, max_length=20_000)
+    top_k: int = Field(default=10, ge=1, le=50)
     filters: dict[str, Any] | None = None
 
 
-class SubQuestionResult(BaseModel):
-    """Result of a sub-question investigation."""
+class InvestigationReviewUpdate(BaseModel):
+    """A durable reviewer disposition for a case."""
+
+    review_status: Literal["draft", "in_review", "approved", "needs_changes"]
+    review_note: str | None = Field(default=None, max_length=10_000)
+
+
+class InvestigationSummary(BaseModel):
     id: str
-    question: str
-    purpose: str
-    partial_answer: str
-    citations: list[dict[str, Any]] = []
+    workspace_id: str
+    query: str
     trust_score: float | None = None
-    guardrail_passed: bool = True
-    latency_ms: int = 0
+    review_status: str
+    created_at: datetime
+    updated_at: datetime
 
-
-class ReasoningStepResult(BaseModel):
-    """A step in the reasoning trace."""
-    phase: str
-    title: str
-    description: str
-    details: dict[str, Any] = {}
-    timestamp_ms: int = 0
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
 
 
 class InvestigationResponse(BaseModel):
-    """Response from an investigation."""
+    """An immutable report snapshot plus its current review metadata."""
+
+    id: str
+    workspace_id: str
+    query: str
     final_report: str
     trust_score: float | None = None
-    trust_components: dict[str, Any] = {}
-    reasoning_trace: list[dict[str, Any]] = []
-    sub_questions: list[dict[str, Any]] = []
+    trust_components: dict[str, Any] = Field(default_factory=dict)
+    reasoning_trace: list[dict[str, Any]] = Field(default_factory=list)
+    sub_questions: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: int = 0
     error: str | None = None
+    review_status: str = "draft"
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_updated_at = field_serializer("updated_at")(utc_iso)
+    _serialize_reviewed_at = field_serializer("reviewed_at")(utc_iso)

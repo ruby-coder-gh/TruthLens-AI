@@ -373,14 +373,16 @@ def _investigate_node(state: InvestigationState) -> dict:
     if not sub_questions:
         return {"error": "No sub-questions to investigate"}
 
-    loop = asyncio.get_event_loop()
+    # The graph runs in FastAPI's worker thread. That thread has no implicit
+    # event loop on modern Python, so own a short-lived loop for the concurrent
+    # retrieval/generation work instead of relying on get_event_loop().
+    async def run_sub_questions() -> list[dict[str, Any]]:
+        return await asyncio.gather(*[
+            _investigate_sub_question(sq, workspace_id, top_k, filters)
+            for sq in sub_questions
+        ])
 
-    # Process all sub-questions concurrently
-    tasks = [
-        _investigate_sub_question(sq, workspace_id, top_k, filters)
-        for sq in sub_questions
-    ]
-    results = loop.run_until_complete(asyncio.gather(*tasks))
+    results = asyncio.run(run_sub_questions())
 
     # Update sub_questions with results
     result_map = {r["id"]: r for r in results}
@@ -535,8 +537,7 @@ def _trust_score_node(state: InvestigationState) -> dict:
         details=f"Aggregate across {len(sub_questions)} sub-questions: {guardrail_passed_count}/{len(sub_questions)} passed",
     )
 
-    loop = asyncio.get_event_loop()
-    trust: TrustScoreComponents = loop.run_until_complete(
+    trust: TrustScoreComponents = asyncio.run(
         compute_trust(
             retrieval_results=all_retrieval_results,
             guardrail_result=agg_guardrail,

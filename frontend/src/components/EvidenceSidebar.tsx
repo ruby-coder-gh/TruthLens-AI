@@ -238,9 +238,40 @@ const SourceCard = memo(function SourceCard({
   const docName = useMemo(() => source.document_name || source.document_id.slice(0, 8) + '...' || `Source ${index + 1}`, [source.document_name, source.document_id, index]);
   const fileExt = useMemo(() => docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC', [docName]);
 
-  const handleCopyCitation = () => {
-    navigator.clipboard.writeText(`[${index + 1}] ${docName}: ${source.excerpt.slice(0, 200)}...`);
-    addToast('Citation copied', 'info');
+  const handleCopyCitation = async () => {
+    try {
+      await navigator.clipboard.writeText(`[${index + 1}] ${docName}${source.page_number ? `, p. ${source.page_number}` : ''}: ${source.excerpt.slice(0, 200)}...`);
+      addToast('Citation copied', 'info');
+    } catch {
+      addToast('Could not copy the citation. Check browser permissions.', 'error');
+    }
+  };
+
+  const handleCopyExcerpt = async () => {
+    try {
+      await navigator.clipboard.writeText(source.excerpt || '');
+      addToast('Evidence excerpt copied', 'info');
+    } catch {
+      addToast('Could not copy the evidence excerpt.', 'error');
+    }
+  };
+
+  const handleExportEvidence = () => {
+    const evidencePackage = [
+      `Evidence ${index + 1}: ${docName}`,
+      source.page_number ? `Page: ${source.page_number}` : '',
+      `Relevance: ${relevancePct}%`,
+      `Confidence: ${confidencePct}%`,
+      '',
+      source.excerpt || '',
+    ].filter(Boolean).join('\n');
+    const url = URL.createObjectURL(new Blob([evidencePackage], { type: 'text/markdown;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${docName.replace(/[^a-z0-9._-]/gi, '-') || 'evidence'}-evidence.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+    addToast('Evidence package exported', 'success');
   };
 
   return (
@@ -445,16 +476,16 @@ const SourceCard = memo(function SourceCard({
             animate={{ opacity: 1 }}
             className="flex flex-wrap gap-1.5 pt-1"
           >
-            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); }}>
-              <Eye size={12} /> View
+            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void handleCopyExcerpt(); }}>
+              <Eye size={12} /> Copy excerpt
             </Button>
-            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); }}>
-              <Target size={12} /> Jump to Match
+            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onToggle(); }}>
+              <Target size={12} /> Focus evidence
             </Button>
-            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleCopyCitation(); }}>
+            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void handleCopyCitation(); }}>
               <Quote size={12} /> Cite
             </Button>
-            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); }}>
+            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleExportEvidence(); }}>
               <Download size={12} /> Export
             </Button>
           </motion.div>
@@ -462,7 +493,7 @@ const SourceCard = memo(function SourceCard({
       </div>
     </motion.div>
   );
-}
+});
 
 // ─── AI Reasoning Tab ────────────────────────────────────────────────────────
 
@@ -952,7 +983,6 @@ export default function EvidenceSidebar({
   onRephrase,
   onExpandScope,
 }: EvidenceSidebarProps) {
-  const effectiveTrust = trustScore ?? 0;
   const currentTab = activeTab ?? 'sources';
   const sourceCount = sources.length;
 
@@ -984,7 +1014,7 @@ export default function EvidenceSidebar({
                   <h3 className="text-xs font-semibold text-text">
                     Evidence
                   </h3>
-                  <StatusBadge trustScore={effectiveTrust} isLoading={isLoading} hasError={hasError} />
+                  <StatusBadge trustScore={trustScore} isLoading={isLoading} hasError={hasError} />
                 </div>
                 <motion.button
                   type="button"

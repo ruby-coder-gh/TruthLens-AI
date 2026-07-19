@@ -15,6 +15,8 @@ import type {
   AuditLogEntry,
   InvestigationRequest,
   InvestigationResponse,
+  InvestigationSummary,
+  InvestigationReviewUpdate,
   PaginatedResponse,
   ListResponse,
   CreateWorkspaceRequest,
@@ -305,7 +307,7 @@ export const documentApi = {
   delete: (workspaceId: string, documentId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}`, { method: 'DELETE' }),
 
-  listAll: (params?: { status?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
+  listAll: (params?: { status?: string; search?: string; file_type?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
     request(`/documents${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   reindex: (workspaceId: string, docId: string): Promise<void> =>
@@ -468,6 +470,15 @@ export const collectionApi = {
 export const investigationApi = {
   run: (workspaceId: string, data: InvestigationRequest): Promise<InvestigationResponse> =>
     request(`/workspaces/${workspaceId}/investigate`, { method: 'POST', body: JSON.stringify(data) }),
+
+  list: (workspaceId: string, params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<InvestigationSummary>> =>
+    request(`/workspaces/${workspaceId}/investigations${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  get: (workspaceId: string, investigationId: string): Promise<InvestigationResponse> =>
+    request(`/workspaces/${workspaceId}/investigations/${investigationId}`),
+
+  review: (workspaceId: string, investigationId: string, data: InvestigationReviewUpdate): Promise<InvestigationResponse> =>
+    request(`/workspaces/${workspaceId}/investigations/${investigationId}/review`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 // ─── Unified API object ─────────────────────────────────────────────────────

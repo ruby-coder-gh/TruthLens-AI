@@ -92,6 +92,8 @@ const ACTION_FILTERS: ActionFilterOption[] = [
   { value: 'document.upload', label: 'Document upload' },
   { value: 'document.delete', label: 'Document delete' },
   { value: 'document.reindex', label: 'Document reindex' },
+  { value: 'investigation.create', label: 'Investigation created' },
+  { value: 'investigation.review_update', label: 'Investigation review updated' },
   { value: 'collection.create', label: 'Collection create' },
   { value: 'collection.delete', label: 'Collection delete' },
 ];
@@ -1083,28 +1085,24 @@ export default function AdminDashboard() {
             label="Total Users"
             value={stats.total_users}
             gradient="bg-gradient-to-br from-primary/80 to-primary-dark/80"
-            trend={{ direction: 'up', percent: 12 }}
           />
           <StatCard
             icon={<FolderOpen size={22} className="text-white" />}
             label="Total Workspaces"
             value={stats.total_workspaces}
             gradient="bg-gradient-to-br from-accent/80 to-accent/60"
-            trend={{ direction: 'up', percent: 8 }}
           />
           <StatCard
             icon={<FileText size={22} className="text-white" />}
             label="Total Documents"
             value={stats.total_documents}
             gradient="bg-gradient-to-br from-accent-2/80 to-accent-2/60"
-            trend={{ direction: 'up', percent: 15 }}
           />
           <StatCard
             icon={<MessageSquare size={22} className="text-white" />}
             label="Total Queries"
             value={stats.total_queries}
             gradient="bg-gradient-to-br from-gold/70 to-gold/50"
-            trend={{ direction: 'up', percent: 23 }}
           />
         </motion.div>
 
