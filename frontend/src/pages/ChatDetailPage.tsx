@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useCallback, useState, useEffect } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MessageSquare, Clock, Shield, FileText, ExternalLink } from 'lucide-react';
-import { Button, Card, Badge, LoadingSpinner } from '../components/ui';
+import { ArrowLeft, MessageSquare, Clock, Shield, FileText, ExternalLink, GitCompareArrows } from 'lucide-react';
+import { Button, Card, Badge, LoadingSpinner, ProgressBar } from '../components/ui';
 import { pageTransition, staggerItem } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { queryApi } from '../api/client';
-import type { QueryDetail, Source } from '../api/types';
+import type { QueryDetail, Source, QueryComparison } from '../api/types';
+import AnswerComparison from '../components/AnswerComparison';
+import AnnotationThread from '../components/AnnotationThread';
 import { getRelevanceMeta, getTrustBadgeColor } from '../utils/relevance';
 
 function formatDate(iso: string): string {
@@ -16,9 +18,13 @@ function formatDate(iso: string): string {
 
 export default function ChatDetailPage() {
   const { queryId } = useParams<{ queryId: string }>();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<QueryDetail | null>(null);
+  const [comparison, setComparison] = useState<QueryComparison | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!queryId) return;
@@ -32,6 +38,28 @@ export default function ChatDetailPage() {
         setLoading(false);
       });
   }, [queryId]);
+
+  const runComparison = useCallback(async () => {
+    if (!query || comparing) return;
+    setComparing(true);
+    setComparisonError(null);
+    try {
+      const result = await queryApi.compare(query.workspace_id, query.id);
+      setComparison(result);
+    } catch (err) {
+      setComparisonError(err instanceof Error ? err.message : 'Could not re-run the comparison.');
+    } finally {
+      setComparing(false);
+    }
+  }, [query, comparing]);
+
+  useEffect(() => {
+    if (query && searchParams.get('compare') === 'true' && !comparison && !comparing) {
+      const timer = window.setTimeout(() => { void runComparison(); }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [query, searchParams, comparison, comparing, runComparison]);
 
   if (loading) {
     return <LoadingSpinner text="Loading chat detail..." />;
@@ -165,6 +193,22 @@ export default function ChatDetailPage() {
         </Card>
       </motion.div>
 
+      <motion.div variants={staggerItem}>
+        <AnnotationThread workspaceId={query.workspace_id} queryId={query.id} label="Answer comments" />
+      </motion.div>
+
+      <motion.div variants={staggerItem}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="secondary" loading={comparing} onClick={() => void runComparison()}>
+            <GitCompareArrows size={14} /> Re-run comparison
+          </Button>
+          {comparing && <div className="min-w-[220px] flex-1"><ProgressBar value={65} size="sm" label="Retrieving current evidence, generating, and scoring…" /></div>}
+        </div>
+        {comparisonError && <p className="mt-2 text-xs text-red">{comparisonError}</p>}
+      </motion.div>
+
+      {comparison && <motion.div variants={staggerItem}><AnswerComparison comparison={comparison} /></motion.div>}
+
       {/* Sources */}
       {sources.length > 0 && (
         <motion.div variants={staggerItem}>
@@ -182,6 +226,7 @@ export default function ChatDetailPage() {
                     <Badge color={getRelevanceMeta(s.relevance_score).badgeColor}>{(s.relevance_score * 100).toFixed(0)}%</Badge>
                   </div>
                   <p className="text-xs text-text-dim line-clamp-2">{s.excerpt}</p>
+                  {s.chunk_id && <AnnotationThread workspaceId={query.workspace_id} queryId={query.id} sourceId={s.chunk_id} label="Source comments" compact />}
                 </div>
               ))}
             </div>

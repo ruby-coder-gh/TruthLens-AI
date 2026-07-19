@@ -1,0 +1,49 @@
+"""Schemas for the confidence-based query review queue."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_serializer
+
+from app.schemas._datetime import utc_iso
+
+ReviewDisposition = Literal["needs_review", "reviewed", "dismissed"]
+
+
+class ReviewQueueUpdate(BaseModel):
+    review_status: ReviewDisposition
+    review_note: str | None = Field(default=None, max_length=10_000)
+
+
+class ReviewQueueSettingsUpdate(BaseModel):
+    review_queue_enabled: bool
+
+
+class ReviewQueueSettingsResponse(BaseModel):
+    review_queue_enabled: bool
+
+
+class ReviewQueueCountResponse(ReviewQueueSettingsResponse):
+    count: int
+
+
+class ReviewQueueItem(BaseModel):
+    id: str
+    workspace_id: str
+    query_text: str
+    response_text: str | None = None
+    response_sources: list[dict[str, Any]] = Field(default_factory=list)
+    trust_score: float | None = None
+    trust_components: dict[str, Any] = Field(default_factory=dict)
+    guardrail_score: float | None = None
+    guardrail_passed: bool | None = None
+    review_status: ReviewDisposition
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_reviewed_at = field_serializer("reviewed_at")(utc_iso)

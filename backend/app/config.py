@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     TRUST_RELEVANCE_WEIGHT: float = 0.2
     TRUST_SOURCE_WEIGHT: float = 0.1
 
+    # ─── Human Review Queue ───────────────────
+    REVIEW_QUEUE_TRUST_THRESHOLD: float = 0.5
+    QUERY_PIN_LIMIT: int = 20
+
     # ─── Evaluation ───────────────────────────
     EVAL_MIN_FAITHFULNESS: float = 0.6
     EVAL_MIN_TRUST: float = 0.5

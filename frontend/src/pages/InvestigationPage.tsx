@@ -98,6 +98,7 @@ export default function InvestigationPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [reviewStatus, setReviewStatus] = useState<InvestigationReviewStatus>('draft');
   const [reviewNote, setReviewNote] = useState('');
+  const [exportingAuditBundle, setExportingAuditBundle] = useState(false);
 
   const runMutation = useMutation({
     mutationFn: () => investigationApi.run(workspaceId!, { query: query.trim(), top_k: topK }),
@@ -158,6 +159,25 @@ export default function InvestigationPage() {
     addToast('Evidence-backed case file exported.', 'success');
   };
 
+  const exportAuditBundle = async () => {
+    if (!result || !workspaceId) return;
+    setExportingAuditBundle(true);
+    try {
+      const { blob, filename } = await investigationApi.exportAuditBundle(workspaceId, result.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      addToast('Audit bundle downloaded and export logged to the audit trail.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Could not prepare the audit bundle.', 'error');
+    } finally {
+      setExportingAuditBundle(false);
+    }
+  };
+
   const shareCase = async () => {
     if (!result) return;
     try {
@@ -203,7 +223,7 @@ export default function InvestigationPage() {
 
           {result && !isLoading && (
             <motion.div className="space-y-6" variants={staggerContainer} initial="initial" animate="animate">
-              <motion.div variants={staggerItem}><CaseControlBar result={result} onCopy={copyReport} onExport={exportReport} onShare={shareCase} /></motion.div>
+              <motion.div variants={staggerItem}><CaseControlBar result={result} onCopy={copyReport} onExport={exportReport} onAuditExport={() => void exportAuditBundle()} exportingAuditBundle={exportingAuditBundle} onShare={shareCase} /></motion.div>
               {result.error ? <motion.div variants={staggerItem}><Card className="border-red/30 bg-red/5 p-5"><p className="text-sm font-medium text-red">Case saved with an execution error</p><p className="mt-1 text-sm text-text-muted">{result.error}</p></Card></motion.div> : <motion.div variants={staggerItem}><FinalReportCard report={result.final_report} /></motion.div>}
               <motion.div variants={staggerItem}><ReviewWorkflowCard status={reviewStatus} note={reviewNote} onStatusChange={setReviewStatus} onNoteChange={setReviewNote} onSave={() => reviewMutation.mutate()} saving={reviewMutation.isPending} /></motion.div>
               <motion.div variants={staggerItem}><EvidenceRegister citations={citations} /></motion.div>
@@ -219,8 +239,8 @@ export default function InvestigationPage() {
   );
 }
 
-function CaseControlBar({ result, onCopy, onExport, onShare }: { result: InvestigationResponse; onCopy: () => void; onExport: () => void; onShare: () => void }) {
-  return <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-text-dim">Case file</p><p className="mt-1 font-mono text-xs text-text-muted">{result.id}</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" size="sm" onClick={onCopy}><Copy size={14} /> Copy</Button><Button variant="secondary" size="sm" onClick={onExport}><Download size={14} /> Export .md</Button><Button variant="secondary" size="sm" onClick={onShare}><Share2 size={14} /> Share reference</Button></div></Card>;
+function CaseControlBar({ result, onCopy, onExport, onAuditExport, exportingAuditBundle, onShare }: { result: InvestigationResponse; onCopy: () => void; onExport: () => void; onAuditExport: () => void; exportingAuditBundle: boolean; onShare: () => void }) {
+  return <Card className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-text-dim">Case file</p><p className="mt-1 font-mono text-xs text-text-muted">{result.id}</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" size="sm" onClick={onCopy}><Copy size={14} /> Copy</Button><Button variant="secondary" size="sm" onClick={onExport}><Download size={14} /> Export .md</Button><Button size="sm" loading={exportingAuditBundle} onClick={onAuditExport}><ShieldCheck size={14} /> {exportingAuditBundle ? 'Preparing export…' : 'Export Audit Bundle'}</Button><Button variant="secondary" size="sm" onClick={onShare}><Share2 size={14} /> Share reference</Button></div></Card>;
 }
 
 function FinalReportCard({ report }: { report: string }) {
