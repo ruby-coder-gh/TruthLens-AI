@@ -1,27 +1,46 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, File, FileSpreadsheet, FileImage, Search, Clock, Upload, Loader2 } from 'lucide-react';
-import { Card, Badge, Modal, LoadingSpinner, EmptyState, Button, Input } from '../components/ui';
-import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
+import {
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  File,
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Search,
+  Upload,
+} from 'lucide-react';
+import { Badge, Button, Card, EmptyState, Input, LoadingSpinner, Modal } from '../components/ui';
+import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { useToast } from '../components/toast-context';
 import { documentApi, workspaceApi } from '../api/client';
-import type { Document } from '../api/types';
+import type { Document, PaginatedResponse } from '../api/types';
 
-const DOCUMENT_TYPE_FILTERS = ['All', 'PDF', 'DOCX', 'TXT'] as const;
+const DOCUMENT_TYPE_FILTERS = ['All', 'PDF', 'DOCX', 'TXT', 'MD', 'CSV', 'JSON'] as const;
+const PAGE_SIZE = 20;
+
+type DocumentTypeFilter = typeof DOCUMENT_TYPE_FILTERS[number];
 
 function getFileIcon(mime: string) {
   if (mime.includes('pdf')) return <FileText size={20} />;
-  if (mime.includes('spreadsheet') || mime.includes('excel')) return <FileSpreadsheet size={20} />;
-  if (mime.includes('image')) return <FileImage size={20} />;
+  if (mime.includes('csv') || mime.includes('spreadsheet') || mime.includes('excel')) return <FileSpreadsheet size={20} />;
   return <File size={20} />;
 }
 
-function getFileType(mime: string): string {
+function getFileType(mime: string, filename = ''): string {
+  const extension = filename.split('.').pop()?.toUpperCase();
+  if (extension && ['PDF', 'DOCX', 'TXT', 'MD', 'CSV', 'JSON'].includes(extension)) return extension;
   if (mime.includes('pdf')) return 'PDF';
   if (mime.includes('docx') || mime.includes('document')) return 'DOCX';
-  if (mime.includes('txt')) return 'TXT';
+  if (mime.includes('markdown')) return 'MD';
+  if (mime.includes('csv')) return 'CSV';
+  if (mime.includes('json')) return 'JSON';
+  if (mime.includes('text')) return 'TXT';
   return mime.split('/').pop()?.toUpperCase() || 'FILE';
 }
 
@@ -37,6 +56,7 @@ function formatDate(iso: string): string {
 
 function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
   switch (status) {
+    case 'ready':
     case 'indexed': return 'green';
     case 'pending': return 'orange';
     case 'failed': return 'red';
@@ -45,48 +65,65 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
   }
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────────
+function documentRange(meta: PaginatedResponse<Document>['meta'] | null): string {
+  if (!meta || meta.total === 0) return 'No documents';
+  const start = (meta.page - 1) * meta.page_size + 1;
+  const end = Math.min(meta.total, start + meta.page_size - 1);
+  return `Showing ${start}–${end} of ${meta.total}`;
+}
 
 export default function DocumentsBrowsePage() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('All');
+  const [typeFilter, setTypeFilter] = useState<DocumentTypeFilter>('All');
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [meta, setMeta] = useState<PaginatedResponse<Document>['meta'] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  // Uploads are workspace-scoped (`documentApi.upload(workspaceId, file)`), and
-  // this page has no workspace context of its own (it lists documents across
-  // every workspace) — so "Select File" resolves the caller's real workspace(s)
-  // and hands off to the workspace's own Documents tab, which already has a
-  // working upload flow, instead of guessing/hardcoding a workspace id.
   const [resolvingWorkspace, setResolvingWorkspace] = useState(false);
 
   useEffect(() => {
-    documentApi.listAll()
-      .then((result) => {
-        setDocuments(result.data || []);
-        setLoading(false);
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      setLoading(true);
+      documentApi.listAll({
+        page,
+        page_size: PAGE_SIZE,
+        search: search.trim() || undefined,
+        file_type: typeFilter === 'All' ? undefined : typeFilter.toLowerCase(),
       })
-      .catch(() => {
-        setDocuments([]);
-        setLoading(false);
-      });
-  }, []);
+        .then((result) => {
+          if (!active) return;
+          setDocuments(result.data || []);
+          setMeta(result.meta);
+          setLoadError(null);
+        })
+        .catch((error: Error) => {
+          if (!active) return;
+          setLoadError(error.message || 'We could not load the document inventory.');
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+    };
+  }, [page, search, typeFilter, reloadToken]);
+
+  const retryLoad = () => setReloadToken((value) => value + 1);
 
   async function handleSelectFile() {
     setResolvingWorkspace(true);
     try {
       const result = await workspaceApi.list();
       const workspaces = result.data || [];
-      if (workspaces.length === 1) {
-        // Only one workspace — skip the picker and go straight to its Documents
-        // tab (the tab this page's upload flow is mirrored from).
-        navigate(`/workspaces/${workspaces[0].id}`);
-      } else {
-        // Zero or multiple workspaces — let the user pick (or create one).
-        navigate('/workspaces');
-      }
+      navigate(workspaces.length === 1 ? `/workspaces/${workspaces[0].id}` : '/workspaces');
       setUploadModalOpen(false);
     } catch {
       addToast('Failed to load your workspaces. Please try again.', 'error');
@@ -95,173 +132,131 @@ export default function DocumentsBrowsePage() {
     }
   }
 
-  const filtered = documents.filter((doc) => {
-    const matchesSearch = doc.original_filename.toLowerCase().includes(search.toLowerCase());
-    const matchesType = typeFilter === 'All' || getFileType(doc.mime_type) === typeFilter;
-    return matchesSearch && matchesType;
-  });
+  const totalPages = meta ? Math.max(1, Math.ceil(meta.total / meta.page_size)) : 1;
+  const hasFilters = Boolean(search.trim()) || typeFilter !== 'All';
 
   return (
-    <div className="-mx-4 lg:-mx-6 px-4 lg:px-8 xl:px-12">
-      <motion.div
-        className="mx-auto max-w-[1200px] space-y-5 py-6"
-        variants={pageTransition}
-        initial="initial"
-        animate="animate"
-      >
-      <PageShell>
-      {/* Header */}
-      <motion.div variants={staggerItem}>
-        <PageHeader
-          title="Documents"
-          description="Browse all indexed documents."
-          actions={(
-            <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-              <Button onClick={() => setUploadModalOpen(true)} size="md">
-                <Upload size={16} />
-                Upload Document
-              </Button>
+    <div className="-mx-4 px-4 lg:-mx-6 lg:px-8 xl:px-12">
+      <motion.div className="mx-auto max-w-[1280px] space-y-5 py-6" variants={pageTransition} initial="initial" animate="animate">
+        <PageShell>
+          <motion.div variants={staggerItem}>
+            <PageHeader
+              title="Document Intelligence"
+              description="A governed inventory across every workspace you can access. Search, verify ingestion state, and open the owning workspace."
+              actions={(
+                <Button onClick={() => setUploadModalOpen(true)} size="md">
+                  <Upload size={16} /> Upload to workspace
+                </Button>
+              )}
+            />
+          </motion.div>
+
+          <motion.div variants={staggerItem} className="grid gap-3 rounded-2xl border border-primary/15 bg-primary/[0.035] p-4 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <p className="text-sm font-semibold text-text">Workspace-scoped ingestion</p>
+              <p className="mt-1 text-xs text-text-muted">Upload to a workspace to inherit its access controls. PDF, DOCX, TXT, MD, CSV, and JSON are supported up to 50 MB.</p>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setUploadModalOpen(true)}><Upload size={14} /> Choose workspace</Button>
+          </motion.div>
+
+          <motion.div variants={staggerItem} className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="w-full max-w-xl">
+              <Input
+                placeholder="Search every accessible document..."
+                value={search}
+                onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+                icon={<Search size={16} />}
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5" aria-label="Document type filter">
+              {DOCUMENT_TYPE_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => { setTypeFilter(filter); setPage(1); }}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                    typeFilter === filter ? 'border border-primary/20 bg-primary/15 text-primary-soft' : 'glass text-text-muted hover:bg-white/[0.04] hover:text-text'
+                  }`}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+
+          {loadError && (
+            <motion.div variants={staggerItem} role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red/25 bg-red/5 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-text-muted"><AlertCircle size={16} className="text-red" />{loadError}</div>
+              <Button variant="secondary" size="sm" onClick={retryLoad}><RefreshCw size={14} /> Retry</Button>
             </motion.div>
           )}
-        />
-      </motion.div>
 
-      {/* Upload Area — dashed border with glowing hover */}
-      <motion.div
-        variants={staggerItem}
-        onClick={() => setUploadModalOpen(true)}
-        className="relative cursor-pointer group"
-        whileHover={{ scale: 1.01 }}
-        whileTap={{ scale: 0.98 }}
-      >
-        <div className="rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] p-8 text-center transition-all duration-300 group-hover:border-primary/40 group-hover:bg-primary/[0.04] group-hover:shadow-lg group-hover:shadow-primary/10">
-          <motion.div
-            className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary-soft"
-            animate={{ y: [0, -4, 0] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <Upload size={24} />
+          <motion.div variants={staggerItem} className="flex items-center justify-between text-xs text-text-dim">
+            <span>{documentRange(meta)}</span>
+            {loading && documents.length > 0 && <span className="inline-flex items-center gap-1"><Loader2 size={13} className="animate-spin" /> Updating inventory</span>}
           </motion.div>
-          <h3 className="text-base font-semibold text-text group-hover:text-primary-soft transition-colors">
-            Upload new document
-          </h3>
-          <p className="mt-1 text-sm text-text-muted">
-            Drop files here or click to browse. Supports PDF, DOCX, TXT.
-          </p>
-        </div>
-      </motion.div>
 
-      {/* Search & Filters */}
-      <motion.div variants={staggerItem} className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1 max-w-md">
-          <Input
-            placeholder="Search documents..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            icon={<Search size={16} />}
-          />
-        </div>
-        <div className="flex gap-1.5">
-          {DOCUMENT_TYPE_FILTERS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setTypeFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                typeFilter === f
-                  ? 'bg-primary/15 text-primary-soft border border-primary/20'
-                  : 'glass text-text-muted hover:text-text hover:bg-white/[0.04]'
-              }`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Document Grid */}
-      <motion.div
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-        variants={staggerContainer}
-        initial="initial"
-        animate="animate"
-      >
-        {loading ? (
-          <LoadingSpinner text="Loading documents..." />
-        ) : filtered.length === 0 ? (
-          <div className="col-span-full">
-            <EmptyState
-              icon={<FileText size={24} />}
-              title={search ? 'No documents match your search' : 'No documents available'}
-              description={search ? 'Try modifying your search or filters.' : 'Upload a document to start asking questions.'}
-              action={
-                <Button onClick={() => setUploadModalOpen(true)} size="sm">
-                  <Upload size={14} />
-                  Upload Document
-                </Button>
-              }
-            />
-          </div>
-        ) : (
-          filtered.map((doc) => (
-            <motion.div key={doc.id} variants={staggerItem}>
-              <Card hover className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
-                    {getFileIcon(doc.mime_type)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text truncate">{doc.original_filename}</p>
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
-                      <span className="text-xs text-text-dim">{getFileType(doc.mime_type)}</span>
-                      <span className="text-xs text-text-dim">{formatFileSize(doc.file_size)}</span>
-                      {doc.chunk_count != null && (
-                        <span className="text-xs text-text-dim">{doc.chunk_count} chunks</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 mt-2 text-xs text-text-dim">
-                      <Clock size={11} />
-                      {formatDate(doc.created_at)}
+          <motion.div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" variants={staggerContainer} initial="initial" animate="animate">
+            {loading && documents.length === 0 ? (
+              <div className="col-span-full"><LoadingSpinner text="Loading document inventory..." /></div>
+            ) : documents.length === 0 ? (
+              <div className="col-span-full">
+                <EmptyState
+                  icon={<FileText size={24} />}
+                  title={hasFilters ? 'No documents match these filters' : 'No documents available'}
+                  description={hasFilters ? 'Try a different search term or file type.' : 'Upload a document into a workspace to start grounded research.'}
+                  action={<Button onClick={() => setUploadModalOpen(true)} size="sm"><Upload size={14} /> Upload document</Button>}
+                />
+              </div>
+            ) : documents.map((document) => (
+              <motion.button
+                key={document.id}
+                type="button"
+                variants={staggerItem}
+                onClick={() => navigate(`/workspaces/${document.workspace_id}`)}
+                className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-xl"
+              >
+                <Card hover className="h-full p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">{getFileIcon(document.mime_type)}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-text">{document.original_filename}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <Badge color={statusBadgeColor(document.status)}>{document.status === 'ready' ? 'indexed' : document.status}</Badge>
+                        <span className="text-xs text-text-dim">{getFileType(document.mime_type, document.original_filename)}</span>
+                        <span className="text-xs text-text-dim">{formatFileSize(document.file_size)}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2 text-xs text-text-dim">
+                        <span>{document.chunk_count ?? 0} chunks</span><span aria-hidden="true">·</span><span>{formatDate(document.created_at)}</span>
+                      </div>
+                      {document.status === 'failed' && document.error_message && <p className="mt-2 line-clamp-2 text-xs text-red">{document.error_message}</p>}
+                      <div className="mt-3 flex items-center gap-1 text-[11px] text-primary-soft"><Clock size={11} /> Open workspace</div>
                     </div>
                   </div>
-                </div>
-              </Card>
+                </Card>
+              </motion.button>
+            ))}
+          </motion.div>
+
+          {meta && meta.total > 0 && (
+            <motion.div variants={staggerItem} className="flex items-center justify-center gap-3 border-t border-border pt-5">
+              <Button variant="secondary" size="sm" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}><ChevronLeft size={15} /> Previous</Button>
+              <span className="text-xs text-text-muted">Page {page} of {totalPages}</span>
+              <Button variant="secondary" size="sm" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next <ChevronRight size={15} /></Button>
             </motion.div>
-          ))
-        )}
-      </motion.div>
+          )}
 
-      {/* Upload Modal */}
-      <Modal
-        open={uploadModalOpen}
-        onClose={() => setUploadModalOpen(false)}
-        title="Upload Document"
-      >
-        <div className="space-y-4 text-center">
-          <div className="rounded-2xl border-2 border-dashed border-white/10 p-8 hover:border-primary/30 transition-colors">
-            {resolvingWorkspace ? (
-              <Loader2 size={32} className="mx-auto text-primary-soft mb-3 animate-spin" />
-            ) : (
-              <Upload size={32} className="mx-auto text-text-dim mb-3" />
-            )}
-            <p className="text-sm text-text-muted">
-              {resolvingWorkspace ? 'Finding your workspace…' : 'Documents are uploaded into a workspace.'}
-            </p>
-            <p className="text-xs text-text-dim mt-1">PDF, DOCX, TXT up to 50MB</p>
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setUploadModalOpen(false)} disabled={resolvingWorkspace}>
-              Cancel
-            </Button>
-            <Button onClick={handleSelectFile} loading={resolvingWorkspace}>
-              <Upload size={14} />
-              Select File
-            </Button>
-          </div>
-        </div>
-      </Modal>
-      </PageShell>
+          <Modal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} title="Choose upload workspace">
+            <div className="space-y-4 text-center">
+              <div className="rounded-2xl border-2 border-dashed border-white/10 p-8">
+                {resolvingWorkspace ? <Loader2 size={32} className="mx-auto mb-3 animate-spin text-primary-soft" /> : <Upload size={32} className="mx-auto mb-3 text-text-dim" />}
+                <p className="text-sm text-text-muted">{resolvingWorkspace ? 'Finding your workspace…' : 'Documents are governed by the workspace they are uploaded to.'}</p>
+                <p className="mt-1 text-xs text-text-dim">You will choose a file from the workspace document area.</p>
+              </div>
+              <div className="flex justify-end gap-3 pt-2"><Button variant="secondary" onClick={() => setUploadModalOpen(false)} disabled={resolvingWorkspace}>Cancel</Button><Button onClick={handleSelectFile} loading={resolvingWorkspace}><Upload size={14} /> Continue</Button></div>
+            </div>
+          </Modal>
+        </PageShell>
       </motion.div>
     </div>
   );

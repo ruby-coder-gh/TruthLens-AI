@@ -1013,7 +1013,7 @@ const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExam
       </motion.div>
     </motion.div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHAT MESSAGE BUBBLE
@@ -1264,7 +1264,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       </div>
     </motion.div>
   );
-}
+});
 
 // ─── Retry button — shown on cancelled/error bubbles, same action-cluster style ─
 
@@ -1283,7 +1283,7 @@ const RetryButton = memo(function RetryButton({ onClick }: { onClick: () => void
       Retry
     </motion.button>
   );
-}
+});
 
 // ─── Typing Indicator (bouncing dots) ─────────────────────────────────────────
 
@@ -1308,7 +1308,7 @@ const TypingIndicator = memo(function TypingIndicator() {
       ))}
     </div>
   );
-}
+});
 
 // ─── Citation Hover Card — shows source excerpt on hover ─────────────────────
 
@@ -1400,7 +1400,7 @@ const CitationHoverCard = memo(function CitationHoverCard({ source, children }: 
       )}
     </>
   );
-}
+});
 
 // ─── Render message with clickable citation markers ──────────────────────────
 
@@ -1535,7 +1535,7 @@ const GuardrailBadge = memo(function GuardrailBadge({ guardrail }: { guardrail: 
       </div>
     </motion.div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TRUST SCORE RING (Answer Verification Sequence)
@@ -1599,7 +1599,7 @@ const TrustScoreRing = memo(function TrustScoreRing({ score }: { score: number }
       </div>
     </div>
   );
-}
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  TRACE BEAM OVERLAY (Citation Trace Beam)
@@ -1667,4 +1667,4 @@ const TraceBeamOverlay = memo(function TraceBeamOverlay({
       />
     </svg>
   );
-}
+});

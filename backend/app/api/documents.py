@@ -336,6 +336,8 @@ async def delete_document(
 @router.get("/documents", response_model=PaginatedResponse[DocumentResponse])
 async def list_all_documents(
     status: str | None = None,
+    search: str | None = None,
+    file_type: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
@@ -361,6 +363,20 @@ async def list_all_documents(
         if status:
             query = query.where(Document.status == status)
             count_query = count_query.where(Document.status == status)
+
+    # Apply the same controlled filters to the data and count queries. Search
+    # is server-backed, so results on later pages remain discoverable.
+    if search and search.strip():
+        filename_pattern = f"%{search.strip()}%"
+        query = query.where(Document.original_filename.ilike(filename_pattern))
+        count_query = count_query.where(Document.original_filename.ilike(filename_pattern))
+
+    allowed_types = {"pdf", "docx", "txt", "md", "csv", "json"}
+    normalized_type = (file_type or "").lower().lstrip(".")
+    if normalized_type in allowed_types:
+        extension_pattern = f"%.{normalized_type}"
+        query = query.where(func.lower(Document.original_filename).like(extension_pattern))
+        count_query = count_query.where(func.lower(Document.original_filename).like(extension_pattern))
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0

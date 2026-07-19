@@ -9,6 +9,7 @@ from app.models.audit_log import AuditLog
 from app.models.collection import Collection, CollectionAccess
 from app.models.eval_run import EvalRun
 from app.models.comparison import Comparison, ComparisonResult
+from app.models.investigation import Investigation
 
 __all__ = [
     "DeclarativeBase",
@@ -27,4 +28,5 @@ __all__ = [
     "EvalRun",
     "Comparison",
     "ComparisonResult",
+    "Investigation",
 ]

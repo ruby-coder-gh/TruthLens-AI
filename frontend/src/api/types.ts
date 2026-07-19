@@ -159,6 +159,35 @@ export interface AuditLogEntry {
 }
 
 // ─── Investigation ──────────────────────────────────────────────────────────
+export type InvestigationReviewStatus = 'draft' | 'in_review' | 'approved' | 'needs_changes';
+
+export interface InvestigationCitation {
+  text: string;
+  chunk_id: string;
+  start_index?: number;
+  end_index?: number;
+}
+
+export interface InvestigationSubQuestion {
+  id: string;
+  question: string;
+  purpose?: string;
+  partial_answer?: string;
+  citations?: InvestigationCitation[];
+  trust_score?: number;
+  guardrail_passed?: boolean;
+  latency_ms?: number;
+  retrieved_chunks?: Source[];
+}
+
+export interface InvestigationReasoningStep {
+  phase: string;
+  title: string;
+  description: string;
+  details?: Record<string, unknown>;
+  timestamp_ms?: number;
+}
+
 export interface InvestigationRequest {
   query: string;
   top_k?: number;
@@ -166,13 +195,37 @@ export interface InvestigationRequest {
 }
 
 export interface InvestigationResponse {
+  id: string;
+  workspace_id: string;
+  query: string;
   final_report: string;
   trust_score?: number;
   trust_components?: Record<string, number>;
-  reasoning_trace?: string[];
-  sub_questions?: string[];
+  reasoning_trace?: InvestigationReasoningStep[];
+  sub_questions?: InvestigationSubQuestion[];
   latency_ms: number;
   error?: string;
+  review_status: InvestigationReviewStatus;
+  review_note?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestigationSummary {
+  id: string;
+  workspace_id: string;
+  query: string;
+  trust_score?: number;
+  review_status: InvestigationReviewStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvestigationReviewUpdate {
+  review_status: InvestigationReviewStatus;
+  review_note?: string;
 }
 
 // ─── Comparison ──────────────────────────────────────────────────────────────
