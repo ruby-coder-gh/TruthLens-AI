@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     REWRITE_TEMPERATURE: float = 0.2
     REWRITE_MAX_TOKENS: int = 256
 
+    # ─── Query Cache ─────────────────────────
+    QUERY_CACHE_ENABLED: bool = True
+    QUERY_CACHE_TTL_SECONDS: int = 3600
+
     # ─── Trust Score ──────────────────────────
     TRUST_RETRIEVAL_WEIGHT: float = 0.3
     TRUST_FAITHFULNESS_WEIGHT: float = 0.4

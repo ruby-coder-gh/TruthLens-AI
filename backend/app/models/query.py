@@ -18,6 +18,9 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         ForeignKey("users.id"), nullable=True, index=True
     )
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    cache_hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     rewritten_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_sources: Mapped[str | None] = mapped_column(
@@ -40,6 +43,7 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         Index("idx_queries_user", "user_id"),
         Index("idx_queries_created", "created_at"),
         Index("idx_queries_trust_score", "trust_score"),
+        Index("idx_queries_cache_lookup", "workspace_id", "normalized_query", "document_version", "created_at"),
     )
 
     def __repr__(self) -> str:

@@ -5,8 +5,6 @@ import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   ClipboardCheck,
   Copy,
   Download,
@@ -20,12 +18,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Badge, Button, Card, TextArea } from '../components/ui';
+import { ReasoningTimeline } from '../components/ReasoningTimeline';
 import { fadeIn, fadeInScale, fadeInUp, pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { investigationApi } from '../api/client';
 import type {
-  InvestigationReasoningStep,
   InvestigationResponse,
   InvestigationReviewStatus,
   InvestigationSubQuestion,
@@ -198,7 +196,7 @@ export default function InvestigationPage() {
           </motion.div>
 
           <AnimatePresence mode="wait">
-            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file</p><p className="text-xs text-text-muted">Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-gradient-to-r from-primary via-accent to-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card></motion.div>}
+            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit" className="space-y-4"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file</p><p className="text-xs text-text-muted">Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-gradient-to-r from-primary via-accent to-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card><ReasoningTimeline isLoading /></motion.div>}
           </AnimatePresence>
 
           {runError && <Card className="border-red/30 bg-red/5 p-5"><p className="text-sm font-medium text-red">Investigation failed</p><p className="mt-1 text-sm text-text-muted">{runError}</p><Button className="mt-4" variant="secondary" size="sm" onClick={() => runMutation.mutate()}><Search size={14} /> Retry investigation</Button></Card>}
@@ -210,7 +208,7 @@ export default function InvestigationPage() {
               <motion.div variants={staggerItem}><ReviewWorkflowCard status={reviewStatus} note={reviewNote} onStatusChange={setReviewStatus} onNoteChange={setReviewNote} onSave={() => reviewMutation.mutate()} saving={reviewMutation.isPending} /></motion.div>
               <motion.div variants={staggerItem}><EvidenceRegister citations={citations} /></motion.div>
               {result.sub_questions && result.sub_questions.length > 0 && <motion.div variants={staggerItem}><SubQuestionsSection questions={result.sub_questions} /></motion.div>}
-              {result.reasoning_trace && result.reasoning_trace.length > 0 && <motion.div variants={staggerItem}><ReasoningTraceSection trace={result.reasoning_trace} /></motion.div>}
+              <motion.div variants={staggerItem}><ReasoningTimeline trace={result.reasoning_trace} subQuestions={result.sub_questions} /></motion.div>
               {result.trust_score != null && <motion.div variants={staggerItem}><TrustScoreSection score={result.trust_score} components={result.trust_components ?? {}} /></motion.div>}
               <motion.div variants={staggerItem}><MetadataFooter result={result} citationCount={citations.length} /></motion.div>
             </motion.div>
@@ -239,11 +237,6 @@ function EvidenceRegister({ citations }: { citations: Array<{ citation: { text: 
 
 function SubQuestionsSection({ questions }: { questions: InvestigationSubQuestion[] }) {
   return <Card className="space-y-3 p-4 lg:p-6"><div className="flex items-center gap-2 border-b border-border pb-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent"><FileSearch size={18} /></div><h2 className="text-base font-semibold text-text">Research ledger ({questions.length})</h2></div><div className="space-y-2">{questions.map((question, index) => <div key={question.id} className="rounded-xl border border-border bg-bg-soft p-3"><div className="flex flex-wrap items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15 text-xs font-medium text-primary-soft">{index + 1}</span><p className="font-medium text-text">{question.question}</p><Badge color={question.guardrail_passed === false ? 'red' : 'green'} className="ml-auto">{question.guardrail_passed === false ? 'Review evidence' : 'Grounded'}</Badge></div>{question.purpose && <p className="mt-2 text-xs text-text-dim">Purpose: {question.purpose}</p>}{question.partial_answer && <p className="mt-2 text-sm leading-relaxed text-text-muted">{question.partial_answer}</p>}<div className="mt-3 flex flex-wrap gap-3 text-xs text-text-dim"><span>{question.citations?.length ?? 0} cited spans</span>{question.trust_score != null && <span>Trust {(question.trust_score * 100).toFixed(0)}%</span>}{question.latency_ms != null && <span>{formatLatency(question.latency_ms)}</span>}</div></div>)}</div></Card>;
-}
-
-function ReasoningTraceSection({ trace }: { trace: InvestigationReasoningStep[] }) {
-  const [expanded, setExpanded] = useState(false);
-  return <Card className="space-y-3 p-4 lg:p-6"><button type="button" onClick={() => setExpanded((value) => !value)} className="flex w-full items-center justify-between text-left"><div className="flex items-center gap-2"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary-soft"><Network size={18} /></div><div><h2 className="text-base font-semibold text-text">Reasoning and provenance ({trace.length} stages)</h2><p className="text-xs text-text-dim">Operational trace retained with this case.</p></div></div>{expanded ? <ChevronUp size={18} className="text-text-muted" /> : <ChevronDown size={18} className="text-text-muted" />}</button><AnimatePresence initial={false}>{expanded && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="space-y-2 overflow-hidden">{trace.map((step, index) => <div key={`${step.phase}-${index}`} className="rounded-xl border border-border bg-bg-soft p-3"><div className="flex items-center gap-2"><Badge color="blue">{step.phase}</Badge><p className="text-sm font-medium text-text">{step.title}</p></div><p className="mt-2 text-sm text-text-muted">{step.description}</p>{step.details && Object.keys(step.details).length > 0 && <pre className="mt-3 overflow-x-auto rounded-lg bg-black/20 p-3 text-[11px] text-text-dim"><code>{JSON.stringify(step.details, null, 2)}</code></pre>}</div>)}</motion.div>}</AnimatePresence></Card>;
 }
 
 function TrustScoreSection({ score, components }: { score: number; components: Record<string, number> }) {

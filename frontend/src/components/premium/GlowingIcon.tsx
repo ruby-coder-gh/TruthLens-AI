@@ -8,6 +8,7 @@ interface GlowingIconProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
   onClick?: () => void;
+  ariaLabel?: string;
 }
 
 function ParticleBurst({ color }: { color: string }) {
@@ -45,6 +46,7 @@ export default function GlowingIcon({
   size = 'md',
   className,
   onClick,
+  ariaLabel,
 }: GlowingIconProps) {
   const sizeMap = { sm: 28, md: 36, lg: 44 };
   const iconSize = sizeMap[size];
@@ -53,6 +55,7 @@ export default function GlowingIcon({
     <motion.button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       className={clsx(
         'relative flex items-center justify-center rounded-xl transition-all duration-300',
         'cursor-pointer',

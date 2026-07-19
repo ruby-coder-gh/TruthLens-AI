@@ -145,6 +145,8 @@ export interface AdminStats {
   avg_trust_score?: number;
   avg_rating?: number;
   total_feedback: number;
+  query_cache_hits: number;
+  query_cache_hit_rate?: number;
 }
 
 export interface AuditLogEntry {
@@ -325,6 +327,7 @@ export interface WSComplete {
   latency_ms: number;
   model_used: string;
   token_count: number;
+  from_cache?: boolean;
 }
 
 export interface WSError {

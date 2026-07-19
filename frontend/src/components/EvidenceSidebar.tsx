@@ -8,7 +8,7 @@
  * Design tokens: Case File warm archival glass, manila evidence tags, backdrop blur, Framer Motion.
  */
 
-import { useEffect, useRef, memo, useMemo } from 'react';
+import { useEffect, useRef, memo, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -40,6 +40,7 @@ import {
 } from './ui';
 import { useToast } from './toast-context';
 import { staggerContainer, staggerItem } from './motion';
+import { ReportBuilderWizard } from './ReportBuilderWizard';
 import type { Source } from '../api/types';
 import { getRelevanceMeta, relevancePercent } from '../utils/relevance';
 
@@ -256,24 +257,6 @@ const SourceCard = memo(function SourceCard({
     }
   };
 
-  const handleExportEvidence = () => {
-    const evidencePackage = [
-      `Evidence ${index + 1}: ${docName}`,
-      source.page_number ? `Page: ${source.page_number}` : '',
-      `Relevance: ${relevancePct}%`,
-      `Confidence: ${confidencePct}%`,
-      '',
-      source.excerpt || '',
-    ].filter(Boolean).join('\n');
-    const url = URL.createObjectURL(new Blob([evidencePackage], { type: 'text/markdown;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${docName.replace(/[^a-z0-9._-]/gi, '-') || 'evidence'}-evidence.md`;
-    link.click();
-    URL.revokeObjectURL(url);
-    addToast('Evidence package exported', 'success');
-  };
-
   return (
     <motion.div
       layout
@@ -484,9 +467,6 @@ const SourceCard = memo(function SourceCard({
             </Button>
             <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void handleCopyCitation(); }}>
               <Quote size={12} /> Cite
-            </Button>
-            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleExportEvidence(); }}>
-              <Download size={12} /> Export
             </Button>
           </motion.div>
         )}
@@ -892,6 +872,7 @@ function SourcesPanel({
   onUploadDocuments,
   onRephrase,
   onExpandScope,
+  onBuildReport,
 }: {
   sources: Source[];
   isLoading: boolean;
@@ -902,6 +883,7 @@ function SourcesPanel({
   onUploadDocuments?: () => void;
   onRephrase?: () => void;
   onExpandScope?: () => void;
+  onBuildReport: () => void;
 }) {
   // Skeletons while retrieving with nothing to show yet.
   if (isLoading && sources.length === 0) {
@@ -932,6 +914,10 @@ function SourcesPanel({
       initial="initial"
       animate="animate"
     >
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5">
+        <div><p className="text-xs font-semibold text-text">Evidence package</p><p className="mt-0.5 text-[11px] text-text-dim">Select and export cited passages.</p></div>
+        <Button size="sm" variant="ghost" onClick={onBuildReport}><Download size={12} /> Build report</Button>
+      </div>
       {/* Streaming shimmer — more evidence may still arrive */}
       {isStreaming && (
         <div className="space-y-1.5 px-1 pb-1">
@@ -985,9 +971,11 @@ export default function EvidenceSidebar({
 }: EvidenceSidebarProps) {
   const currentTab = activeTab ?? 'sources';
   const sourceCount = sources.length;
+  const [reportBuilderOpen, setReportBuilderOpen] = useState(false);
 
   return (
-    <AnimatePresence>
+    <>
+      <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
           initial={{ x: '100%' }}
@@ -1081,6 +1069,7 @@ export default function EvidenceSidebar({
                   onUploadDocuments={onUploadDocuments}
                   onRephrase={onRephrase}
                   onExpandScope={onExpandScope}
+                  onBuildReport={() => setReportBuilderOpen(true)}
                 />
               ) : (
                 <AIReasoningTab
@@ -1097,6 +1086,8 @@ export default function EvidenceSidebar({
           </div>
         </motion.aside>
       )}
-    </AnimatePresence>
+      </AnimatePresence>
+      <ReportBuilderWizard open={reportBuilderOpen} onClose={() => setReportBuilderOpen(false)} sources={sources} />
+    </>
   );
 }
