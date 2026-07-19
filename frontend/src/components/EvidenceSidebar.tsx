@@ -8,7 +8,7 @@
  * Design tokens: Case File warm archival glass, manila evidence tags, backdrop blur, Framer Motion.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -212,7 +212,7 @@ function ShimmerBar({ width = '100%', delay = 0 }: { width?: string; delay?: num
 
 // ─── Source Card ─────────────────────────────────────────────────────────────
 
-function SourceCard({
+const SourceCard = memo(function SourceCard({
   source,
   index,
   isExpanded,
@@ -228,13 +228,15 @@ function SourceCard({
   streaming: boolean;
 }) {
   const { addToast } = useToast();
-  const relevance = getRelevanceLevel(source.relevance_score || 0);
-  const evidence = getEvidenceBadge(source.relevance_score || 0);
-  const confidencePct = relevancePercent(source.confidence ?? source.relevance_score);
-  const relevancePct = relevancePercent(source.relevance_score);
-  const chunkConfidencePct = relevancePercent(source.confidence);
-  const docName = source.document_name || source.document_id.slice(0, 8) + '...' || `Source ${index + 1}`;
-  const fileExt = docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC';
+  
+  // Memoize computed values to avoid recalculation on every render
+  const relevance = useMemo(() => getRelevanceLevel(source.relevance_score || 0), [source.relevance_score]);
+  const evidence = useMemo(() => getEvidenceBadge(source.relevance_score || 0), [source.relevance_score]);
+  const confidencePct = useMemo(() => relevancePercent(source.confidence ?? source.relevance_score), [source.confidence, source.relevance_score]);
+  const relevancePct = useMemo(() => relevancePercent(source.relevance_score), [source.relevance_score]);
+  const chunkConfidencePct = useMemo(() => relevancePercent(source.confidence), [source.confidence]);
+  const docName = useMemo(() => source.document_name || source.document_id.slice(0, 8) + '...' || `Source ${index + 1}`, [source.document_name, source.document_id, index]);
+  const fileExt = useMemo(() => docName.includes('.') ? docName.split('.').pop()?.toUpperCase() : 'DOC', [docName]);
 
   const handleCopyCitation = () => {
     navigator.clipboard.writeText(`[${index + 1}] ${docName}: ${source.excerpt.slice(0, 200)}...`);

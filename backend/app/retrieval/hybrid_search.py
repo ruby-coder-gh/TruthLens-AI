@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 from typing import Any
-
 
 from app.chroma_client import get_workspace_collection
 from app.config import settings
@@ -35,6 +35,15 @@ class RetrievalResult:
         self.vector_score = vector_score
         self.bm25_score = bm25_score
         self.metadata = metadata or {}
+
+
+# Cache for query embeddings (LRU cache with max 256 queries)
+@lru_cache(maxsize=256)
+def _get_cached_embedding(query: str) -> tuple[float, ...]:
+    """Get cached embedding for a query. Returns tuple for hashability."""
+    model = _load_model()
+    embedding = model.encode([query], normalize_embeddings=True)[0]
+    return tuple(embedding.tolist())
 
 
 def _reciprocal_rank_fusion(
@@ -132,6 +141,7 @@ async def vector_search(
     workspace_id: str,
     top_k: int | None = None,
     filters: dict[str, Any] | None = None,
+    use_cache: bool = True,
 ) -> list[RetrievalResult]:
     """Vector similarity search using ChromaDB.
 
@@ -140,15 +150,21 @@ async def vector_search(
         workspace_id: Workspace UUID.
         top_k: Number of results.
         filters: Optional metadata filter dict.
+        use_cache: Whether to use cached embeddings (default True).
 
     Returns:
         List of RetrievalResult.
     """
     k = top_k or settings.RETRIEVAL_TOP_K
 
-    # Embed query
-    model = await asyncio.to_thread(_load_model)
-    query_embedding = (await asyncio.to_thread(model.encode, [query], normalize_embeddings=True))[0]
+    # Embed query (with caching)
+    if use_cache:
+        # Use cached embedding if available
+        query_embedding_tuple = await asyncio.to_thread(_get_cached_embedding, query)
+        query_embedding = list(query_embedding_tuple)
+    else:
+        model = _load_model()
+        query_embedding = (await asyncio.to_thread(model.encode, [query], normalize_embeddings=True))[0].tolist()
 
     # Search ChromaDB
     collection = await asyncio.to_thread(get_workspace_collection, workspace_id)
@@ -159,7 +175,7 @@ async def vector_search(
             collection.query,
             # chromadb's stub types query_embeddings as ndarray/Sequence; a plain
             # list-of-lists is accepted at runtime.
-            query_embeddings=[query_embedding.tolist()],  # type: ignore[arg-type]
+            query_embeddings=[query_embedding],  # type: ignore[arg-type]
             n_results=k,
             where=where_filter,
             include=["metadatas", "documents", "distances"],

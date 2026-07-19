@@ -13,7 +13,7 @@ from app.database import async_session_factory
 from app.ingestion.chunker import ChunkResult
 from app.ingestion.embedder import EmbeddingResult
 from app.models.chunk import Chunk
-from app.retrieval.bm25_utils import _bm25_tokenizer, _get_bm25_path, _load_bm25_index
+from app.retrieval.bm25_utils import _bm25_tokenizer, _get_bm25_path, _load_bm25_index, clear_bm25_cache
 from app.utils.logger import logger
 
 
@@ -23,12 +23,14 @@ def _save_bm25_index(
     corpus: list[str],
     metadatas: list[dict[str, Any]],
 ) -> None:
-    """Save BM25 corpus+metadata as JSON (safe serialization)."""
+    """Save BM25 corpus+metadata as JSON (safe serialization) and clear cache."""
     index_path = _get_bm25_path(workspace_id)
     index_path.parent.mkdir(parents=True, exist_ok=True)
     data = {"corpus": corpus, "metadatas": metadatas}
     with open(index_path, "w") as f:
         json.dump(data, f)
+    # Clear the cache so subsequent loads get fresh data
+    clear_bm25_cache(workspace_id)
 
 
 async def store(
@@ -136,7 +138,7 @@ async def delete_document(workspace_id: str, document_id: str) -> None:
                 new_index = BM25Okapi([_bm25_tokenizer(doc) for doc in new_corpus])
                 _save_bm25_index(workspace_id, new_index, list(new_corpus), list(new_metadatas))
             else:
-                # All documents removed — clear index
+                # All documents removed — clear index and cache
                 _save_bm25_index(workspace_id, BM25Okapi([]), [], [])
             logger.info("bm25_delete_complete", document_id=document_id)
     except Exception as e:
@@ -152,4 +154,7 @@ async def delete_workspace(workspace_id: str) -> None:
     index_path = _get_bm25_path(workspace_id)
     if index_path.exists():
         index_path.unlink()
+    
+    # Clear the BM25 cache for this workspace
+    clear_bm25_cache(workspace_id)
     logger.info("workspace_index_deleted", workspace_id=workspace_id)

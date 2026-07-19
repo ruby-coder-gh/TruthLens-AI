@@ -51,21 +51,14 @@ class GraphState(TypedDict):
     error: str | None
 
 
-def _retrieve_node(state: GraphState) -> dict:
+async def _retrieve_node(state: GraphState) -> dict:
     """Retrieve relevant chunks via hybrid search + rerank."""
     query_text = state.get("rewritten_query") or state["query"]
     workspace_id = state["workspace_id"]
     top_k = state.get("top_k", settings.RETRIEVAL_TOP_K)
 
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-
-    results = loop.run_until_complete(
-        hybrid_search(query_text, workspace_id, top_k=top_k, filters=state.get("filters"))
-    )
-
-    reranked = loop.run_until_complete(rerank(query_text, results))
+    results = await hybrid_search(query_text, workspace_id, top_k=top_k, filters=state.get("filters"))
+    reranked = await rerank(query_text, results)
 
     contexts = [
         {
@@ -87,21 +80,14 @@ def _retrieve_node(state: GraphState) -> dict:
     }
 
 
-def _rewrite_node(state: GraphState) -> dict:
+async def _rewrite_node(state: GraphState) -> dict:
     """Rewrite query for better retrieval."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    rewritten = loop.run_until_complete(rewrite_query(state["query"]))
+    rewritten = await rewrite_query(state["query"])
     return {"rewritten_query": rewritten}
 
 
-def _generate_node(state: GraphState) -> dict:
+async def _generate_node(state: GraphState) -> dict:
     """Generate answer from retrieved contexts."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-
     contexts = state.get("contexts", [])
     gen_input = GenerationInput(
         query=state["query"],
@@ -109,7 +95,7 @@ def _generate_node(state: GraphState) -> dict:
         contexts=contexts,
     )
 
-    result: GenerationResult = loop.run_until_complete(generate_answer(gen_input))
+    result: GenerationResult = await generate_answer(gen_input)
 
     return {
         "response_text": result.text,
@@ -119,18 +105,12 @@ def _generate_node(state: GraphState) -> dict:
     }
 
 
-def _guardrail_node(state: GraphState) -> dict:
+async def _guardrail_node(state: GraphState) -> dict:
     """Check generated answer for hallucination."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-
     answer = state.get("response_text") or ""
     contexts = state.get("contexts") or []
 
-    guardrail_result: GuardrailResult = loop.run_until_complete(
-        guardrail_check(answer, contexts)
-    )
+    guardrail_result: GuardrailResult = await guardrail_check(answer, contexts)
 
     return {
         "guardrail_result": {
@@ -142,12 +122,8 @@ def _guardrail_node(state: GraphState) -> dict:
     }
 
 
-def _trust_score_node(state: GraphState) -> dict:
+async def _trust_score_node(state: GraphState) -> dict:
     """Compute trust score from all signals."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-
     retrieval_results = state.get("reranked_results") or state.get("retrieval_results") or []
     guardrail_dict = state.get("guardrail_result")
 
@@ -160,12 +136,10 @@ def _trust_score_node(state: GraphState) -> dict:
             details=guardrail_dict.get("details", ""),
         )
 
-    trust: TrustScoreComponents = loop.run_until_complete(
-        compute_trust(
-            retrieval_results=retrieval_results,
-            guardrail_result=guardrail_result,
-            query=state["query"],
-        )
+    trust: TrustScoreComponents = await compute_trust(
+        retrieval_results=retrieval_results,
+        guardrail_result=guardrail_result,
+        query=state["query"],
     )
 
     return {
@@ -191,10 +165,12 @@ def build_query_graph() -> CompiledStateGraph:
     """Build the standard RAG query graph.
 
     Flow: rewrite → retrieve → rerank → generate → guardrail → trust_score
+    
+    Note: All node functions are async for proper non-blocking execution.
     """
     workflow = StateGraph(GraphState)
 
-    # Nodes
+    # Nodes (async functions work with LangGraph's async execution)
     workflow.add_node("rewrite", _rewrite_node)
     workflow.add_node("retrieve", _retrieve_node)
     workflow.add_node("generate", _generate_node)

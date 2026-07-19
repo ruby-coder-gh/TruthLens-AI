@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo, type FormEvent, type KeyboardEvent } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -930,7 +930,7 @@ export default function ChatPage() {
 //  EMPTY CHAT STATE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function EmptyChatState({ onExampleClick }: { onExampleClick: (q: string) => void }) {
+const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExampleClick: (q: string) => void }) {
   return (
     <motion.div
       className="flex h-full flex-col items-center justify-center py-16 text-center"
@@ -1019,7 +1019,7 @@ function EmptyChatState({ onExampleClick }: { onExampleClick: (q: string) => voi
 //  CHAT MESSAGE BUBBLE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function ChatMessageBubble({
+const ChatMessageBubble = memo(function ChatMessageBubble({
   message,
   onCopy,
   onExport,
@@ -1268,7 +1268,7 @@ function ChatMessageBubble({
 
 // ─── Retry button — shown on cancelled/error bubbles, same action-cluster style ─
 
-function RetryButton({ onClick }: { onClick: () => void }) {
+const RetryButton = memo(function RetryButton({ onClick }: { onClick: () => void }) {
   return (
     <motion.button
       type="button"
@@ -1287,7 +1287,7 @@ function RetryButton({ onClick }: { onClick: () => void }) {
 
 // ─── Typing Indicator (bouncing dots) ─────────────────────────────────────────
 
-function TypingIndicator() {
+const TypingIndicator = memo(function TypingIndicator() {
   return (
     <div className="flex items-center gap-1" aria-label="Thinking" role="status">
       {[0, 1, 2].map((i) => (
@@ -1312,7 +1312,7 @@ function TypingIndicator() {
 
 // ─── Citation Hover Card — shows source excerpt on hover ─────────────────────
 
-function CitationHoverCard({ source, children }: { source: Source; children: ReactNode }) {
+const CitationHoverCard = memo(function CitationHoverCard({ source, children }: { source: Source; children: ReactNode }) {
   const [show, setShow] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -1470,8 +1470,9 @@ function renderMessageWithCitations(
 
 // ─── Guardrail badge ─────────────────────────────────────────────────────────
 
-function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
-  const claims = parseGuardrailDetails(guardrail.details);
+const GuardrailBadge = memo(function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
+  // Memoize the parsed claims to avoid re-parsing on every render
+  const claims = useMemo(() => parseGuardrailDetails(guardrail.details), [guardrail.details]);
 
   return (
     <motion.div
@@ -1540,7 +1541,7 @@ function GuardrailBadge({ guardrail }: { guardrail: GuardrailResult }) {
 //  TRUST SCORE RING (Answer Verification Sequence)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function TrustScoreRing({ score }: { score: number }) {
+const TrustScoreRing = memo(function TrustScoreRing({ score }: { score: number }) {
   const [complete, setComplete] = useState(false);
   const size = 32;
   const strokeWidth = 3;
@@ -1604,7 +1605,7 @@ function TrustScoreRing({ score }: { score: number }) {
 //  TRACE BEAM OVERLAY (Citation Trace Beam)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function TraceBeamOverlay({ 
+const TraceBeamOverlay = memo(function TraceBeamOverlay({ 
   startId, 
   targetId, 
   onComplete 
