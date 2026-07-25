@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 
 from app.config import settings
 from app.core.auth import hash_password
+from app.core.refresh_tokens import revoke_all_refresh_tokens
 from app.core.deps import get_current_admin, get_db
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
@@ -449,6 +450,12 @@ async def update_user_status(
         raise NotFoundException("User", user_id)
 
     user.is_active = body.is_active
+    if not user.is_active:
+        await revoke_all_refresh_tokens(
+            db,
+            user_id=user.id,
+            reason="admin_deactivated",
+        )
 
     db.add(AuditLog(
         user_id=current_user.id,
@@ -482,6 +489,11 @@ async def delete_user(
         raise NotFoundException("User", user_id)
 
     user.is_active = False
+    await revoke_all_refresh_tokens(
+        db,
+        user_id=user.id,
+        reason="admin_deactivated",
+    )
 
     db.add(AuditLog(
         user_id=current_user.id,

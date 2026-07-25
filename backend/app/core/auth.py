@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -36,11 +37,24 @@ def create_access_token(user_id: str, role: str) -> str:
     return jwt.encode(payload, settings.APP_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(user_id: str) -> str:
-    """Create long-lived JWT refresh token."""
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+def create_refresh_token(
+    user_id: str,
+    session_id: str | None = None,
+    *,
+    expires_at: datetime | None = None,
+) -> str:
+    """Create a long-lived refresh JWT bound to a server-side session ID.
+
+    Application request flows must create the session record before calling
+    this helper. A generated ID keeps direct unit-test use backward compatible
+    while still ensuring such a token cannot pass refresh-session validation.
+    """
+    expire = expires_at or (
+        datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
+    )
     payload = {
         "sub": user_id,
+        "jti": session_id or str(uuid.uuid4()),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
         "iss": settings.JWT_ISSUER,
@@ -50,19 +64,12 @@ def create_refresh_token(user_id: str) -> str:
 
 
 def decode_token(token: str) -> dict:
-    """Decode and validate a JWT (signature, exp, issuer). Returns the payload.
+    """Decode and validate a JWT (signature, expiry, and issuer).
 
-    Session model — STATELESS by design: no server-side token store, denylist,
-    jti, or token_version. A token is valid until its ``exp`` (access =
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES, refresh = JWT_REFRESH_TOKEN_EXPIRE_DAYS).
-    Accepted trade-off (kept simple given the short 30-min access TTL):
-      - Logout clears the HttpOnly cookies client-side but does NOT revoke an
-        already-issued token — a captured token stays valid until it expires.
-      - Password reset/change does not invalidate live sessions.
-      - Account deactivation IS enforced on the next request (get_current_user
-        re-checks User.is_active against the DB).
-    For true revocation, embed a ``token_version`` in the payload and compare it
-    to a ``User.token_version`` column, bumping it on logout/password-change.
+    Access tokens remain short-lived and stateless. Refresh tokens carry a
+    random ``jti`` that must match an active ``RefreshTokenSession`` database
+    row before it can be exchanged. This enables per-session rotation,
+    logout/password/account revocation, and replay detection.
     """
     try:
         payload = jwt.decode(

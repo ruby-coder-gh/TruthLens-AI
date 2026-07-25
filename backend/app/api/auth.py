@@ -10,14 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.core.auth import (
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    hash_password,
-    verify_password,
+from app.core.auth import create_access_token, decode_token, hash_password, verify_password
+from app.core.refresh_tokens import (
+    RefreshTokenReuseDetected,
+    RefreshTokenSessionError,
+    issue_refresh_token,
+    revoke_all_refresh_tokens,
+    revoke_refresh_token,
+    rotate_refresh_token,
 )
 from app.core.deps import get_current_user, get_db
 from app.core.exceptions import (
@@ -69,7 +72,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         secure=_cookie_secure(),
         samesite="lax",
         max_age=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-        path="/api/auth/refresh",
+        path="/api/auth",
     )
 
 
@@ -83,11 +86,35 @@ def _clear_auth_cookies(response: Response) -> None:
     )
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
+        path="/api/auth",
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+    )
+    # Remove refresh cookies issued before the path was widened for logout.
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
         path="/api/auth/refresh",
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
     )
+
+
+def _refresh_token_unauthorized(message: str = "Invalid refresh token") -> JSONResponse:
+    """Return the standard 401 envelope and remove unusable auth cookies."""
+    error_response = JSONResponse(
+        status_code=401,
+        content={
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": message,
+                "details": {},
+            }
+        },
+    )
+    _clear_auth_cookies(error_response)
+    return error_response
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
@@ -117,7 +144,7 @@ async def register(
 
     # Generate tokens
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    refresh_token = await issue_refresh_token(db, user_id=user.id)
     _set_auth_cookies(response, access_token, refresh_token)
 
     # Audit log
@@ -180,7 +207,7 @@ async def login(
 
     # Generate tokens
     access_token = create_access_token(user.id, user.role)
-    refresh_token = create_refresh_token(user.id)
+    refresh_token = await issue_refresh_token(db, user_id=user.id)
     _set_auth_cookies(response, access_token, refresh_token)
 
     # Audit log
@@ -210,29 +237,75 @@ async def refresh(
     body: RefreshRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Refresh access token using refresh token."""
-    refresh_token = body.refresh_token if body and body.refresh_token else request.cookies.get(REFRESH_COOKIE_NAME)
+    """Rotate a valid refresh session into fresh access and refresh tokens."""
+    refresh_token = (
+        body.refresh_token
+        if body and body.refresh_token
+        else request.cookies.get(REFRESH_COOKIE_NAME)
+    )
     if not refresh_token:
-        raise UnauthorizedException("Missing refresh token")
+        return _refresh_token_unauthorized("Missing refresh token")
 
     try:
         payload = decode_token(refresh_token)
     except Exception:
-        raise UnauthorizedException("Invalid refresh token")
-
-    if payload.get("type") != "refresh":
-        raise UnauthorizedException("Invalid token type")
+        return _refresh_token_unauthorized()
 
     user_id = payload.get("sub")
-    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    token_id = payload.get("jti")
+    if (
+        payload.get("type") != "refresh"
+        or not isinstance(user_id, str)
+        or not isinstance(token_id, str)
+    ):
+        return _refresh_token_unauthorized()
+
+    result = await db.execute(
+        select(User).where(User.id == user_id, User.is_active.is_(True))
+    )
     user = result.scalar_one_or_none()
     if not user:
-        raise UnauthorizedException("User not found")
+        return _refresh_token_unauthorized()
 
-    # Rotate tokens
+    try:
+        new_refresh_token = await rotate_refresh_token(
+            db,
+            user_id=user.id,
+            token_id=token_id,
+        )
+    except RefreshTokenReuseDetected:
+        # This branch returns a response-level 401, so commit revocation before
+        # returning; otherwise a later rollback could undo the reuse response.
+        await revoke_all_refresh_tokens(
+            db,
+            user_id=user.id,
+            reason="refresh_token_reuse_detected",
+        )
+        db.add(
+            AuditLog(
+                user_id=user.id,
+                action="auth.refresh_reuse_detected",
+                resource_type="user",
+                resource_id=user.id,
+            )
+        )
+        await db.commit()
+        return _refresh_token_unauthorized(
+            "Refresh token is no longer valid; please sign in again"
+        )
+    except RefreshTokenSessionError:
+        return _refresh_token_unauthorized()
+
     access_token = create_access_token(user.id, user.role)
-    new_refresh_token = create_refresh_token(user.id)
     _set_auth_cookies(response, access_token, new_refresh_token)
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="auth.refresh_rotate",
+            resource_type="user",
+            resource_id=user.id,
+        )
+    )
 
     return AuthResponse(
         user=UserInfo(
@@ -283,6 +356,11 @@ async def update_me(
         if len(body.password) < 8:
             raise InvalidInputException("Password must be at least 8 characters")
         current_user.password_hash = hash_password(body.password)
+        await revoke_all_refresh_tokens(
+            db,
+            user_id=current_user.id,
+            reason="password_changed",
+        )
 
     await db.flush()
     await db.refresh(current_user)
@@ -351,6 +429,11 @@ async def reset_password(
         raise InvalidInputException("Password must be at least 8 characters")
 
     user.password_hash = hash_password(body.password)
+    await revoke_all_refresh_tokens(
+        db,
+        user_id=user.id,
+        reason="password_reset",
+    )
 
     db.add(AuditLog(
         user_id=user.id,
@@ -376,6 +459,11 @@ async def change_password(
         raise InvalidInputException("Password must be at least 8 characters")
 
     current_user.password_hash = hash_password(body.new_password)
+    await revoke_all_refresh_tokens(
+        db,
+        user_id=current_user.id,
+        reason="password_changed",
+    )
 
     db.add(AuditLog(
         user_id=current_user.id,
@@ -389,32 +477,71 @@ async def change_password(
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
+    request: Request,
     response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     body: LogoutRequest | None = None,
 ):
-    """Logout user (adds audit log entry)."""
-    _clear_auth_cookies(response)
+    """Revoke the presented refresh session and clear auth cookies."""
+    refresh_token = (
+        body.refresh_token
+        if body and body.refresh_token
+        else request.cookies.get(REFRESH_COOKIE_NAME)
+    )
+    revoked = False
+    if refresh_token:
+        try:
+            payload = decode_token(refresh_token)
+            token_id = payload.get("jti")
+            if (
+                payload.get("type") == "refresh"
+                and payload.get("sub") == current_user.id
+                and isinstance(token_id, str)
+            ):
+                revoked = await revoke_refresh_token(
+                    db,
+                    user_id=current_user.id,
+                    token_id=token_id,
+                    reason="logout",
+                )
+        except Exception:
+            # Logout is idempotent and must still clear potentially stale cookies.
+            pass
 
-    db.add(AuditLog(
-        user_id=current_user.id,
-        action="user.logout",
-        resource_type="user",
-        resource_id=current_user.id,
-        details=json.dumps({"had_refresh_token": bool(body and body.refresh_token)}) if body else None,
-    ))
+    _clear_auth_cookies(response)
+    db.add(
+        AuditLog(
+            user_id=current_user.id,
+            action="user.logout",
+            resource_type="user",
+            resource_id=current_user.id,
+            details=json.dumps(
+                {
+                    "refresh_token_present": bool(refresh_token),
+                    "refresh_token_revoked": revoked,
+                }
+            ),
+        )
+    )
 
     return MessageResponse(message="Logged out successfully")
 
 
 @router.delete("/me", status_code=204)
 async def delete_me(
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete current user account."""
+    """Deactivate the account and invalidate every refresh session."""
     current_user.is_active = False
+    await revoke_all_refresh_tokens(
+        db,
+        user_id=current_user.id,
+        reason="account_deleted",
+    )
+    _clear_auth_cookies(response)
     db.add(AuditLog(
         user_id=current_user.id,
         action="user.delete",
