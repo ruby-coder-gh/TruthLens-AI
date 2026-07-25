@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import Cookie, Depends, Header, HTTPException, WebSocket
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import decode_token
@@ -22,6 +22,9 @@ __all__ = [
     "check_workspace_access",
     "check_workspace_access_or_admin",
     "check_workspace_owner",
+    "get_accessible_workspace_ids",
+    "require_workspace_editor",
+    "is_workspace_owner_or_admin",
 ]
 
 
@@ -193,3 +196,42 @@ async def check_workspace_owner(
     if workspace.owner_id != user.id:
         raise ForbiddenException(message="Only workspace owner can perform this action")
     return workspace
+
+
+async def get_accessible_workspace_ids(db: AsyncSession, user: User) -> list[str]:
+    """Return every workspace the user can access using the same owner/member rule.
+
+    Aggregate endpoints call this once instead of reimplementing membership
+    filtering or fan-out ``check_workspace_access`` calls. Owners are included
+    even for legacy workspaces that do not have an owner membership row.
+    """
+    result = await db.execute(
+        select(Workspace.id)
+        .outerjoin(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+        .where(or_(Workspace.owner_id == user.id, WorkspaceMember.user_id == user.id))
+        .distinct()
+    )
+    return list(result.scalars().all())
+
+
+async def require_workspace_editor(
+    *, workspace: Workspace, current_user: User, db: AsyncSession
+) -> None:
+    """Require a workspace owner/editor (or global admin) for review actions."""
+    if current_user.role == "admin" or workspace.owner_id == current_user.id:
+        return
+    result = await db.execute(
+        select(WorkspaceMember.role).where(
+            WorkspaceMember.workspace_id == workspace.id,
+            WorkspaceMember.user_id == current_user.id,
+        )
+    )
+    if result.scalar_one_or_none() not in {"owner", "editor"}:
+        raise ForbiddenException("Viewer role cannot update workspace review state")
+
+
+async def is_workspace_owner_or_admin(
+    *, workspace: Workspace, current_user: User
+) -> bool:
+    """Return whether a user has workspace-admin management authority."""
+    return current_user.role == "admin" or workspace.owner_id == current_user.id

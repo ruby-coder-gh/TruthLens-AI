@@ -10,6 +10,9 @@ from app.models.collection import Collection, CollectionAccess
 from app.models.eval_run import EvalRun
 from app.models.comparison import Comparison, ComparisonResult
 from app.models.investigation import Investigation
+from app.models.query_pin import QueryPin
+from app.models.annotation import Annotation
+from app.models.refresh_token_session import RefreshTokenSession
 
 __all__ = [
     "DeclarativeBase",
@@ -29,4 +32,7 @@ __all__ = [
     "Comparison",
     "ComparisonResult",
     "Investigation",
+    "QueryPin",
+    "Annotation",
+    "RefreshTokenSession",
 ]

@@ -7,6 +7,7 @@ import type {
   Workspace,
   WorkspaceMember,
   Document,
+  DocumentDetail,
   DocumentStatus,
   QuerySummary,
   QueryDetail,
@@ -30,6 +31,11 @@ import type {
   ComparisonCreateResponse,
   EvalRunResponse,
   EvalRunQueuedResponse,
+  SearchResult,
+  QueryComparison,
+  ReviewQueueItem,
+  ReviewQueueCount,
+  Annotation,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -301,6 +307,9 @@ export const documentApi = {
   get: (workspaceId: string, documentId: string): Promise<Document> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}`),
 
+  getDetail: (workspaceId: string, documentId: string): Promise<DocumentDetail> =>
+    request(`/workspaces/${workspaceId}/documents/${documentId}`),
+
   status: (workspaceId: string, documentId: string): Promise<DocumentStatus> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}/status`),
 
@@ -331,7 +340,16 @@ export const queryApi = {
   delete: (workspaceId: string, queryId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}`, { method: 'DELETE' }),
 
-  listAll: (params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
+  pin: (workspaceId: string, queryId: string): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/pin`, { method: 'POST' }),
+
+  unpin: (workspaceId: string, queryId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/pin`, { method: 'DELETE' }),
+
+  compare: (workspaceId: string, queryId: string): Promise<QueryComparison> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/compare`, { method: 'POST' }),
+
+  listAll: (params?: { pinned?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
     request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   // Bespoke fetch — response is raw markdown (Content-Disposition attachment),
@@ -341,6 +359,38 @@ export const queryApi = {
     if (!res.ok) throw new ApiError(`Export failed (${res.status})`, res.status);
     return { blob: await res.blob(), filename: `truthlens-query-${queryId}.md` };
   },
+};
+
+// ─── Global Search API ──────────────────────────────────────────────────────
+export const searchApi = {
+  search: (params: { q: string; page?: number; page_size?: number; per_workspace?: number }): Promise<PaginatedResponse<SearchResult>> =>
+    request(`/search${buildQuery(params)}`),
+};
+
+// ─── Confidence Review Queue API ────────────────────────────────────────────
+export const reviewQueueApi = {
+  list: (workspaceId: string, params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<ReviewQueueItem>> =>
+    request(`/workspaces/${workspaceId}/review-queue${buildQuery(params as Record<string, unknown> | undefined)}`),
+  count: (workspaceId: string): Promise<ReviewQueueCount> =>
+    request(`/workspaces/${workspaceId}/review-queue/count`),
+  review: (workspaceId: string, queryId: string, data: { review_status: 'needs_review' | 'reviewed' | 'dismissed'; review_note?: string }): Promise<ReviewQueueItem> =>
+    request(`/workspaces/${workspaceId}/review-queue/${queryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  settings: (workspaceId: string, reviewQueueEnabled: boolean): Promise<{ review_queue_enabled: boolean }> =>
+    request(`/workspaces/${workspaceId}/review-queue/settings`, { method: 'PATCH', body: JSON.stringify({ review_queue_enabled: reviewQueueEnabled }) }),
+};
+
+// ─── Collaborative Annotations API ──────────────────────────────────────────
+export const annotationApi = {
+  list: (workspaceId: string, queryId: string, params?: { source_id?: string; answer_only?: boolean }): Promise<ListResponse<Annotation>> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/annotations${buildQuery(params as Record<string, unknown> | undefined)}`),
+  count: (workspaceId: string, queryId: string, params?: { source_id?: string; answer_only?: boolean }): Promise<{ count: number }> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/annotations/count${buildQuery(params as Record<string, unknown> | undefined)}`),
+  create: (workspaceId: string, queryId: string, data: { body: string; source_id?: string }): Promise<Annotation> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/annotations`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (workspaceId: string, queryId: string, annotationId: string, body: string): Promise<Annotation> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/annotations/${annotationId}`, { method: 'PATCH', body: JSON.stringify({ body }) }),
+  delete: (workspaceId: string, queryId: string, annotationId: string): Promise<Annotation> =>
+    request(`/workspaces/${workspaceId}/queries/${queryId}/annotations/${annotationId}`, { method: 'DELETE' }),
 };
 
 // ─── Comparison API ─────────────────────────────────────────────────────────
@@ -479,6 +529,12 @@ export const investigationApi = {
 
   review: (workspaceId: string, investigationId: string, data: InvestigationReviewUpdate): Promise<InvestigationResponse> =>
     request(`/workspaces/${workspaceId}/investigations/${investigationId}/review`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  exportAuditBundle: async (workspaceId: string, investigationId: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/investigations/${investigationId}/export`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    return { blob: await res.blob(), filename: `truthlens-audit-${investigationId}.zip` };
+  },
 };
 
 // ─── Unified API object ─────────────────────────────────────────────────────
@@ -492,4 +548,7 @@ export const api = {
   investigation: investigationApi,
   collections: collectionApi,
   comparisons: comparisonApi,
+  search: searchApi,
+  reviewQueue: reviewQueueApi,
+  annotations: annotationApi,
 };

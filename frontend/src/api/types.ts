@@ -83,6 +83,20 @@ export interface DocumentStatus {
   error_message?: string;
 }
 
+export interface DocumentDetail {
+  id: string;
+  workspace_id: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  page_count?: number;
+  chunk_count: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  chunks: Array<{ id: string; index: number; content: string; token_count: number; created_at: string }>;
+}
+
 // ─── Query ──────────────────────────────────────────────────────────────────
 export interface QuerySummary {
   id: string;
@@ -91,6 +105,9 @@ export interface QuerySummary {
   trust_score?: number;
   guardrail_passed?: boolean;
   model_used?: string;
+  is_pinned: boolean;
+  compared_to_query_id?: string;
+  review_status: 'needs_review' | 'reviewed' | 'dismissed';
   created_at: string;
 }
 
@@ -107,6 +124,13 @@ export interface QueryDetail {
   model_used?: string;
   latency_ms?: number;
   token_count?: number;
+  is_pinned: boolean;
+  compared_to_query_id?: string;
+  trust_components?: Record<string, number>;
+  review_status: 'needs_review' | 'reviewed' | 'dismissed';
+  review_note?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
   created_at: string;
 }
 
@@ -135,6 +159,67 @@ export interface Feedback {
   created_at: string;
 }
 
+
+
+export interface QuerySourceDiff {
+  new_sources: Source[];
+  dropped_sources: Source[];
+  shared_sources: Source[];
+}
+
+export interface QueryComparison {
+  original: QueryDetail;
+  rerun: QueryDetail;
+  trust_score_delta?: number;
+  source_diff: QuerySourceDiff;
+  trust_components?: Record<string, number>;
+}
+
+export interface SearchResult {
+  id: string;
+  resource_type: 'query' | 'document';
+  workspace_id: string;
+  workspace_name: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+export interface ReviewQueueItem {
+  id: string;
+  workspace_id: string;
+  query_text: string;
+  response_text?: string;
+  response_sources: Source[];
+  trust_score?: number;
+  trust_components: Record<string, number>;
+  guardrail_score?: number;
+  guardrail_passed?: boolean;
+  review_status: 'needs_review' | 'reviewed' | 'dismissed';
+  review_note?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+}
+
+export interface ReviewQueueCount {
+  count: number;
+  review_queue_enabled: boolean;
+}
+
+export interface Annotation {
+  id: string;
+  workspace_id: string;
+  query_id?: string;
+  source_id?: string;
+  user_id?: string;
+  author_name?: string;
+  body?: string;
+  is_deleted: boolean;
+  can_edit: boolean;
+  created_at: string;
+  updated_at: string;
+}
 // ─── Admin ──────────────────────────────────────────────────────────────────
 export interface AdminStats {
   total_users: number;
@@ -145,6 +230,8 @@ export interface AdminStats {
   avg_trust_score?: number;
   avg_rating?: number;
   total_feedback: number;
+  query_cache_hits: number;
+  query_cache_hit_rate?: number;
 }
 
 export interface AuditLogEntry {
@@ -325,6 +412,7 @@ export interface WSComplete {
   latency_ms: number;
   model_used: string;
   token_count: number;
+  from_cache?: boolean;
 }
 
 export interface WSError {
@@ -350,6 +438,10 @@ export interface PaginatedResponse<T> {
     page: number;
     page_size: number;
     total: number;
+    workspace_count?: number;
+    per_workspace_limit?: number;
+    enabled?: boolean;
+    threshold?: number;
   };
 }
 

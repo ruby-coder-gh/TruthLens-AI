@@ -1169,6 +1169,14 @@ export default function AdminDashboard() {
             label="Total Chunks Indexed"
             value={stats.total_chunks.toLocaleString()}
           />
+
+          {/* Query Cache */}
+          <SecondaryStatCard
+            icon={<Clock size={20} />}
+            label="Query Cache Hits"
+          >
+            <div className="flex items-center gap-2"><span className="text-xl font-bold text-text tabular-nums">{stats.query_cache_hits.toLocaleString()}</span>{stats.query_cache_hit_rate != null && <span className="text-xs text-text-dim">{(stats.query_cache_hit_rate * 100).toFixed(0)}% hit rate</span>}</div>
+          </SecondaryStatCard>
         </motion.div>
 
         {/* ── Charts ─────────────────────────────────────────────────────────── */}

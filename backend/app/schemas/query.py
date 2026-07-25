@@ -30,9 +30,17 @@ class QueryResponse(BaseModel):
     model_used: str | None = None
     latency_ms: int | None = None
     token_count: int | None = None
+    is_pinned: bool = False
+    compared_to_query_id: str | None = None
+    trust_components: dict[str, Any] = {}
+    review_status: str = "needs_review"
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_reviewed_at = field_serializer("reviewed_at")(utc_iso)
 
 
 class QuerySummary(BaseModel):
@@ -42,6 +50,9 @@ class QuerySummary(BaseModel):
     trust_score: float | None = None
     guardrail_passed: bool | None = None
     model_used: str | None = None
+    is_pinned: bool = False
+    compared_to_query_id: str | None = None
+    review_status: str = "needs_review"
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
@@ -75,6 +86,14 @@ class QueryDetailResponse(BaseModel):
     model_used: str | None = None
     latency_ms: int | None = None
     token_count: int | None = None
+    is_pinned: bool = False
+    compared_to_query_id: str | None = None
+    trust_components: dict[str, Any] = {}
+    review_status: str = "needs_review"
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_reviewed_at = field_serializer("reviewed_at")(utc_iso)

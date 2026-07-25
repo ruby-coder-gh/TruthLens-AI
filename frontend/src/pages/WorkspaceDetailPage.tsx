@@ -25,6 +25,7 @@ import {
   Check,
   MessageSquare,
   Loader2,
+  ClipboardCheck,
 } from 'lucide-react';
 import { Button, Input, TextArea, Select, Card, Badge, Modal, EmptyState, Tabs, Skeleton, ProgressBar } from '../components/ui';
 import { staggerContainer, staggerItem, fadeIn, pageTransition, slideInRight } from '../components/motion';
@@ -346,6 +347,12 @@ function WorkspaceHeader({
             </motion.div>
           </div>
         </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button size="sm" variant="secondary" onClick={() => navigate(`/workspaces/${workspace.id}/review-queue`)}>
+          <ClipboardCheck size={14} /> Review Queue
+        </Button>
       </div>
 
       {/* Dashboard Stats */}

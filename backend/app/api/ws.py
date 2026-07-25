@@ -18,6 +18,12 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
+from app.query_cache import (
+    cached_query_sources,
+    get_workspace_document_version,
+    lookup_cached_query,
+    normalize_query,
+)
 from app.utils.logger import logger
 
 router = APIRouter()
@@ -96,6 +102,71 @@ async def _check_workspace_access(user_id: str, workspace_id: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+def _source_payload(context: dict[str, Any]) -> dict[str, Any]:
+    """Shape persisted retrieval context into the public WebSocket source contract."""
+    metadata = context.get("metadata")
+    safe_metadata = metadata if isinstance(metadata, dict) else {}
+    raw_excerpt = context.get("excerpt") or context.get("content") or ""
+    excerpt = raw_excerpt if isinstance(raw_excerpt, str) else str(raw_excerpt)
+    raw_score = context.get("relevance_score", context.get("score", 0.0))
+    score = float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
+    rerank_score = context.get("rerank_score")
+
+    return {
+        "chunk_id": str(context.get("chunk_id", "")),
+        "document_id": str(context.get("document_id", "")),
+        "document_name": context.get("document_name") or safe_metadata.get("document_name", ""),
+        "excerpt": excerpt[:300],
+        "relevance_score": score,
+        "rerank_score": rerank_score if isinstance(rerank_score, (int, float)) else None,
+        "page_number": context.get("page_number") or safe_metadata.get("page_number"),
+        "matched_chunks": context.get("matched_chunks", 1),
+        "confidence": context.get("confidence") if isinstance(context.get("confidence"), (int, float)) else min(1.0, score * 1.5 + 0.3),
+    }
+
+
+async def _send_cached_query(query: Query, send_json: Any, elapsed_ms: int) -> None:
+    """Return a persisted answer in the normal streaming protocol without running RAG again."""
+    sources = cached_query_sources(query)
+    await send_json({
+        "type": "ack",
+        "payload": {"query_id": query.id, "status": "cached"},
+    })
+    await send_json({
+        "type": "sources",
+        "payload": {"query_id": query.id, "sources": [_source_payload(source) for source in sources]},
+    })
+    await send_json({
+        "type": "token",
+        "payload": {"query_id": query.id, "content": query.response_text or "", "index": 0},
+    })
+    if query.guardrail_score is not None and query.guardrail_passed is not None:
+        await send_json({
+            "type": "guardrail",
+            "payload": {
+                "query_id": query.id,
+                "passed": query.guardrail_passed,
+                "score": query.guardrail_score,
+                "details": "Served from cached result.",
+            },
+        })
+    if query.trust_score is not None:
+        await send_json({
+            "type": "trust_score",
+            "payload": {"query_id": query.id, "score": query.trust_score, "components": {}},
+        })
+    await send_json({
+        "type": "complete",
+        "payload": {
+            "query_id": query.id,
+            "latency_ms": elapsed_ms,
+            "model_used": query.model_used or "cached",
+            "token_count": query.token_count or 0,
+            "from_cache": True,
+        },
+    })
+
+
 async def _run_query_pipeline(
     query_text: str,
     workspace_id: str,
@@ -104,6 +175,7 @@ async def _run_query_pipeline(
     top_k: int,
     filters: dict[str, Any] | None,
     send_json: Any,
+    force_refresh: bool = False,
 ) -> None:
     """Run the full query pipeline and stream results via WebSocket."""
     from app.generation.generator import GenerationInput
@@ -130,6 +202,25 @@ async def _run_query_pipeline(
     try:
         if not sanitized_query:
             raise ValueError("Query is empty after sanitization")
+
+        async with async_session_factory() as db:
+            document_version = await get_workspace_document_version(db, workspace_id)
+            if filters:
+                logger.info("query_cache_bypassed", workspace_id=workspace_id, reason="filtered_query")
+                cached_query = None
+            else:
+                cached_query = await lookup_cached_query(
+                    db,
+                    workspace_id=workspace_id,
+                    query_text=sanitized_query,
+                    document_version=document_version,
+                    force_refresh=force_refresh,
+                )
+            await db.commit()
+
+        if cached_query is not None:
+            await _send_cached_query(cached_query, send_json, int((time.time() - start_time) * 1000))
+            return
 
         # 1. Acknowledge
         await send_json({
@@ -264,6 +355,7 @@ async def _run_query_pipeline(
                 "latency_ms": elapsed_ms,
                 "model_used": model_used,
                 "token_count": total_tokens,
+                "from_cache": False,
             },
         })
 
@@ -277,11 +369,19 @@ async def _run_query_pipeline(
             response_text=full_text,
             response_sources=contexts,
             trust_score=trust.overall,
+            trust_components={
+                "retrieval_quality": trust.retrieval_quality,
+                "faithfulness": trust.faithfulness,
+                "relevance": trust.relevance,
+                "source_authority": trust.source_authority,
+            },
             guardrail_score=guardrail_result.score,
             guardrail_passed=guardrail_result.passed,
             model_used=model_used,
             latency_ms=elapsed_ms,
             token_count=total_tokens,
+            normalized_query=normalize_query(sanitized_query),
+            document_version=document_version,
         )
 
     except asyncio.CancelledError:
@@ -307,11 +407,14 @@ async def _save_query(
     response_text: str,
     response_sources: list[dict[str, Any]],
     trust_score: float,
+    trust_components: dict[str, float],
     guardrail_score: float,
     guardrail_passed: bool,
     model_used: str,
     latency_ms: int,
     token_count: int,
+    normalized_query: str,
+    document_version: int,
 ) -> None:
     """Save query result to database."""
     import json as json_mod
@@ -322,10 +425,13 @@ async def _save_query(
             workspace_id=workspace_id,
             user_id=user_id,
             query_text=query_text,
+            normalized_query=normalized_query,
+            document_version=document_version,
             rewritten_query=rewritten_query,
             response_text=response_text,
             response_sources=json_mod.dumps(response_sources),
             trust_score=trust_score,
+            trust_components=trust_components,
             guardrail_score=guardrail_score,
             guardrail_passed=guardrail_passed,
             model_used=model_used,
@@ -386,6 +492,7 @@ async def websocket_query(websocket: WebSocket):
                 query_text = msg_payload.get("query")
                 top_k = msg_payload.get("top_k", 5)
                 filters = msg_payload.get("filters")
+                force_refresh = bool(msg_payload.get("force_refresh", False))
 
                 if not workspace_id or not query_text:
                     await websocket.send_json({
@@ -415,6 +522,7 @@ async def websocket_query(websocket: WebSocket):
                         top_k=top_k,
                         filters=filters,
                         send_json=websocket.send_json,
+                        force_refresh=force_refresh,
                     )
                 )
 

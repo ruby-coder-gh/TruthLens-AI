@@ -9,12 +9,15 @@ from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
+from app.database import async_session_factory
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.query_cache import cached_query_sources, get_workspace_document_version, lookup_cached_query
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
 from app.retrieval.reranker import rerank
+from app.utils.logger import logger
 
 
 class GraphState(TypedDict):
@@ -27,6 +30,12 @@ class GraphState(TypedDict):
     query_id: str
     top_k: int
     filters: dict | None
+    force_refresh: bool
+
+    # Cache
+    cache_hit: bool
+    cached_query_id: str | None
+    workspace_document_version: int
 
     # Retrieval
     retrieval_results: list | None
@@ -49,6 +58,62 @@ class GraphState(TypedDict):
     model_used: str
     latency_ms: int
     error: str | None
+
+
+async def _cache_lookup_node(state: GraphState) -> dict:
+    """Short-circuit the graph when an unexpired, document-version-matched answer exists."""
+    workspace_id = state["workspace_id"]
+
+    async with async_session_factory() as session:
+        document_version = await get_workspace_document_version(session, workspace_id)
+        if state.get("filters"):
+            logger.info("query_cache_bypassed", workspace_id=workspace_id, reason="filtered_query")
+            return {
+                "cache_hit": False,
+                "cached_query_id": None,
+                "workspace_document_version": document_version,
+            }
+
+        cached_query = await lookup_cached_query(
+            session,
+            workspace_id=workspace_id,
+            query_text=state["query"],
+            document_version=document_version,
+            force_refresh=state.get("force_refresh", False),
+        )
+        await session.commit()
+
+    if cached_query is None:
+        return {
+            "cache_hit": False,
+            "cached_query_id": None,
+            "workspace_document_version": document_version,
+        }
+
+    return {
+        "cache_hit": True,
+        "cached_query_id": cached_query.id,
+        "workspace_document_version": document_version,
+        "contexts": cached_query_sources(cached_query),
+        "retrieval_results": [],
+        "reranked_results": [],
+        "response_text": cached_query.response_text,
+        "guardrail_result": {
+            "passed": cached_query.guardrail_passed if cached_query.guardrail_passed is not None else True,
+            "score": cached_query.guardrail_score if cached_query.guardrail_score is not None else 0.0,
+            "unsupported_claims": [],
+            "details": "Served from cache.",
+        },
+        "trust_score": cached_query.trust_score,
+        "trust_components": {},
+        "model_used": cached_query.model_used or "cached",
+        "latency_ms": 0,
+        "error": None,
+    }
+
+
+def _should_use_cache(state: GraphState) -> Literal["cached", "rewrite"]:
+    return "cached" if state.get("cache_hit") else "rewrite"
 
 
 async def _retrieve_node(state: GraphState) -> dict:
@@ -164,13 +229,14 @@ def _should_continue(state: GraphState) -> Literal["generate", "rewrite"]:
 def build_query_graph() -> CompiledStateGraph:
     """Build the standard RAG query graph.
 
-    Flow: rewrite → retrieve → rerank → generate → guardrail → trust_score
-    
+    Flow: cache_lookup → (cached | rewrite → retrieve → rerank → generate → guardrail → trust_score)
+
     Note: All node functions are async for proper non-blocking execution.
     """
     workflow = StateGraph(GraphState)
 
     # Nodes (async functions work with LangGraph's async execution)
+    workflow.add_node("cache_lookup", _cache_lookup_node)
     workflow.add_node("rewrite", _rewrite_node)
     workflow.add_node("retrieve", _retrieve_node)
     workflow.add_node("generate", _generate_node)
@@ -178,7 +244,15 @@ def build_query_graph() -> CompiledStateGraph:
     workflow.add_node("trust_score", _trust_score_node)
 
     # Edges
-    workflow.set_entry_point("rewrite")
+    workflow.set_entry_point("cache_lookup")
+    workflow.add_conditional_edges(
+        "cache_lookup",
+        _should_use_cache,
+        {
+            "cached": END,
+            "rewrite": "rewrite",
+        },
+    )
     workflow.add_edge("rewrite", "retrieve")
     workflow.add_conditional_edges(
         "retrieve",

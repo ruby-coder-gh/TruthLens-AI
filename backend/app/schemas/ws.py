@@ -12,6 +12,7 @@ class WSQueryPayload(BaseModel):
     query: str
     top_k: int = 5
     filters: dict[str, Any] | None = None
+    force_refresh: bool = False
 
 
 class WSCancelPayload(BaseModel):
@@ -63,6 +64,7 @@ class WSCompletePayload(BaseModel):
     latency_ms: int
     model_used: str
     token_count: int
+    from_cache: bool = False
 
 
 class WSErrorPayload(BaseModel):

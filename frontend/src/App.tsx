@@ -33,6 +33,8 @@ const AdminAuditLogPage = lazy(() => import('./pages/AdminAuditLogPage'))
 const ChatNewPage = lazy(() => import('./pages/ChatNewPage'))
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'))
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'))
+const WorkspaceDocumentDetailPage = lazy(() => import('./pages/WorkspaceDocumentDetailPage'))
+const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'))
 const InvestigationPage = lazy(() => import('./pages/InvestigationPage'))
 const ApiCatalogPage = lazy(() => import('./pages/ApiCatalogPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
@@ -108,12 +110,15 @@ function AppRoutes() {
         <Route path="/chat/new" element={<ChatNewPage />} />
         <Route path="/chats" element={<ChatHistoryPage />} />
         <Route path="/chat/:queryId" element={<ChatDetailPage />} />
+        <Route path="/workspaces/:id/queries/:queryId" element={<ChatDetailPage />} />
         <Route path="/documents" element={<DocumentsBrowsePage />} />
         <Route path="/settings" element={<SettingsPage />} />
 
         {/* Workspace routes */}
         <Route path="/workspaces" element={<WorkspacesPage />} />
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
+        <Route path="/workspaces/:id/documents/:docId" element={<WorkspaceDocumentDetailPage />} />
+        <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
         <Route path="/workspaces/:id/chat" element={<ChatPage />} />
         <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
 

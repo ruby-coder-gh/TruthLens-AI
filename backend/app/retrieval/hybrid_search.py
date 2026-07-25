@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
+
+from rank_bm25 import BM25Okapi
 
 from app.chroma_client import get_workspace_collection
 from app.config import settings
@@ -110,7 +112,7 @@ async def hybrid_search(
 
     # Run both searches in parallel
     vector_results = await vector_search(query, workspace_id, top_k=k * 2, filters=filters)
-    bm25_results = await bm25_search(query, workspace_id, top_k=k * 2)
+    bm25_results = await bm25_search(query, workspace_id, top_k=k * 2, filters=filters)
 
     if not vector_results and not bm25_results:
         return []
@@ -214,6 +216,7 @@ async def bm25_search(
     query: str,
     workspace_id: str,
     top_k: int | None = None,
+    filters: dict[str, Any] | None = None,
 ) -> list[RetrievalResult]:
     """BM25 keyword search.
 
@@ -238,8 +241,20 @@ async def bm25_search(
         logger.error("bm25_search_failed", error=str(e), workspace_id=workspace_id)
         return []
 
+    # Preserve the vector path's metadata filters for BM25 too. Without this,
+    # a document-filtered comparison can be contaminated by another document's
+    # keyword hit during reciprocal-rank fusion.
+    candidate_indices = list(range(len(scores)))
+    if filters:
+        def matches_filters(metadata: dict[str, Any]) -> bool:
+            return all(str(metadata.get(key)) == str(value) for key, value in filters.items())
+        candidate_indices = [
+            idx for idx in candidate_indices
+            if matches_filters(metadatas[idx] if idx < len(metadatas) else {})
+        ]
+
     # Get top-k indices
-    top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+    top_indices = sorted(candidate_indices, key=lambda i: scores[i], reverse=True)[:k]
 
     results: list[RetrievalResult] = []
     for idx in top_indices:
@@ -267,3 +282,50 @@ async def bm25_search(
         ))
 
     return results
+
+
+def keyword_search_records(
+    query: str,
+    records: Iterable[dict[str, Any]],
+    *,
+    text_key: str = "search_text",
+    top_k: int = 20,
+) -> list[tuple[dict[str, Any], float]]:
+    """Rank in-memory lightweight records with the project's BM25 tokenizer.
+
+    This deliberately shares the same BM25 implementation and normalization as
+    workspace retrieval while avoiding embeddings, reranking, or generation.
+    It is suitable for metadata/query-history lookup where no Chroma document
+    needs to be loaded.
+    """
+    items = [record for record in records if str(record.get(text_key, "")).strip()]
+    tokens = _bm25_tokenizer(query)
+    if not items or not tokens:
+        return []
+
+    tokenized_records = [_bm25_tokenizer(str(record[text_key])) for record in items]
+    index = BM25Okapi(tokenized_records)
+    scores = index.get_scores(tokens)
+    matching_indices = [
+        record_index
+        for record_index, record_tokens in enumerate(tokenized_records)
+        if set(tokens).intersection(record_tokens)
+    ]
+    if not matching_indices:
+        return []
+
+    ranked = sorted(matching_indices, key=lambda record_index: scores[record_index], reverse=True)[:top_k]
+    max_score = max(float(scores[record_index]) for record_index in ranked)
+    if max_score > 0:
+        return [
+            (items[record_index], float(scores[record_index] / max_score))
+            for record_index in ranked
+        ]
+
+    # BM25Okapi can give a non-positive score when every small candidate record
+    # contains a term. Preserve its ranking and emit a stable relative score
+    # rather than treating exact keyword matches as no results.
+    return [
+        (items[record_index], 1.0 - (rank / max(1, len(ranked))))
+        for rank, record_index in enumerate(ranked)
+    ]

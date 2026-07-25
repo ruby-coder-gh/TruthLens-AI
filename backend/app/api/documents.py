@@ -27,6 +27,7 @@ from app.schemas.document import (
     DocumentResponse,
     DocumentStatusResponse,
 )
+from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
 
 router = APIRouter(tags=["documents"])
@@ -132,6 +133,7 @@ async def upload_document(
     )
     db.add(doc)
     await db.flush()
+    await bump_workspace_document_version(db, workspace_id)
     await db.refresh(doc)
 
     # Audit log
@@ -330,6 +332,7 @@ async def delete_document(
         resource_type="document",
         resource_id=doc_id,
     ))
+    await bump_workspace_document_version(db, workspace_id)
     await db.delete(doc)
 
 
@@ -447,6 +450,7 @@ async def reindex_document(
     # Reset status to trigger re-ingestion
     doc.status = "pending"
     doc.error_message = None
+    await bump_workspace_document_version(db, workspace_id)
 
     # Schedule background processing via asyncio
     file_path = settings.upload_path / doc.filename
@@ -509,6 +513,7 @@ async def process_document_background(
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+                await bump_workspace_document_version(session, workspace_id)
             else:
                 doc.status = "failed"
                 doc.error_message = ingest_result.get("error", "Unknown error")

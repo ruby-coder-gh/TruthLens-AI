@@ -8,6 +8,7 @@ lockstep. The BM25Okapi index itself is rebuilt from the corpus on load.
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,8 +20,8 @@ from app.utils.logger import logger
 
 
 def _bm25_tokenizer(text: str) -> list[str]:
-    """Simple tokenizer for BM25."""
-    return text.lower().split()
+    """Normalize word tokens consistently for retrieval and lightweight search."""
+    return re.findall(r"[\w]+", text.lower())
 
 
 def _get_bm25_path(workspace_id: str) -> Path:

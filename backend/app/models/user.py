@@ -27,10 +27,13 @@ class User(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     workspaces_owned = relationship("Workspace", back_populates="owner", lazy="selectin")
     workspace_memberships = relationship("WorkspaceMember", back_populates="user", lazy="selectin")
     documents_uploaded = relationship("Document", back_populates="uploader", lazy="selectin")
-    queries = relationship("Query", back_populates="user", lazy="selectin")
+    queries = relationship("Query", back_populates="user", lazy="selectin", foreign_keys="Query.user_id")
     feedback_given = relationship("Feedback", back_populates="user", lazy="selectin")
     audit_logs = relationship("AuditLog", back_populates="user", lazy="selectin")
     comparisons = relationship("Comparison", back_populates="user", lazy="selectin")
+    query_pins = relationship("QueryPin", back_populates="user", lazy="selectin", cascade="all, delete-orphan")
+    annotations_authored = relationship("Annotation", back_populates="author", lazy="selectin", foreign_keys="Annotation.user_id")
+    annotations_deleted = relationship("Annotation", back_populates="deleter", lazy="selectin", foreign_keys="Annotation.deleted_by")
 
     __table_args__ = (
         Index("idx_users_email", "email"),

@@ -72,6 +72,7 @@ interface ChatMessage {
   latencyMs: number | null;
   modelUsed: string | null;
   tokenCount: number | null;
+  servedFromCache: boolean;
   queryId: string | null;
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
@@ -178,7 +179,7 @@ export default function ChatPage() {
 
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
-    (queryText: string, topK?: number) => {
+    (queryText: string, topK?: number, forceRefresh = false) => {
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       // Tear down any previous socket before creating a new one — otherwise the
@@ -209,6 +210,7 @@ export default function ChatPage() {
         latencyMs: null,
         modelUsed: null,
         tokenCount: null,
+        servedFromCache: false,
         queryId: null,
         error: null,
         status: 'complete',
@@ -227,6 +229,7 @@ export default function ChatPage() {
         latencyMs: null,
         modelUsed: null,
         tokenCount: null,
+        servedFromCache: false,
         queryId: null,
         error: null,
         status: 'pending',
@@ -281,7 +284,7 @@ export default function ChatPage() {
           );
         },
 
-        onComplete: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number }) => {
+        onComplete: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number; from_cache: boolean }) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
@@ -292,6 +295,7 @@ export default function ChatPage() {
                     latencyMs: result.latency_ms,
                     modelUsed: result.model_used,
                     tokenCount: result.token_count,
+                    servedFromCache: result.from_cache,
                   }
                 : m,
             ),
@@ -324,7 +328,7 @@ export default function ChatPage() {
         onProgress: (phase: string) => {
           setPipelinePhase(phase);
         },
-      }, convId, topK);
+      }, convId, topK, forceRefresh);
 
       wsRef.current = ws;
       ws.connect();
@@ -437,6 +441,17 @@ export default function ChatPage() {
       startQuery(precedingUser.content);
     },
     [messages, startQuery],
+  );
+
+  const handleRegenerate = useCallback(
+    (assistantMsgId: string) => {
+      const idx = messages.findIndex((m) => m.id === assistantMsgId);
+      if (idx <= 0 || isStreaming) return;
+      const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
+      if (!precedingUser) return;
+      startQuery(precedingUser.content, undefined, true);
+    },
+    [isStreaming, messages, startQuery],
   );
 
   // ─── Copy response ────────────────────────────────────────────────────────
@@ -652,6 +667,7 @@ export default function ChatPage() {
                         }
                       }}
                       onRetry={() => handleRetry(msg.id)}
+                      onRegenerate={() => handleRegenerate(msg.id)}
                       onSourceClick={(source, _e, msgId, index) => {
                         const markerId = `cite-${msgId}-${index}`;
                         const targetId = `source-${source.chunk_id}`;
@@ -1025,6 +1041,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onExport,
   onFeedback,
   onRetry,
+  onRegenerate,
   onSourceClick,
 }: {
   message: ChatMessage;
@@ -1032,6 +1049,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onExport: () => void;
   onFeedback: (rating: number) => void;
   onRetry: () => void;
+  onRegenerate: () => void;
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
 }) {
   const isUser = message.role === 'user';
@@ -1149,6 +1167,11 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                       </span>
                     </div>
                   )}
+                  {message.servedFromCache && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-card-2 px-2 py-0.5 text-[11px] font-medium text-text-dim" title="Served from a valid cached result. Regenerate to run retrieval and generation again.">
+                      <Clock size={11} aria-hidden="true" /> Cached
+                    </span>
+                  )}
                 </div>
 
                 {/* MIDDLE: Markdown content with citations */}
@@ -1177,6 +1200,19 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                     <span>{formatTimestamp(message.timestamp)}</span>
                   </div>
                   <div className="flex items-center -mr-2">
+                    {message.servedFromCache && (
+                      <motion.button
+                        type="button"
+                        onClick={onRegenerate}
+                        className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-primary-soft"
+                        aria-label="Regenerate with fresh retrieval"
+                        title="Regenerate fresh answer"
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                      >
+                        <RotateCcw size={14} />
+                      </motion.button>
+                    )}
                     <motion.button
                       type="button"
                       onClick={() => onCopy(message.content)}

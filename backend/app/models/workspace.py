@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import DeclarativeBase, TimestampMixin, UUIDPkMixin
@@ -18,6 +18,8 @@ class Workspace(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     owner_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    review_queue_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
 
     # Relationships
     owner = relationship("User", back_populates="workspaces_owned", lazy="selectin")
@@ -26,6 +28,8 @@ class Workspace(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     queries = relationship("Query", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     collections = relationship("Collection", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     comparisons = relationship("Comparison", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    query_pins = relationship("QueryPin", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    annotations = relationship("Annotation", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name={self.name})>"

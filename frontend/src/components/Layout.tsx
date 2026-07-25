@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
@@ -18,12 +18,15 @@ import {
   Users,
   BarChart3,
   ClipboardList,
+  ClipboardCheck,
   FolderOpen,
   Menu,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/auth-context';
 import Logo from './Logo';
+import GlobalSearch from './GlobalSearch';
+import { reviewQueueApi } from '../api/client';
 
 // ─── Ambient Background ───────────────────────────────────────────────────────
 function AmbientBackground() {
@@ -160,6 +163,17 @@ export default function Layout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [reviewCount, setReviewCount] = useState(0);
+  const workspaceMatch = location.pathname.match(/^\/workspaces\/([^/]+)/);
+  const activeWorkspaceId = workspaceMatch?.[1];
+
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      const reset = window.setTimeout(() => setReviewCount(0), 0);
+      return () => window.clearTimeout(reset);
+    }
+    reviewQueueApi.count(activeWorkspaceId).then((response) => setReviewCount(response.count)).catch(() => setReviewCount(0));
+  }, [activeWorkspaceId]);
 
   const closeSidebar = () => setSidebarOpen(false);
   const filteredNav = navItems.filter((item) => !item.adminOnly || user?.role === 'admin');
@@ -244,6 +258,13 @@ export default function Layout() {
           {filteredNav.map((item) => (
             <NavItemLink key={item.path} item={item} active={isActive(item.path)} collapsed={collapsed} onClick={closeSidebar} />
           ))}
+          {activeWorkspaceId && (
+            <Link to={`/workspaces/${activeWorkspaceId}/review-queue`} onClick={closeSidebar} className={clsx('relative flex items-center rounded-xl text-sm font-medium text-text-muted transition-colors hover:bg-primary/10 hover:text-primary-soft', collapsed ? 'justify-center h-10 w-10' : 'gap-3 px-3 py-2.5')} title={collapsed ? 'Review Queue' : undefined}>
+              <ClipboardCheck size={18} />
+              {!collapsed && <span className="flex-1">Review Queue</span>}
+              {reviewCount > 0 && <span className="rounded-full bg-red/20 px-1.5 py-0.5 text-[10px] font-semibold text-red">{reviewCount}</span>}
+            </Link>
+          )}
 
           {/* Quick actions */}
           <div className={clsx('pt-5 mt-5 border-t border-white/[0.06]', collapsed ? 'flex flex-col items-center px-0' : '')}>
@@ -370,6 +391,13 @@ export default function Layout() {
             {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
             <span>{sidebarOpen ? 'Close menu' : 'Open menu'}</span>
           </button>
+        </div>
+
+        <div className="hidden border-b border-white/[0.06] px-4 py-3 lg:flex lg:items-center lg:justify-end">
+          <GlobalSearch />
+        </div>
+        <div className="px-4 pt-4 lg:hidden">
+          <GlobalSearch />
         </div>
 
         {/* Content */}

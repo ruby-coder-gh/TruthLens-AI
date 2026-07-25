@@ -87,11 +87,19 @@ class Settings(BaseSettings):
     REWRITE_TEMPERATURE: float = 0.2
     REWRITE_MAX_TOKENS: int = 256
 
+    # ─── Query Cache ─────────────────────────
+    QUERY_CACHE_ENABLED: bool = True
+    QUERY_CACHE_TTL_SECONDS: int = 3600
+
     # ─── Trust Score ──────────────────────────
     TRUST_RETRIEVAL_WEIGHT: float = 0.3
     TRUST_FAITHFULNESS_WEIGHT: float = 0.4
     TRUST_RELEVANCE_WEIGHT: float = 0.2
     TRUST_SOURCE_WEIGHT: float = 0.1
+
+    # ─── Human Review Queue ───────────────────
+    REVIEW_QUEUE_TRUST_THRESHOLD: float = 0.5
+    QUERY_PIN_LIMIT: int = 20
 
     # ─── Evaluation ───────────────────────────
     EVAL_MIN_FAITHFULNESS: float = 0.6

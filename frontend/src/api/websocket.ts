@@ -5,7 +5,7 @@ export interface QueryWebSocketCallbacks {
   onSource?: (source: Source) => void;
   onGuardrail?: (result: { passed: boolean; score: number; details: string }) => void;
   onTrustScore?: (score: number, components: Record<string, number>) => void;
-  onComplete?: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number }) => void;
+  onComplete?: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number; from_cache: boolean }) => void;
   onError?: (code: string, message: string) => void;
   onProgress?: (phase: string, progress: number) => void;
 }
@@ -40,6 +40,7 @@ interface WSMessagePayload {
   latency_ms?: number;
   model_used?: string;
   token_count?: number;
+  from_cache?: boolean;
   code?: string;
   message?: string;
   phase?: string;
@@ -61,6 +62,7 @@ export class QueryWebSocket {
   private callbacks: QueryWebSocketCallbacks;
   private isConnected = false;
   private topK?: number;
+  private forceRefresh: boolean;
 
   constructor(
     workspaceId: string,
@@ -68,12 +70,14 @@ export class QueryWebSocket {
     callbacks: QueryWebSocketCallbacks,
     conversationId?: string,
     topK?: number,
+    forceRefresh = false,
   ) {
     this.workspaceId = workspaceId;
     this.query = query;
     this.callbacks = callbacks;
     this.conversationId = conversationId;
     this.topK = topK;
+    this.forceRefresh = forceRefresh;
   }
 
   connect(): void {
@@ -158,6 +162,7 @@ export class QueryWebSocket {
             query: this.query,
             ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
             ...(this.topK ? { top_k: this.topK } : {}),
+            ...(this.forceRefresh ? { force_refresh: true } : {}),
           }
         });
         break;
@@ -210,6 +215,7 @@ export class QueryWebSocket {
           latency_ms: payload.latency_ms ?? 0,
           model_used: payload.model_used ?? '',
           token_count: payload.token_count ?? 0,
+          from_cache: payload.from_cache ?? false,
         });
         break;
       }

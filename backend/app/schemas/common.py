@@ -40,6 +40,8 @@ class AdminStatsResponse(BaseModel):
     avg_trust_score: float | None = None
     avg_rating: float | None = None
     total_feedback: int
+    query_cache_hits: int = 0
+    query_cache_hit_rate: float | None = None
 
 
 class AuditLogResponse(BaseModel):

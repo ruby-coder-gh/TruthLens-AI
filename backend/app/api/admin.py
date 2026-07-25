@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 
 from app.config import settings
 from app.core.auth import hash_password
+from app.core.refresh_tokens import revoke_all_refresh_tokens
 from app.core.deps import get_current_admin, get_db
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
@@ -112,12 +113,15 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     )
     total_users, total_workspaces, total_documents, total_queries, total_feedback = counts
 
-    trust_r, rating_r = await asyncio.gather(
+    trust_r, rating_r, cache_hits_r = await asyncio.gather(
         db.execute(select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))),
         db.execute(select(func.avg(Feedback.rating))),
+        db.execute(select(func.coalesce(func.sum(Query.cache_hit_count), 0))),
     )
     avg_trust = trust_r.scalar()
     avg_rating = rating_r.scalar()
+    query_cache_hits = int(cache_hits_r.scalar() or 0)
+    cache_request_count = total_queries + query_cache_hits
 
     return AdminStatsResponse(
         total_users=total_users,
@@ -128,6 +132,8 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
         avg_trust_score=round(float(avg_trust), 4) if avg_trust else None,
         avg_rating=round(float(avg_rating), 2) if avg_rating else None,
         total_feedback=total_feedback,
+        query_cache_hits=query_cache_hits,
+        query_cache_hit_rate=round(query_cache_hits / cache_request_count, 4) if cache_request_count else None,
     )
 
 
@@ -444,6 +450,12 @@ async def update_user_status(
         raise NotFoundException("User", user_id)
 
     user.is_active = body.is_active
+    if not user.is_active:
+        await revoke_all_refresh_tokens(
+            db,
+            user_id=user.id,
+            reason="admin_deactivated",
+        )
 
     db.add(AuditLog(
         user_id=current_user.id,
@@ -477,6 +489,11 @@ async def delete_user(
         raise NotFoundException("User", user_id)
 
     user.is_active = False
+    await revoke_all_refresh_tokens(
+        db,
+        user_id=user.id,
+        reason="admin_deactivated",
+    )
 
     db.add(AuditLog(
         user_id=current_user.id,
