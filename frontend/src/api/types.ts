@@ -105,6 +105,9 @@ export interface QuerySummary {
   trust_score?: number;
   guardrail_passed?: boolean;
   model_used?: string;
+  /** 12-char content hash of the system prompt that produced the answer.
+   *  Null for rows written before F1. */
+  prompt_version?: string;
   is_pinned: boolean;
   compared_to_query_id?: string;
   review_status: 'needs_review' | 'reviewed' | 'dismissed';
@@ -122,8 +125,12 @@ export interface QueryDetail {
   guardrail_score?: number;
   guardrail_passed?: boolean;
   model_used?: string;
+  /** 12-char content hash of the system prompt that produced the answer.
+   *  Null for rows written before F1. */
+  prompt_version?: string;
   latency_ms?: number;
   token_count?: number;
+  prompt_tokens?: number;
   is_pinned: boolean;
   compared_to_query_id?: string;
   trust_components?: Record<string, number>;
@@ -498,6 +505,14 @@ export interface EvalRunResponse {
   // JSON-encoded string; may be absent on older rows. Parse defensively —
   // shape is `{ per_category?: {...}, thresholds?: {...} }`.
   notes?: string | null;
+  // ── F1 additions (rows written before migration 010 leave these null) ──
+  status?: string | null;
+  prompt_version_id?: string | null;
+  model_used?: string | null;
+  subset?: string | null;
+  /** JSON-encoded string here (unlike `PromptEvalSummary.verdict`) — parse it
+   *  defensively, exactly like `notes`. */
+  verdict?: string | null;
 }
 
 export interface EvalRunQueuedResponse {
@@ -533,4 +548,97 @@ export interface EvalRunNotes {
   };
   thresholds?: EvalThresholds;
   [key: string]: unknown;
+}
+
+// ─── Prompt versions (F1: pinning + eval-gated promotion) ────────────────────
+export type PromptVersionStatus = 'draft' | 'staged' | 'active' | 'retired';
+
+/** Terminal states are `passed` / `failed` / `error` — a crashed job lands on
+ *  `error`, so pollers must stop on anything that is not `running`. */
+export type PromptEvalStatus = 'running' | 'passed' | 'failed' | 'error';
+
+export interface PromptEvalVerdict {
+  passed: boolean;
+  failed_metrics: string[];
+  thresholds: EvalThresholds;
+}
+
+/** The `eval` sub-object on `PromptVersionResponse`. Unlike `EvalRunResponse`,
+ *  `verdict` here is already parsed (the history endpoint returns a string). */
+export interface PromptEvalSummary {
+  id: string;
+  status: PromptEvalStatus;
+  subset?: string | null;
+  model_used?: string | null;
+  golden_set_version?: string | null;
+  faithfulness: number | null;
+  context_precision: number | null;
+  context_recall: number | null;
+  answer_relevance: number | null;
+  answer_correctness: number | null;
+  refusal_accuracy: number | null;
+  /** Trust lives in the eval run's `notes` JSON, so the API surfaces it here. */
+  trust: number | null;
+  verdict?: PromptEvalVerdict | null;
+  run_at?: string | null;
+}
+
+export interface PromptVersion {
+  id: string;
+  name: string;
+  version: number;
+  content: string;
+  content_hash: string;
+  status: PromptVersionStatus;
+  model_name?: string | null;
+  created_by?: string | null;
+  promoted_at?: string | null;
+  eval_run_id?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  eval?: PromptEvalSummary | null;
+}
+
+export interface PromptVersionCreate {
+  name: string;
+  content: string;
+  model_name?: string;
+  notes?: string;
+}
+
+export interface ActivePrompt {
+  name: string;
+  content: string;
+  content_hash: string;
+  model_name: string | null;
+  version: number | null;
+  version_id: string | null;
+  /** True when no row is active and the code default is being served. */
+  is_default: boolean;
+}
+
+export interface PromptDiffResponse {
+  from_id: string | null;
+  from_label: string;
+  to_id: string;
+  to_label: string;
+  /** `difflib.unified_diff` text. */
+  diff: string;
+}
+
+export interface PromptEvalQueued {
+  eval_run_id: string;
+  prompt_version_id: string;
+  subset: string;
+  status: string;
+}
+
+/** Body of the promote gate's 409, read from `ApiError.details`. */
+export interface PromptGateFailure {
+  detail?: string;
+  reason?: 'no_eval_run' | 'eval_incomplete' | 'thresholds_not_met';
+  failed_metrics?: string[];
+  thresholds?: EvalThresholds;
+  scores?: Record<string, number | null>;
 }

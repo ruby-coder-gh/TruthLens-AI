@@ -36,6 +36,12 @@ import type {
   ReviewQueueItem,
   ReviewQueueCount,
   Annotation,
+  PromptVersion,
+  PromptVersionCreate,
+  PromptVersionStatus,
+  PromptDiffResponse,
+  PromptEvalQueued,
+  ActivePrompt,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -67,12 +73,19 @@ export function clearStoredTokens(): void {
 export class ApiError extends Error {
   status: number;
   detail?: string;
+  /** Structured payload from the backend's error envelope
+   *  (`{ error: { code, message, details } }`). Endpoints that fail with
+   *  machine-readable context — e.g. the prompt promote gate's 409, which
+   *  carries `{ reason, failed_metrics, thresholds, scores }` — surface it
+   *  here; most errors leave it undefined. */
+  details?: Record<string, unknown>;
 
-  constructor(message: string, status: number, detail?: string) {
+  constructor(message: string, status: number, detail?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.details = details;
   }
 }
 
@@ -101,7 +114,12 @@ async function parseErrorResponse(res: Response): Promise<ApiError> {
     const body = await res.json() as Record<string, unknown>;
     const errorBody = body.error as Record<string, unknown> | undefined;
     const message = (errorBody?.message as string) || (body.detail as string) || (body.message as string) || `Request failed (${res.status})`;
-    return new ApiError(message, res.status, body.detail as string | undefined);
+    return new ApiError(
+      message,
+      res.status,
+      body.detail as string | undefined,
+      errorBody?.details as Record<string, unknown> | undefined,
+    );
   } catch {
     return new ApiError(`Request failed (${res.status})`, res.status);
   }
@@ -426,8 +444,46 @@ export const feedbackApi = {
     request(`/queries/${queryId}/feedback`),
 };
 
+// ─── Admin prompt-version API (F1) ──────────────────────────────────────────
+// Declared above `adminApi` because that object literal references it eagerly
+// (a `const` declared further down would be in its temporal dead zone).
+const adminPromptsApi = {
+  list: (params?: { name?: string; status?: PromptVersionStatus }): Promise<ListResponse<PromptVersion>> =>
+    request(`/admin/prompts${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  get: (id: string): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}`),
+
+  active: (name = 'answer'): Promise<ActivePrompt> =>
+    request(`/admin/prompts/active${buildQuery({ name })}`),
+
+  create: (body: PromptVersionCreate): Promise<PromptVersion> =>
+    request('/admin/prompts', { method: 'POST', body: JSON.stringify(body) }),
+
+  // 202 — the golden-set run happens in the background. Poll `get(id)` and
+  // watch `eval.status` flip off `running`.
+  evaluate: (id: string, subset: 'smoke' | 'full' = 'smoke'): Promise<PromptEvalQueued> =>
+    request(`/admin/prompts/${id}/evaluate${buildQuery({ subset })}`, { method: 'POST' }),
+
+  // 409 when the eval gate refuses; `ApiError.details` then carries
+  // `{ reason, failed_metrics, thresholds, scores }`.
+  promote: (id: string, force = false): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}/promote${buildQuery(force ? { force: true } : undefined)}`, { method: 'POST' }),
+
+  rollback: (id: string): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}/rollback`, { method: 'POST' }),
+
+  remove: (id: string): Promise<void> =>
+    request(`/admin/prompts/${id}`, { method: 'DELETE' }),
+
+  diff: (id: string, against = 'active'): Promise<PromptDiffResponse> =>
+    request(`/admin/prompts/${id}/diff${buildQuery({ against })}`),
+};
+
 // ─── Admin API ──────────────────────────────────────────────────────────────
 export const adminApi = {
+  prompts: adminPromptsApi,
+
   stats: (): Promise<AdminStats> =>
     request('/admin/stats'),
 

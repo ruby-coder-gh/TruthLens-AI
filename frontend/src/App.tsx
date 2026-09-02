@@ -30,6 +30,7 @@ const AdminUserDetailPage = lazy(() => import('./pages/AdminUserDetailPage'))
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'))
 const AdminAnalyticsPage = lazy(() => import('./pages/AdminAnalyticsPage'))
 const AdminAuditLogPage = lazy(() => import('./pages/AdminAuditLogPage'))
+const AdminPromptsPage = lazy(() => import('./pages/AdminPromptsPage'))
 const ChatNewPage = lazy(() => import('./pages/ChatNewPage'))
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'))
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'))
@@ -114,6 +115,7 @@ function AppRoutes() {
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
           <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+          <Route path="/admin/prompts" element={<AdminPromptsPage />} />
         </Route>
       </Route>
 
