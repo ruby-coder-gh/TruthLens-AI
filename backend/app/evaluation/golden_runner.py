@@ -65,6 +65,48 @@ def golden_set_version() -> str:
     return digest[:12]
 
 
+# How much of the *builtin* set a smoke run samples. It MUST include an
+# unanswerable entry: without one, `refusal_accuracy` is None, which
+# `evaluate_verdict` scores as a failure, so a purely answerable smoke run could
+# never pass the promotion gate.
+SMOKE_ANSWERABLE = 4
+SMOKE_UNANSWERABLE = 1
+
+
+def _smoke_sample(builtin: list[Any]) -> list[Any]:
+    """A small mixed slice of the builtin set: some answerable, one refusal."""
+    answerable = [e for e in builtin if getattr(e, "category", "") != "unanswerable"]
+    unanswerable = [e for e in builtin if getattr(e, "category", "") == "unanswerable"]
+    return answerable[:SMOKE_ANSWERABLE] + unanswerable[:SMOKE_UNANSWERABLE]
+
+
+async def load_eval_entries(db: Any, subset: str | None = None) -> list[Any]:
+    """Builtin + reviewer-promoted golden entries for `subset`.
+
+    This is what an application eval run scores; `run_golden_eval` calls it
+    whenever `entries` is omitted.
+
+    A smoke run samples the builtin set but keeps **every** promoted entry.
+    Sampling them too would make the default gate path silently ignore the
+    corrections a reviewer deliberately recorded — which is the whole point of
+    promoting one. The promoted set is human-curated and therefore small; a
+    deployment that grows it far enough to slow smoke runs down should be
+    running `subset=full` anyway.
+    """
+    from evaluation.golden_dataset import get_golden_dataset
+
+    from app.evaluation.golden_store import load_golden_entries
+
+    entries = await load_golden_entries(db)
+    if subset != SUBSET_SMOKE:
+        return entries
+
+    # `load_golden_entries` returns builtin first, then promoted (documented
+    # contract), so the split point is the builtin length.
+    builtin_count = len(get_golden_dataset())
+    return _smoke_sample(entries[:builtin_count]) + entries[builtin_count:]
+
+
 # Phrases a well-behaved system emits when it declines to answer. Kept in sync
 # with the generator's DEFAULT_SYSTEM_PROMPT ("I cannot find this information
 # in your documents.") and the golden reference answers for unanswerable
@@ -223,7 +265,7 @@ def evaluate_verdict(run: EvalRun) -> Verdict:
 
 
 async def run_golden_eval(
-    entries: list[Any],
+    entries: list[Any] | None = None,
     *,
     generate_fn: GenerateFn,
     guardrail_fn: GuardrailFn,
@@ -255,7 +297,25 @@ async def run_golden_eval(
     Exactly one ``EvalRun`` row is written with the six metric columns (None
     where not computed), ``golden_set_version``, a JSON ``notes`` breakdown and
     the ``status`` / ``verdict`` gate result. The persisted row is returned.
+
+    ``entries`` selects the golden set, and the version stamp follows it:
+
+    * omitted — builtin **plus** reviewer-promoted entries (``golden_store``),
+      narrowed by ``subset``, stamped with the store's hash so a promotion or
+      deletion is visible in ``golden_set_version``. This is the application
+      path (the admin evaluate job).
+    * passed explicitly — exactly those entries, stamped with the builtin-only
+      file hash. This keeps ``test_golden_regression.py`` deterministic and
+      independent of whatever a reviewer promoted last week.
     """
+    if entries is None:
+        from app.evaluation.golden_store import golden_set_version as store_version
+
+        entries = await load_eval_entries(db, subset)
+        version = await store_version(db)
+    else:
+        version = golden_set_version()
+
     faithfulness_scores: list[float] = []
     trust_scores: list[float] = []
     relevance_scores: list[float] = []
@@ -380,7 +440,7 @@ async def run_golden_eval(
     eval_run.answer_relevance = overall_relevance
     eval_run.answer_correctness = None
     eval_run.refusal_accuracy = refusal_accuracy
-    eval_run.golden_set_version = golden_set_version()
+    eval_run.golden_set_version = version
     eval_run.notes = json.dumps(breakdown, default=str)
     eval_run.prompt_version_id = prompt_version_id
     # Prefer what the provider actually served: a run that fell back to another

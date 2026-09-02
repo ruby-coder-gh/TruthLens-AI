@@ -67,11 +67,6 @@ router = APIRouter(
 
 DELETABLE_STATUSES = ("draft", "retired")
 VALID_SUBSETS = (SUBSET_SMOKE, SUBSET_FULL)
-# Smoke run size mirrors admin.py's DEFAULT_EVAL_SMOKE_LIMIT. It must include an
-# unanswerable entry, otherwise refusal_accuracy has no denominator and the
-# gate can never pass.
-SMOKE_ANSWERABLE = 4
-SMOKE_UNANSWERABLE = 1
 
 # Serialises the read-modify-write sequences that SQLite cannot express as a
 # constraint: per-name version numbering, and "exactly one active per name".
@@ -263,18 +258,6 @@ def _audit(user: User, action: str, prompt: PromptVersion, details: dict[str, An
     )
 
 
-def _golden_entries(subset: str) -> list[Any]:
-    """Entries for the run: the full dataset, or a small mixed smoke subset."""
-    from evaluation.golden_dataset import get_entries_by_category, get_golden_dataset
-
-    if subset == SUBSET_FULL:
-        return get_golden_dataset()
-    return (
-        get_entries_by_category("answerable")[:SMOKE_ANSWERABLE]
-        + get_entries_by_category("unanswerable")[:SMOKE_UNANSWERABLE]
-    )
-
-
 async def _generate_fn(gen_input: Any) -> Any:
     # Resolved at call time so tests can monkeypatch `generator.generate`.
     from app.generation import generator
@@ -343,7 +326,8 @@ async def _run_prompt_eval_background(
                 return
 
             run = await run_golden_eval(
-                _golden_entries(subset),
+                # `entries` omitted: the runner loads builtin + reviewer-promoted
+                # entries for `subset` and stamps the matching golden_set_version.
                 generate_fn=_generate_fn,
                 guardrail_fn=_guardrail_fn,
                 trust_fn=_trust_fn,

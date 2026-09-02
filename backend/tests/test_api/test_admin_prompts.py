@@ -813,3 +813,69 @@ class TestEvalRunHistoryContract:
         assert entry["model_used"] == "served:7b"
         assert entry["subset"] == "smoke"
         assert json.loads(entry["verdict"])["failed_metrics"] == ["trust"]
+
+
+class TestEvaluateIncludesPromotedEntries:
+    """The evaluate job scores builtin + reviewer-promoted golden entries.
+
+    Without this the promotion gate never sees the corrections reviewers make,
+    and `golden_set_version` claims a set the run did not actually cover.
+    """
+
+    @staticmethod
+    async def _promote(db, question: str) -> None:
+        from app.models.golden_entry import GoldenEntry as GoldenEntryRow
+
+        db.add(
+            GoldenEntryRow(
+                question=question,
+                reference_answer="The reviewer-corrected answer.",
+                source_documents=["Reviewed Doc"],
+                expected_grounding=True,
+                category="answerable",
+                difficulty=1,
+            )
+        )
+        await db.commit()
+
+    async def test_a_promoted_entry_is_scored_by_the_evaluate_job(
+        self, client: AsyncClient, admin_headers, monkeypatch, test_db
+    ):
+        await self._promote(test_db, "Who signed the 1994 lease?")
+        seen: list[str] = []
+
+        async def _generate(gen_input):
+            seen.append(gen_input.query)
+            ref = gen_input.contexts[0]["content"] if gen_input.contexts else ""
+            return GenerationResult(text=ref, token_count=3, model_used="mock")
+
+        _install_pipeline(monkeypatch, _generate)
+        draft = await _create_draft(client, admin_headers, "Candidate prompt text.")
+
+        # Default subset: promotion is gated on smoke runs, so the promoted
+        # entry has to reach *that* path, not just an explicit full run.
+        await _evaluate(client, admin_headers, draft["id"])
+
+        assert "Who signed the 1994 lease?" in seen
+
+    async def test_the_run_is_stamped_with_the_merged_golden_set_version(
+        self, client: AsyncClient, admin_headers, monkeypatch, test_db
+    ):
+        from app.evaluation.golden_runner import golden_set_version as builtin_version
+
+        await self._promote(test_db, "Who signed the 1994 lease?")
+
+        async def _generate(gen_input):
+            ref = gen_input.contexts[0]["content"] if gen_input.contexts else ""
+            return GenerationResult(text=ref, token_count=3, model_used="mock")
+
+        _install_pipeline(monkeypatch, _generate)
+        draft = await _create_draft(client, admin_headers, "Another candidate prompt.")
+
+        body = await _evaluate(client, admin_headers, draft["id"])
+
+        run = (
+            await test_db.execute(select(EvalRun).where(EvalRun.id == body["eval_run_id"]))
+        ).scalar_one()
+        assert run.golden_set_version != builtin_version()
+        assert len(run.golden_set_version) == 12

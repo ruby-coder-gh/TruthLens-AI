@@ -357,3 +357,116 @@ class TestRunGoldenEvalUnchangedBehaviour:
         assert "per_category" in parsed
         assert "per_difficulty" in parsed
         assert parsed["overall"]["refusal_accuracy"] == pytest.approx(1.0)
+
+
+class TestPromotedEntriesReachTheRunner:
+    """Omitting `entries` makes the runner evaluate builtin + promoted rows.
+
+    Passing `entries` explicitly keeps the builtin-only, deterministic path the
+    CI regression suite depends on.
+    """
+
+    @staticmethod
+    async def _promote(db, question: str) -> None:
+        from app.models.golden_entry import GoldenEntry as GoldenEntryRow
+
+        db.add(
+            GoldenEntryRow(
+                question=question,
+                reference_answer="The reviewer-corrected answer.",
+                source_documents=["Reviewed Doc"],
+                expected_grounding=True,
+                category="answerable",
+                difficulty=1,
+            )
+        )
+        await db.commit()
+
+    @staticmethod
+    def _recording_generate(seen: list[str]):
+        async def _generate(inp: GenerationInput) -> GenerationResult:
+            seen.append(inp.query)
+            ref = inp.contexts[0]["content"] if inp.contexts else ""
+            return GenerationResult(text=ref, token_count=1, model_used="mock")
+
+        return _generate
+
+    async def test_a_promoted_entry_is_scored_by_the_runner(self, test_db):
+        await self._promote(test_db, "Who signed the 1994 lease?")
+        seen: list[str] = []
+
+        await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+        )
+
+        assert "Who signed the 1994 lease?" in seen
+
+    async def test_promoted_entries_change_the_golden_set_version(self, test_db):
+        from app.evaluation.golden_runner import golden_set_version as builtin_version
+
+        await self._promote(test_db, "Who signed the 1994 lease?")
+
+        run = await run_golden_eval(
+            generate_fn=self._recording_generate([]),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+        )
+
+        assert run.golden_set_version != builtin_version()
+        assert len(run.golden_set_version) == 12
+
+    async def test_explicit_entries_keep_the_builtin_only_version(self, test_db):
+        """The CI regression path must not move when someone promotes an entry."""
+        from app.evaluation.golden_runner import golden_set_version as builtin_version
+
+        await self._promote(test_db, "Who signed the 1994 lease?")
+        seen: list[str] = []
+
+        run = await run_golden_eval(
+            _entries(),
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+        )
+
+        assert "Who signed the 1994 lease?" not in seen
+        assert run.golden_set_version == builtin_version()
+
+    async def test_smoke_samples_the_builtin_set_but_keeps_every_promoted_entry(self, test_db):
+        """Sampling promoted entries would make the default gate path ignore
+        exactly the corrections a reviewer bothered to record."""
+        await self._promote(test_db, "Who signed the 1994 lease?")
+        seen: list[str] = []
+
+        run = await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            subset="smoke",
+        )
+
+        assert "Who signed the 1994 lease?" in seen
+        # 4 answerable + 1 unanswerable sampled from builtin, + the promoted one.
+        assert len(seen) == 6
+        # `refusal_accuracy` is None without an unanswerable entry, and the gate
+        # scores None as a failure — so a smoke run could never pass.
+        assert run.refusal_accuracy is not None
+
+    async def test_smoke_stays_small_when_nothing_has_been_promoted(self, test_db):
+        seen: list[str] = []
+
+        await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            subset="smoke",
+        )
+
+        assert len(seen) == 5
