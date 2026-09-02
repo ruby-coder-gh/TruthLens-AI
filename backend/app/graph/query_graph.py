@@ -78,11 +78,15 @@ async def _cache_lookup_node(state: GraphState) -> dict:
                 "workspace_document_version": document_version,
             }
 
+        # Keyed on the active prompt too: a promoted prompt invalidates answers
+        # the retired one produced (same reason as the WS path).
+        resolved_prompt = await get_active_prompt(session)
         cached_query = await lookup_cached_query(
             session,
             workspace_id=workspace_id,
             query_text=state["query"],
             document_version=document_version,
+            prompt_version=resolved_prompt.hash,
             force_refresh=state.get("force_refresh", False),
         )
         await session.commit()

@@ -52,10 +52,18 @@ async def lookup_cached_query(
     workspace_id: str,
     query_text: str,
     document_version: int,
+    prompt_version: str | None = None,
     now: datetime | None = None,
     force_refresh: bool = False,
 ) -> Query | None:
-    """Find a valid cached answer for one workspace and increment its hit counter."""
+    """Find a valid cached answer for one workspace and increment its hit counter.
+
+    ``prompt_version`` is the content hash of the prompt that would answer this
+    query now. When supplied, only answers produced by that same prompt are
+    replayed: promoting a new prompt must take effect immediately, and rows
+    written before prompt pinning (``prompt_version IS NULL``) cannot be proven
+    still valid, so they count as misses.
+    """
     normalized_query = normalize_query(query_text)
 
     if not settings.QUERY_CACHE_ENABLED:
@@ -75,17 +83,19 @@ async def lookup_cached_query(
 
     timestamp = now or datetime.now(timezone.utc)
     cutoff = timestamp - timedelta(seconds=ttl_seconds)
+    filters = [
+        Query.workspace_id == workspace_id,
+        Query.normalized_query == normalized_query,
+        Query.document_version == document_version,
+        Query.response_text.isnot(None),
+        Query.created_at >= cutoff,
+    ]
+    if prompt_version is not None:
+        # NULL never equals a hash, so pre-pinning rows drop out here too.
+        filters.append(Query.prompt_version == prompt_version)
+
     cached_query = await session.scalar(
-        select(Query)
-        .where(
-            Query.workspace_id == workspace_id,
-            Query.normalized_query == normalized_query,
-            Query.document_version == document_version,
-            Query.response_text.isnot(None),
-            Query.created_at >= cutoff,
-        )
-        .order_by(Query.created_at.desc())
-        .limit(1)
+        select(Query).where(*filters).order_by(Query.created_at.desc()).limit(1)
     )
 
     if cached_query is None:
@@ -93,6 +103,7 @@ async def lookup_cached_query(
             "query_cache_miss",
             workspace_id=workspace_id,
             document_version=document_version,
+            prompt_version=prompt_version,
             reason="not_found",
         )
         return None
@@ -104,6 +115,7 @@ async def lookup_cached_query(
         workspace_id=workspace_id,
         cache_query_id=cached_query.id,
         document_version=document_version,
+        prompt_version=prompt_version,
     )
     return cached_query
 

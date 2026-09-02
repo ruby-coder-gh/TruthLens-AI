@@ -13,6 +13,8 @@ no Ollama and no `ragas` package are needed.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -20,6 +22,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.generation.generator import DEFAULT_SYSTEM_PROMPT, GenerationResult
 from app.generation.guardrail import GuardrailResult
 from app.models.audit_log import AuditLog
@@ -104,17 +107,37 @@ async def _create_draft(client, headers, content, **extra):
     return resp.json()
 
 
-async def _evaluate(client, headers, prompt_id, subset="smoke"):
-    """Queue an eval and then run the (normally detached) job inline."""
+async def _evaluate(client, headers, prompt_id, subset="smoke", *, monkeypatch=None):
+    """Queue an eval and run the job exactly once, inline.
+
+    The endpoint dispatches the job itself, so the dispatch is swallowed
+    (closing the coroutine to avoid an un-awaited warning) and the job is then
+    awaited deterministically — otherwise the golden set would be scored twice.
+    """
     from app.api import admin_prompts
 
-    resp = await client.post(
-        f"{PROMPTS}/{prompt_id}/evaluate?subset={subset}", headers=headers
-    )
+    def _swallow(coro):
+        coro.close()
+        return None
+
+    with _dispatch_swallowed(admin_prompts, _swallow):
+        resp = await client.post(
+            f"{PROMPTS}/{prompt_id}/evaluate?subset={subset}", headers=headers
+        )
     assert resp.status_code == 202, resp.text
     body = resp.json()
     await admin_prompts._run_prompt_eval_background(prompt_id, body["eval_run_id"], subset)
     return body
+
+
+@contextmanager
+def _dispatch_swallowed(module, replacement):
+    original = module._dispatch_eval
+    module._dispatch_eval = replacement
+    try:
+        yield
+    finally:
+        module._dispatch_eval = original
 
 
 class TestAuthorization:
@@ -299,6 +322,7 @@ class TestEvaluateQueue:
             f"{PROMPTS}/{draft['id']}/evaluate?subset=enormous", headers=admin_headers
         )
         assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == "INVALID_INPUT"
 
     async def test_evaluate_unknown_prompt_is_404(self, client: AsyncClient, admin_headers):
         assert (
@@ -565,6 +589,203 @@ class TestDelete:
 
         resp = await client.delete(f"{PROMPTS}/{draft['id']}", headers=admin_headers)
         assert resp.status_code == 409
+
+
+class TestStuckEvalRuns:
+    """A wedged `running` row must never permanently block the gate.
+
+    Every failure mode that could strand one is covered here: a crashed job, a
+    cancelled job (shutdown), a deleted prompt, and a row that simply outlived
+    its bound.
+    """
+
+    @staticmethod
+    async def _queue(client, headers, prompt_id, monkeypatch):
+        """POST /evaluate without letting the real job run."""
+        from app.api import admin_prompts
+
+        def _swallow(coro):
+            coro.close()
+            return None
+
+        monkeypatch.setattr(admin_prompts, "_dispatch_eval", _swallow)
+        resp = await client.post(f"{PROMPTS}/{prompt_id}/evaluate", headers=headers)
+        assert resp.status_code == 202, resp.text
+        return resp.json()["eval_run_id"]
+
+    @staticmethod
+    async def _age_run(test_db, run_id, seconds):
+        run = (await test_db.execute(select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+        run.run_at = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+        await test_db.commit()
+
+    async def test_a_stale_running_row_no_longer_blocks_promotion(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        _install_pipeline(monkeypatch, _grounded_generate())
+        draft = await _create_draft(client, admin_headers, "Prompt with a stuck run.")
+        await _evaluate(client, admin_headers, draft["id"])  # a real passing run
+
+        stuck = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+        assert (
+            await client.post(f"{PROMPTS}/{draft['id']}/promote", headers=admin_headers)
+        ).status_code == 409
+
+        await self._age_run(test_db, stuck, settings.EVAL_RUN_STALE_SECONDS + 60)
+
+        resp = await client.post(f"{PROMPTS}/{draft['id']}/promote", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "active"
+
+    async def test_a_stale_running_row_is_marked_errored(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        """The UI must stop polling it, so a terminal status is written back."""
+        _install_pipeline(monkeypatch, _grounded_generate())
+        draft = await _create_draft(client, admin_headers, "Another stuck run.")
+        await _evaluate(client, admin_headers, draft["id"])
+        stuck = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+        await self._age_run(test_db, stuck, settings.EVAL_RUN_STALE_SECONDS + 60)
+
+        await client.post(f"{PROMPTS}/{draft['id']}/promote", headers=admin_headers)
+
+        row = (await test_db.execute(select(EvalRun).where(EvalRun.id == stuck))).scalar_one()
+        await test_db.refresh(row)
+        assert row.status == "error"
+
+    async def test_a_missing_prompt_marks_the_run_errored(self, test_db: AsyncSession):
+        """Deleting the prompt mid-flight must not strand the row on `running`."""
+        from app.api import admin_prompts
+
+        run = EvalRun(status="running", prompt_version_id="gone", subset="smoke")
+        test_db.add(run)
+        await test_db.commit()
+        await test_db.refresh(run)
+
+        await admin_prompts._run_prompt_eval_background("gone", run.id, "smoke")
+
+        await test_db.refresh(run)
+        assert run.status == "error"
+
+    async def test_cancellation_marks_the_run_errored_and_propagates(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        """Shutdown cancels the task — record it, then let the cancel through."""
+        import asyncio as _asyncio
+
+        from app.api import admin_prompts
+
+        draft = await _create_draft(client, admin_headers, "Cancelled mid-run.")
+        run_id = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+
+        async def _cancelled(*args, **kwargs):
+            raise _asyncio.CancelledError()
+
+        monkeypatch.setattr(admin_prompts, "run_golden_eval", _cancelled)
+
+        with pytest.raises(_asyncio.CancelledError):
+            await admin_prompts._run_prompt_eval_background(draft["id"], run_id, "smoke")
+
+        row = (await test_db.execute(select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+        await test_db.refresh(row)
+        assert row.status == "error"
+
+    async def test_a_crashed_job_marks_the_run_errored(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        from app.api import admin_prompts
+
+        draft = await _create_draft(client, admin_headers, "Crashing run.")
+        run_id = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("ollama exploded")
+
+        monkeypatch.setattr(admin_prompts, "run_golden_eval", _boom)
+
+        await admin_prompts._run_prompt_eval_background(draft["id"], run_id, "smoke")
+
+        row = (await test_db.execute(select(EvalRun).where(EvalRun.id == run_id))).scalar_one()
+        await test_db.refresh(row)
+        assert row.status == "error"
+        assert json.loads(row.verdict)["failed_metrics"] == ["error"]
+
+    async def test_a_second_evaluate_while_one_is_running_conflicts(
+        self, client: AsyncClient, admin_headers, monkeypatch
+    ):
+        draft = await _create_draft(client, admin_headers, "Only one run at a time.")
+        await self._queue(client, admin_headers, draft["id"], monkeypatch)
+
+        resp = await client.post(f"{PROMPTS}/{draft['id']}/evaluate", headers=admin_headers)
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["details"]["reason"] == "eval_in_progress"
+
+    async def test_a_stale_run_does_not_block_a_new_evaluation(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        from app.api import admin_prompts
+
+        draft = await _create_draft(client, admin_headers, "Retry after a stuck run.")
+        stuck = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+        await self._age_run(test_db, stuck, settings.EVAL_RUN_STALE_SECONDS + 60)
+
+        def _swallow(coro):
+            coro.close()
+            return None
+
+        monkeypatch.setattr(admin_prompts, "_dispatch_eval", _swallow)
+        resp = await client.post(f"{PROMPTS}/{draft['id']}/evaluate", headers=admin_headers)
+
+        assert resp.status_code == 202
+
+    async def test_deleting_a_version_with_a_live_run_conflicts(
+        self, client: AsyncClient, admin_headers, monkeypatch
+    ):
+        draft = await _create_draft(client, admin_headers, "Busy draft.")
+        await self._queue(client, admin_headers, draft["id"], monkeypatch)
+
+        resp = await client.delete(f"{PROMPTS}/{draft['id']}", headers=admin_headers)
+
+        assert resp.status_code == 409
+        assert resp.json()["error"]["details"]["reason"] == "eval_in_progress"
+
+    async def test_deleting_is_allowed_once_the_run_is_stale(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        draft = await _create_draft(client, admin_headers, "Stale-but-deletable draft.")
+        stuck = await self._queue(client, admin_headers, draft["id"], monkeypatch)
+        await self._age_run(test_db, stuck, settings.EVAL_RUN_STALE_SECONDS + 60)
+
+        resp = await client.delete(f"{PROMPTS}/{draft['id']}", headers=admin_headers)
+
+        assert resp.status_code == 204
+
+
+class TestBackgroundTaskRetention:
+    async def test_dispatched_tasks_are_referenced_until_they_finish(self):
+        """A bare `create_task` handle can be GC'd mid-flight — keep a strong ref."""
+        import asyncio as _asyncio
+
+        from app.api import admin_prompts
+
+        started = _asyncio.Event()
+        release = _asyncio.Event()
+
+        async def _job():
+            started.set()
+            await release.wait()
+
+        admin_prompts._dispatch_eval(_job())
+        await started.wait()
+
+        assert len(admin_prompts._eval_tasks) == 1
+
+        release.set()
+        await _asyncio.sleep(0)
+        await _asyncio.sleep(0)
+
+        assert admin_prompts._eval_tasks == set()
 
 
 class TestEvalRunHistoryContract:

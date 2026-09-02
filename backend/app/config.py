@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     EVAL_MIN_TRUST: float = 0.5
     EVAL_MIN_CONTEXT_PRECISION: float = 0.5
     EVAL_REFUSAL_ACCURACY_MIN: float = 0.7
+    # An eval run still marked `running` after this long is presumed dead (the
+    # worker crashed or the process restarted mid-run). Stale rows are ignored
+    # by the promotion gate and lazily marked `error`, so a lost background
+    # task can never permanently wedge a prompt version.
+    EVAL_RUN_STALE_SECONDS: int = 1800
 
     # ─── JWT Auth ────────────────────────────
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30

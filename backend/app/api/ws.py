@@ -206,6 +206,9 @@ async def _run_query_pipeline(
 
         async with async_session_factory() as db:
             document_version = await get_workspace_document_version(db, workspace_id)
+            # Resolve the active prompt here (not just before generation): a
+            # promoted prompt must invalidate answers written by the old one.
+            resolved_prompt = await get_active_prompt(db)
             if filters:
                 logger.info("query_cache_bypassed", workspace_id=workspace_id, reason="filtered_query")
                 cached_query = None
@@ -215,6 +218,7 @@ async def _run_query_pipeline(
                     workspace_id=workspace_id,
                     query_text=sanitized_query,
                     document_version=document_version,
+                    prompt_version=resolved_prompt.hash,
                     force_refresh=force_refresh,
                 )
             await db.commit()
@@ -293,11 +297,6 @@ async def _run_query_pipeline(
             "payload": {"query_id": query_id, "phase": "generation", "progress": 0.6},
         })
 
-        # Resolve the active prompt (falls back to the code default) so the
-        # answer records which prompt — and pinned model — produced it.
-        async with async_session_factory() as db:
-            resolved_prompt = await get_active_prompt(db)
-
         gen_input = GenerationInput(
             query=sanitized_query,
             rewritten_query=rewritten,
@@ -362,6 +361,7 @@ async def _run_query_pipeline(
                 "query_id": query_id,
                 "latency_ms": elapsed_ms,
                 "model_used": model_used,
+                "prompt_version": prompt_version,
                 "token_count": total_tokens,
                 "from_cache": False,
             },

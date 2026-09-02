@@ -239,7 +239,9 @@ class TestRunGoldenEvalPinning:
         assert run.status in {"passed", "failed"}
         assert run.subset == "smoke"
         assert run.prompt_version_id == "pv-123"
-        assert run.model_used == "llama3.2:1b"
+        # The provider reported a model, so that is what the run records —
+        # see test_observed_model_wins_over_the_pinned_name.
+        assert run.model_used == "mock-model"
 
         verdict = json.loads(run.verdict)
         assert set(verdict.keys()) == {"passed", "failed_metrics", "thresholds"}
@@ -261,6 +263,39 @@ class TestRunGoldenEvalPinning:
 
         assert run.status == "failed"
         assert json.loads(run.verdict)["failed_metrics"]
+
+    async def test_observed_model_wins_over_the_pinned_name(self, test_db):
+        """A run that fell back to another model must not claim the pinned one."""
+
+        async def _generate(inp: GenerationInput) -> GenerationResult:
+            # Pinned model was unavailable; the provider served the fallback.
+            return GenerationResult(text="x", token_count=1, model_used="fallback:1b")
+
+        run = await run_golden_eval(
+            _entries(),
+            generate_fn=_generate,
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            model_override="pinned:70b",
+        )
+
+        assert run.model_used == "fallback:1b"
+
+    async def test_pinned_name_is_used_when_the_provider_reports_nothing(self, test_db):
+        async def _generate(inp: GenerationInput) -> GenerationResult:
+            return GenerationResult(text="x", token_count=1, model_used="")
+
+        run = await run_golden_eval(
+            _entries(),
+            generate_fn=_generate,
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            model_override="pinned:70b",
+        )
+
+        assert run.model_used == "pinned:70b"
 
     async def test_run_id_updates_an_existing_row_instead_of_inserting(self, test_db):
         placeholder = EvalRun(status="running", subset="smoke", prompt_version_id="pv-9")

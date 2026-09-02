@@ -383,7 +383,9 @@ async def run_golden_eval(
     eval_run.golden_set_version = golden_set_version()
     eval_run.notes = json.dumps(breakdown, default=str)
     eval_run.prompt_version_id = prompt_version_id
-    eval_run.model_used = model_override or observed_model or None
+    # Prefer what the provider actually served: a run that fell back to another
+    # model must not be recorded under the pinned name.
+    eval_run.model_used = observed_model or model_override or None
     eval_run.subset = subset
 
     verdict = evaluate_verdict(eval_run)

@@ -16,15 +16,21 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Coroutine
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.deps import get_current_admin, get_db
-from app.core.exceptions import AppException, ConflictException, NotFoundException
+from app.core.exceptions import (
+    AppException,
+    ConflictException,
+    InvalidInputException,
+    NotFoundException,
+)
 from app.evaluation.golden_runner import (
     STATUS_ERROR,
     STATUS_PASSED,
@@ -73,6 +79,18 @@ SMOKE_UNANSWERABLE = 1
 # answer (the app runs as a single process; the `(name, version)` unique index
 # is the backstop if that ever changes).
 _mutation_lock = asyncio.Lock()
+
+# asyncio only holds a weak reference to a running task, so a bare
+# `create_task(...)` can be garbage-collected mid-eval. Keep a strong
+# reference until the task completes.
+_eval_tasks: set[asyncio.Task[None]] = set()
+
+
+def _dispatch_eval(coro: Coroutine[Any, Any, None]) -> None:
+    """Fire-and-forget an eval job while retaining a reference to it."""
+    task = asyncio.create_task(coro)
+    _eval_tasks.add(task)
+    task.add_done_callback(_eval_tasks.discard)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────
@@ -162,22 +180,66 @@ async def _linked_run(db: AsyncSession, prompt: PromptVersion) -> EvalRun | None
 
 
 async def _has_running_eval(db: AsyncSession, prompt: PromptVersion) -> bool:
-    """True while a queued run for this version has not reported back yet.
+    """True while a *live* queued run for this version has not reported back.
 
     `prompt.eval_run_id` only advances when a run *completes*, so without this
     check a promotion could be waved through on a stale passing run while a
     fresh evaluation is still in flight.
+
+    The check is bounded by `EVAL_RUN_STALE_SECONDS`: a row still marked
+    `running` after that long means its worker died (crash, restart, lost
+    task), and an unbounded check would let that row wedge the version
+    forever. Stale rows are retired to `error` here so the admin UI also stops
+    polling them.
     """
-    return (
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.EVAL_RUN_STALE_SECONDS)
+    running = (
         await db.execute(
-            select(EvalRun.id)
-            .where(
+            select(EvalRun).where(
                 EvalRun.prompt_version_id == prompt.id,
                 EvalRun.status == STATUS_RUNNING,
             )
-            .limit(1)
         )
-    ).scalar_one_or_none() is not None
+    ).scalars().all()
+
+    live = False
+    for run in running:
+        if _as_utc(run.run_at) >= cutoff:
+            live = True
+            continue
+        logger.warning(
+            "prompt_eval_run_stale",
+            eval_run_id=run.id,
+            prompt_version_id=prompt.id,
+            run_at=str(run.run_at),
+        )
+        run.status = STATUS_ERROR
+        run.verdict = json.dumps(
+            {"passed": False, "failed_metrics": ["stale"], "thresholds": current_thresholds()}
+        )
+
+    if running:
+        await db.commit()
+    return live
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes; compare them as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _eval_in_progress(prompt: PromptVersion) -> AppException:
+    """409 for actions that cannot run while an evaluation is live."""
+    return AppException(
+        "CONFLICT",
+        "eval_in_progress",
+        status_code=409,
+        details={
+            "detail": "eval_in_progress",
+            "reason": "eval_in_progress",
+            "prompt_version_id": prompt.id,
+        },
+    )
 
 
 async def _current_active(db: AsyncSession, name: str) -> PromptVersion | None:
@@ -274,7 +336,10 @@ async def _run_prompt_eval_background(
                 )
             ).scalar_one_or_none()
             if prompt is None:
+                # The version was deleted mid-flight; the row would otherwise
+                # sit on `running` forever.
                 logger.error("prompt_eval_prompt_missing", prompt_version_id=prompt_version_id)
+                await _mark_run_errored(eval_run_id, "prompt version no longer exists")
                 return
 
             run = await run_golden_eval(
@@ -310,14 +375,20 @@ async def _run_prompt_eval_background(
                 status=run.status,
                 prompt_status=prompt.status,
             )
-    except Exception as e:  # noqa: BLE001 — background task must never crash the loop
+    except BaseException as e:  # noqa: BLE001 — must never strand a `running` row
+        # BaseException, not Exception: a shutdown cancels this task, and a
+        # CancelledError that skipped the write-back would leave the run stuck
+        # on `running` and block the gate. Record it, then re-raise so
+        # cancellation still propagates.
         logger.error(
             "prompt_eval_failed",
             prompt_version_id=prompt_version_id,
             eval_run_id=eval_run_id,
-            error=str(e),
+            error=str(e) or type(e).__name__,
         )
-        await _mark_run_errored(eval_run_id, str(e))
+        await _mark_run_errored(eval_run_id, str(e) or type(e).__name__)
+        if not isinstance(e, Exception):
+            raise
 
 
 async def _mark_run_errored(eval_run_id: str, message: str) -> None:
@@ -501,14 +572,14 @@ async def evaluate_prompt_version(
 ):
     """Queue a golden-set run for this version; poll the EvalRun for the result."""
     if subset not in VALID_SUBSETS:
-        raise AppException(
-            "INVALID_INPUT",
+        raise InvalidInputException(
             f"subset must be one of {', '.join(VALID_SUBSETS)}",
-            status_code=400,
             details={"subset": subset},
         )
 
     prompt = await _get_prompt(db, prompt_id)
+    if await _has_running_eval(db, prompt):
+        raise _eval_in_progress(prompt)
 
     run = EvalRun(
         status=STATUS_RUNNING,
@@ -523,7 +594,7 @@ async def evaluate_prompt_version(
     await db.refresh(run)
 
     # The run itself is slow (an LLM call per entry) — dispatch and return.
-    asyncio.create_task(_run_prompt_eval_background(prompt.id, run.id, subset))
+    _dispatch_eval(_run_prompt_eval_background(prompt.id, run.id, subset))
 
     return PromptEvalQueued(
         eval_run_id=run.id,
@@ -665,6 +736,9 @@ async def delete_prompt_version(
             f"Only {' / '.join(DELETABLE_STATUSES)} versions can be deleted "
             f"(v{prompt.version} is {prompt.status})"
         )
+    if await _has_running_eval(db, prompt):
+        # The job would come back to a prompt that no longer exists.
+        raise _eval_in_progress(prompt)
 
     db.add(
         _audit(
