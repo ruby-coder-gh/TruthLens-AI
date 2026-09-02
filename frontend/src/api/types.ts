@@ -74,6 +74,8 @@ export interface Document {
   uploaded_by: string;
   created_at: string;
   updated_at: string;
+  /** Chunks held back by the ingest-time injection scanner (F7a). */
+  quarantined_chunk_count?: number;
 }
 
 export interface DocumentStatus {
@@ -95,6 +97,8 @@ export interface DocumentDetail {
   created_at: string;
   updated_at: string;
   chunks: Array<{ id: string; index: number; content: string; token_count: number; created_at: string }>;
+  /** Chunks held back by the ingest-time injection scanner (F7a). */
+  quarantined_chunk_count?: number;
 }
 
 // ─── Query ──────────────────────────────────────────────────────────────────
@@ -109,6 +113,7 @@ export interface QuerySummary {
   compared_to_query_id?: string;
   review_status: 'needs_review' | 'reviewed' | 'dismissed';
   created_at: string;
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface QueryDetail {
@@ -132,6 +137,7 @@ export interface QueryDetail {
   reviewed_by?: string;
   reviewed_at?: string;
   created_at: string;
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface Source {
@@ -200,6 +206,8 @@ export interface ReviewQueueItem {
   reviewed_by?: string;
   reviewed_at?: string;
   created_at: string;
+  /** Non-null once this answer has been promoted into the golden set (F7b). */
+  golden_entry_id?: string | null;
 }
 
 export interface ReviewQueueCount {
@@ -533,4 +541,91 @@ export interface EvalRunNotes {
   };
   thresholds?: EvalThresholds;
   [key: string]: unknown;
+}
+
+// ─── F7a — Ingest-time injection quarantine ─────────────────────────────────
+
+export type QuarantineStatus = 'quarantined' | 'released' | 'dismissed';
+
+/**
+ * A chunk the ingest-time injection scanner held back from the index.
+ *
+ * SECURITY: `content` is attacker-controlled text (it *is* the injection
+ * payload). Render it only as a plain text node — never through a markdown or
+ * HTML renderer, and never via `dangerouslySetInnerHTML`.
+ */
+export interface QuarantinedChunk {
+  id: string;
+  workspace_id: string;
+  document_id: string;
+  document_name?: string | null;
+  chunk_index: number;
+  content: string;
+  pattern: string;
+  severity: string;
+  status: QuarantineStatus;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface QuarantineActionResponse {
+  id: string;
+  status: QuarantineStatus;
+  message: string;
+}
+
+// ─── F7b — Golden-set promotion ─────────────────────────────────────────────
+
+export type GoldenCategory = 'answerable' | 'unanswerable' | 'ambiguous';
+
+export interface GoldenPromoteRequest {
+  category: GoldenCategory;
+  reference_answer?: string;
+  difficulty?: number;
+  notes?: string;
+}
+
+export interface GoldenEntryResponse {
+  id: string;
+  question: string;
+  reference_answer: string;
+  source_documents: string[];
+  expected_grounding: boolean;
+  category: GoldenCategory;
+  difficulty: number;
+  notes?: string | null;
+  source: 'builtin' | 'promoted';
+  source_query_id?: string | null;
+  workspace_id?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+}
+
+export interface GoldenListResponse {
+  data: GoldenEntryResponse[];
+  meta: {
+    page: number;
+    page_size: number;
+    total: number;
+    source: 'builtin' | 'promoted' | 'all';
+    builtin_count: number;
+    promoted_count: number;
+    golden_set_version: string;
+  };
+}
+
+// ─── F7c — Evidence-sufficiency gate / abstention ───────────────────────────
+
+/** `"insufficient_evidence"` today; kept open so new server-side edge cases
+ *  don't break the build before the UI knows about them. */
+export type QueryEdgeCase = 'insufficient_evidence' | (string & {});
+
+export interface SufficiencyVerdict {
+  sufficient: boolean;
+  reason: string;
+  top_score: number;
+  supporting_count: number;
+  searched_count: number;
+  document_count: number;
 }

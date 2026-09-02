@@ -1,11 +1,24 @@
-import type { Source } from './types';
+import type { QueryEdgeCase, Source, SufficiencyVerdict } from './types';
+
+/** Payload of the terminal `complete` frame. `edge_case`/`sufficiency` are
+ *  present only when the evidence-sufficiency gate abstained (F7c); the cached
+ *  replay path carries `edge_case` but not `sufficiency`. */
+export interface QueryCompleteResult {
+  query_id: string;
+  latency_ms: number;
+  model_used: string;
+  token_count: number;
+  from_cache: boolean;
+  edge_case?: QueryEdgeCase | null;
+  sufficiency?: SufficiencyVerdict | null;
+}
 
 export interface QueryWebSocketCallbacks {
   onToken?: (token: string) => void;
   onSource?: (source: Source) => void;
   onGuardrail?: (result: { passed: boolean; score: number; details: string }) => void;
   onTrustScore?: (score: number, components: Record<string, number>) => void;
-  onComplete?: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number; from_cache: boolean }) => void;
+  onComplete?: (result: QueryCompleteResult) => void;
   onError?: (code: string, message: string) => void;
   onProgress?: (phase: string, progress: number) => void;
 }
@@ -41,6 +54,8 @@ interface WSMessagePayload {
   model_used?: string;
   token_count?: number;
   from_cache?: boolean;
+  edge_case?: QueryEdgeCase | null;
+  sufficiency?: SufficiencyVerdict | null;
   code?: string;
   message?: string;
   phase?: string;
@@ -216,6 +231,8 @@ export class QueryWebSocket {
           model_used: payload.model_used ?? '',
           token_count: payload.token_count ?? 0,
           from_cache: payload.from_cache ?? false,
+          edge_case: payload.edge_case ?? null,
+          sufficiency: payload.sufficiency ?? null,
         });
         break;
       }

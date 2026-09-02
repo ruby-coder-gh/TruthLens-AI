@@ -148,6 +148,50 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: /retry this question/i })).toBeInTheDocument();
   });
 
+  it('renders the abstention card and hides feedback when onComplete reports insufficient evidence', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    const textarea = screen.getByLabelText('Type your question');
+    await user.type(textarea, 'What is the moon made of?');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.('I cannot find this information in your documents.');
+      callbacks.onComplete?.({
+        query_id: 'q-abstain',
+        latency_ms: 42,
+        model_used: 'abstain',
+        token_count: 0,
+        from_cache: false,
+        edge_case: 'insufficient_evidence',
+        sufficiency: {
+          sufficient: false,
+          reason: 'low_relevance',
+          top_score: 0.02,
+          supporting_count: 0,
+          searched_count: 5,
+          document_count: 2,
+        },
+      });
+    });
+
+    expect(screen.getByText('No sufficient evidence')).toBeInTheDocument();
+    expect(
+      screen.getByText('Searched 5 chunks across 2 documents · best evidence score 0.02'),
+    ).toBeInTheDocument();
+
+    // Suggestion chips replace the normal action cluster.
+    expect(screen.getByRole('button', { name: /rephrase the question/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /upload a document/i })).toBeInTheDocument();
+
+    // No citations, no feedback thumbs on an abstention.
+    expect(screen.queryByLabelText('Thumbs up')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Thumbs down')).not.toBeInTheDocument();
+  });
+
   it('calls cancel() on the socket when Stop is clicked', async () => {
     const user = userEvent.setup();
     renderChatPage();

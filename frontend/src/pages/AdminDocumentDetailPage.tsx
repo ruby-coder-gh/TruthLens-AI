@@ -183,6 +183,12 @@ export default function AdminDocumentDetailPage() {
                   <span className="text-xs text-text-muted">{formatFileSize(doc.file_size)}</span>
                   {doc.page_count != null && <span className="text-xs text-text-muted">{doc.page_count} pages</span>}
                   {doc.chunk_count != null && <span className="text-xs text-text-muted">{doc.chunk_count} chunks</span>}
+                  {/* F7a — passages the injection scanner held back at ingest time. */}
+                  {(doc.quarantined_chunk_count ?? 0) > 0 && (
+                    <Badge color="red">
+                      {doc.quarantined_chunk_count} chunks quarantined
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>

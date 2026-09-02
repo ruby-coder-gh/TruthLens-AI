@@ -29,7 +29,7 @@ import { pageTransition, staggerContainer, staggerItem } from '../components/mot
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
-import type { EvalRunNotes, EvalRunResponse, EvalThresholds } from '../api/types';
+import type { EvalRunNotes, EvalRunResponse, EvalThresholds, GoldenListResponse } from '../api/types';
 
 type FlaggedAnswer = {
   id: string;
@@ -205,6 +205,9 @@ export default function AdminAnalyticsPage() {
   const [latestEvalRun, setLatestEvalRun] = useState<EvalRunResponse | null>(null);
   const [evalRunCount, setEvalRunCount] = useState(0);
   const [ragasUnavailable, setRagasUnavailable] = useState(false);
+  // F7b — golden-set inventory. Fetched separately from the analytics bundle so a
+  // 404/403 here never blanks the whole page; the line is simply omitted.
+  const [goldenMeta, setGoldenMeta] = useState<GoldenListResponse['meta'] | null>(null);
 
   const { addToast } = useToast();
   const [runningEval, setRunningEval] = useState(false);
@@ -395,6 +398,21 @@ export default function AdminAnalyticsPage() {
       setRunningEval(false);
     }
   }, [runningEval, stopPolling, addToast, pollForResults]);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminApi
+      .getGolden({ source: 'promoted', page_size: 1 })
+      .then((response) => {
+        if (!cancelled) setGoldenMeta(response.meta);
+      })
+      .catch(() => {
+        if (!cancelled) setGoldenMeta(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <BarChart3 size={14} /> },
@@ -637,7 +655,15 @@ export default function AdminAnalyticsPage() {
           <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} className="px-4 pt-2" />
           <div className="p-5 lg:p-6">
             {activeTab === 'ragas' ? (
-              evalRunCount === 0 ? (
+              <div className="space-y-5">
+                {goldenMeta ? (
+                  <p className="text-xs text-text-dim">
+                    Golden set: builtin {goldenMeta.builtin_count} / promoted {goldenMeta.promoted_count}
+                    {' · version '}
+                    <span className="font-mono text-text-muted">{goldenMeta.golden_set_version}</span>
+                  </p>
+                ) : null}
+                {evalRunCount === 0 ? (
                 <EmptyState
                   icon={<Shield size={24} />}
                   title="No evaluation runs yet"
@@ -751,7 +777,8 @@ export default function AdminAnalyticsPage() {
                     </div>
                   ) : null}
                 </div>
-              )
+              )}
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
