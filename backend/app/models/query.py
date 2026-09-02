@@ -35,6 +35,7 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Fresh-answer comparison lineage. The original answer remains immutable.
     compared_to_query_id: Mapped[str | None] = mapped_column(
         ForeignKey("queries.id", ondelete="SET NULL"), nullable=True, index=True
