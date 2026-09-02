@@ -114,6 +114,30 @@ async def store(
     return len(chunks)
 
 
+def _rebuild_bm25_excluding(workspace_id: str, excluded_ids: set[str]) -> None:
+    """Synchronously rebuild the BM25 index without the given document ids.
+
+    Blocking/CPU-bound (full corpus re-tokenize + re-index); callers should
+    run this via ``asyncio.to_thread`` rather than inline on the event loop.
+    """
+    existing_index, existing_corpus, existing_metadatas = _load_bm25_index(workspace_id)
+    if not existing_index or not existing_corpus:
+        return
+
+    filtered = [
+        (doc, meta)
+        for doc, meta in zip(existing_corpus, existing_metadatas)
+        if meta.get("document_id") not in excluded_ids
+    ]
+    if filtered:
+        new_corpus, new_metadatas = zip(*filtered)
+        new_index = BM25Okapi([_bm25_tokenizer(doc) for doc in new_corpus])
+        _save_bm25_index(workspace_id, new_index, list(new_corpus), list(new_metadatas))
+    else:
+        # All documents removed — clear index and cache
+        _save_bm25_index(workspace_id, BM25Okapi([]), [], [])
+
+
 async def delete_document(workspace_id: str, document_id: str) -> None:
     """Delete document chunks from ChromaDB + BM25 index."""
     # ChromaDB delete
@@ -124,25 +148,59 @@ async def delete_document(workspace_id: str, document_id: str) -> None:
     except Exception as e:
         logger.error("chromadb_delete_failed", error=str(e), document_id=document_id)
 
-    # BM25: rebuild without this document's chunks (expensive but robust)
+    # BM25: rebuild without this document's chunks (expensive but robust).
+    # Run off the event loop — full-corpus tokenize + BM25Okapi rebuild is
+    # CPU-bound and would otherwise block every other request.
     try:
-        existing_index, existing_corpus, existing_metadatas = _load_bm25_index(workspace_id)
-        if existing_index and existing_corpus:
-            filtered = [
-                (doc, meta)
-                for doc, meta in zip(existing_corpus, existing_metadatas)
-                if meta.get("document_id") != document_id
-            ]
-            if filtered:
-                new_corpus, new_metadatas = zip(*filtered) if filtered else ([], [])
-                new_index = BM25Okapi([_bm25_tokenizer(doc) for doc in new_corpus])
-                _save_bm25_index(workspace_id, new_index, list(new_corpus), list(new_metadatas))
-            else:
-                # All documents removed — clear index and cache
-                _save_bm25_index(workspace_id, BM25Okapi([]), [], [])
-            logger.info("bm25_delete_complete", document_id=document_id)
+        await asyncio.to_thread(_rebuild_bm25_excluding, workspace_id, {document_id})
+        logger.info("bm25_delete_complete", document_id=document_id)
     except Exception as e:
         logger.error("bm25_delete_failed", error=str(e), document_id=document_id)
+
+
+async def delete_documents(workspace_id: str, document_ids: list[str]) -> dict[str, str | None]:
+    """Batch-delete document chunks from ChromaDB + BM25 index for one workspace.
+
+    Unlike calling ``delete_document`` once per id, this issues exactly one
+    Chroma ``$in`` delete and one BM25 rebuild for the whole batch, and
+    returns a per-id error map instead of swallowing failures into a log
+    line only.
+
+    Returns:
+        dict mapping each input document_id to None (success) or an error
+        message (failure). A failure in either step marks every id in the
+        batch as failed with that step's error, since a single Chroma
+        collection call / BM25 rebuild cannot fail for only some ids.
+    """
+    results: dict[str, str | None] = dict.fromkeys(document_ids)
+    if not document_ids:
+        return results
+
+    try:
+        collection = get_workspace_collection(workspace_id)
+        # chromadb's Where stub can't narrow a literal "$in" key from a plain
+        # dict; the $in operator is valid at runtime (see Chroma's query docs).
+        await asyncio.to_thread(
+            collection.delete, where={"document_id": {"$in": document_ids}}  # type: ignore[dict-item]
+        )
+        logger.info("chromadb_batch_delete_complete", workspace_id=workspace_id, count=len(document_ids))
+    except Exception as e:
+        error = f"chromadb delete failed: {e}"
+        logger.error("chromadb_batch_delete_failed", error=str(e), workspace_id=workspace_id)
+        for doc_id in document_ids:
+            results[doc_id] = error
+        return results
+
+    try:
+        await asyncio.to_thread(_rebuild_bm25_excluding, workspace_id, set(document_ids))
+        logger.info("bm25_batch_delete_complete", workspace_id=workspace_id, count=len(document_ids))
+    except Exception as e:
+        error = f"bm25 rebuild failed: {e}"
+        logger.error("bm25_batch_delete_failed", error=str(e), workspace_id=workspace_id)
+        for doc_id in document_ids:
+            results[doc_id] = error
+
+    return results
 
 
 async def delete_workspace(workspace_id: str) -> None:

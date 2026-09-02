@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, UploadFile, File
 
 from app.config import settings
-from app.core.deps import check_workspace_access, check_workspace_access_or_admin, get_current_user, get_db
+from app.core.deps import (
+    check_workspace_access,
+    check_workspace_access_or_admin,
+    get_accessible_workspace_ids,
+    get_current_user,
+    get_db,
+)
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
@@ -168,6 +174,7 @@ async def upload_document(
         status=doc.status,
         error_message=doc.error_message,
         uploaded_by=doc.uploaded_by,
+        tags=doc.tags or [],
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -215,6 +222,7 @@ async def list_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                tags=d.tags or [],
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -341,6 +349,7 @@ async def list_all_documents(
     status: str | None = None,
     search: str | None = None,
     file_type: str | None = None,
+    tags: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
@@ -353,19 +362,17 @@ async def list_all_documents(
     if current_user.role == "admin":
         query = select(Document)
         count_query = select(func.count(Document.id))
-        if status:
-            query = query.where(Document.status == status)
-            count_query = count_query.where(Document.status == status)
     else:
-        # Regular user: documents from workspaces they are members of
-        member_ws_ids = select(WorkspaceMember.workspace_id).where(
-            WorkspaceMember.user_id == current_user.id
-        )
-        query = select(Document).where(Document.workspace_id.in_(member_ws_ids))
-        count_query = select(func.count(Document.id)).where(Document.workspace_id.in_(member_ws_ids))
-        if status:
-            query = query.where(Document.status == status)
-            count_query = count_query.where(Document.status == status)
+        # Regular user: documents from every workspace they can access
+        # (owner OR member — get_accessible_workspace_ids covers legacy
+        # workspaces where the owner has no WorkspaceMember row).
+        accessible_ws_ids = await get_accessible_workspace_ids(db, current_user)
+        query = select(Document).where(Document.workspace_id.in_(accessible_ws_ids))
+        count_query = select(func.count(Document.id)).where(Document.workspace_id.in_(accessible_ws_ids))
+
+    if status:
+        query = query.where(Document.status == status)
+        count_query = count_query.where(Document.status == status)
 
     # Apply the same controlled filters to the data and count queries. Search
     # is server-backed, so results on later pages remain discoverable.
@@ -380,6 +387,16 @@ async def list_all_documents(
         extension_pattern = f"%.{normalized_type}"
         query = query.where(func.lower(Document.original_filename).like(extension_pattern))
         count_query = count_query.where(func.lower(Document.original_filename).like(extension_pattern))
+
+    # Tag filter: comma-separated list, AND semantics (a document must carry
+    # every requested tag). Implemented as a LIKE against the serialized JSON
+    # array — adequate at current scale on SQLite. A Postgres deployment
+    # should switch this to a `tags @> ARRAY[...]` / JSONB containment query.
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    for tag in tag_list:
+        tag_pattern = f'%"{tag}"%'
+        query = query.where(Document.tags.like(tag_pattern))
+        count_query = count_query.where(Document.tags.like(tag_pattern))
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -402,6 +419,7 @@ async def list_all_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                tags=d.tags or [],
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
