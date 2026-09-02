@@ -16,11 +16,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.generation.generator import DEFAULT_SYSTEM_PROMPT
 from app.models.prompt_version import PromptVersion
 from app.prompts.hashing import compute_hash
+from app.utils.logger import logger
 
 DEFAULT_PROMPT_NAME = "answer"
 
@@ -55,14 +57,21 @@ async def get_active(db: AsyncSession, name: str = DEFAULT_PROMPT_NAME) -> Resol
     if cached is not None:
         return cached
 
-    row = (
-        await db.execute(
-            select(PromptVersion)
-            .where(PromptVersion.name == name, PromptVersion.status == "active")
-            .order_by(PromptVersion.version.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    try:
+        row = (
+            await db.execute(
+                select(PromptVersion)
+                .where(PromptVersion.name == name, PromptVersion.status == "active")
+                .order_by(PromptVersion.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    except SQLAlchemyError as e:
+        # Answering must not depend on the registry being readable — e.g. a
+        # deployment that has not yet run migration 010. Degrade to the code
+        # default and do NOT cache, so the next call retries.
+        logger.warning("prompt_registry_read_failed", name=name, error=str(e))
+        return _DEFAULT_RESOLVED
 
     if row is None:
         resolved = _DEFAULT_RESOLVED

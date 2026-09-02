@@ -112,6 +112,47 @@ class TestGetActive:
         assert resolved.is_default is True
         assert resolved.content == DEFAULT_SYSTEM_PROMPT
 
+    async def test_database_error_degrades_to_the_default_prompt(self, test_db, monkeypatch):
+        """A deployment that has not run migration 010 must still answer queries."""
+        from sqlalchemy.exc import OperationalError
+
+        async def _boom(*args, **kwargs):
+            raise OperationalError("SELECT 1", {}, Exception("no such table: prompt_versions"))
+
+        monkeypatch.setattr(test_db, "execute", _boom)
+
+        resolved = await registry.get_active(test_db, "answer")
+
+        assert resolved.is_default is True
+        assert resolved.content == DEFAULT_SYSTEM_PROMPT
+
+    async def test_database_error_is_not_cached(self, test_db, monkeypatch):
+        """A transient read failure must not pin the default forever."""
+        from sqlalchemy.exc import OperationalError
+
+        async def _boom(*args, **kwargs):
+            raise OperationalError("SELECT 1", {}, Exception("locked"))
+
+        monkeypatch.setattr(test_db, "execute", _boom)
+        await registry.get_active(test_db, "answer")
+
+        assert registry.cache_size() == 0
+
+        monkeypatch.undo()
+        content = "Recovered prompt."
+        test_db.add(
+            PromptVersion(
+                name="answer",
+                version=1,
+                content=content,
+                content_hash=registry.compute_hash(content),
+                status="active",
+            )
+        )
+        await test_db.commit()
+
+        assert (await registry.get_active(test_db, "answer")).content == content
+
 
 class TestDefaultPromptHash:
     def test_module_constant_matches_computed_hash(self):

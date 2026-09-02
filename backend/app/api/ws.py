@@ -18,6 +18,7 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
+from app.prompts.registry import get_active as get_active_prompt
 from app.query_cache import (
     cached_query_sources,
     get_workspace_document_version,
@@ -292,16 +293,23 @@ async def _run_query_pipeline(
             "payload": {"query_id": query_id, "phase": "generation", "progress": 0.6},
         })
 
+        # Resolve the active prompt (falls back to the code default) so the
+        # answer records which prompt — and pinned model — produced it.
+        async with async_session_factory() as db:
+            resolved_prompt = await get_active_prompt(db)
+
         gen_input = GenerationInput(
             query=sanitized_query,
             rewritten_query=rewritten,
             contexts=contexts,
+            system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+            model=resolved_prompt.model_name,
         )
 
         async def token_sender(msg: dict) -> None:
             await send_json(msg)
 
-        full_text, token_count, model_used = await stream_tokens(
+        full_text, token_count, model_used, prompt_tokens, prompt_version = await stream_tokens(
             gen_input, query_id, token_sender
         )
         total_tokens = token_count
@@ -382,6 +390,8 @@ async def _run_query_pipeline(
             token_count=total_tokens,
             normalized_query=normalize_query(sanitized_query),
             document_version=document_version,
+            prompt_tokens=prompt_tokens,
+            prompt_version=prompt_version,
         )
 
     except asyncio.CancelledError:
@@ -415,6 +425,8 @@ async def _save_query(
     token_count: int,
     normalized_query: str,
     document_version: int,
+    prompt_tokens: int | None = None,
+    prompt_version: str | None = None,
 ) -> None:
     """Save query result to database."""
     import json as json_mod
@@ -437,6 +449,8 @@ async def _save_query(
             model_used=model_used,
             latency_ms=latency_ms,
             token_count=token_count,
+            prompt_tokens=prompt_tokens,
+            prompt_version=prompt_version,
         )
         db.add(query)
         await db.commit()

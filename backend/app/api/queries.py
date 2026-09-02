@@ -79,6 +79,7 @@ def _to_summary(query: Query, *, is_pinned: bool = False) -> QuerySummary:
         trust_score=query.trust_score,
         guardrail_passed=query.guardrail_passed,
         model_used=query.model_used,
+        prompt_version=query.prompt_version,
         is_pinned=is_pinned,
         compared_to_query_id=query.compared_to_query_id,
         review_status=query.review_status,
@@ -100,6 +101,8 @@ def _to_detail(query: Query, *, is_pinned: bool = False) -> QueryDetailResponse:
         model_used=query.model_used,
         latency_ms=query.latency_ms,
         token_count=query.token_count,
+        prompt_tokens=query.prompt_tokens,
+        prompt_version=query.prompt_version,
         is_pinned=is_pinned,
         compared_to_query_id=query.compared_to_query_id,
         trust_components=query.trust_components or {},
@@ -143,6 +146,9 @@ async def _run_fresh_query(*, query: Query, user_id: str) -> dict[str, Any]:
         "trust_components": None,
         "model_used": "unknown",
         "latency_ms": 0,
+        "prompt_version": None,
+        "token_count": None,
+        "prompt_tokens": None,
         "error": None,
     }
     return await graph.ainvoke(initial_state)
@@ -469,7 +475,9 @@ async def compare_query_answer(
         guardrail_passed=guardrail.get("passed"),
         model_used=result.get("model_used"),
         latency_ms=int(result.get("latency_ms") or 0),
-        token_count=None,
+        token_count=result.get("token_count"),
+        prompt_tokens=result.get("prompt_tokens"),
+        prompt_version=result.get("prompt_version"),
         compared_to_query_id=original.id,
         review_status="needs_review",
     )

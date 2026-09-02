@@ -30,6 +30,8 @@ class QueryResponse(BaseModel):
     model_used: str | None = None
     latency_ms: int | None = None
     token_count: int | None = None
+    prompt_tokens: int | None = None
+    prompt_version: str | None = None
     is_pinned: bool = False
     compared_to_query_id: str | None = None
     trust_components: dict[str, Any] = {}
@@ -50,6 +52,7 @@ class QuerySummary(BaseModel):
     trust_score: float | None = None
     guardrail_passed: bool | None = None
     model_used: str | None = None
+    prompt_version: str | None = None
     is_pinned: bool = False
     compared_to_query_id: str | None = None
     review_status: str = "needs_review"
@@ -86,6 +89,8 @@ class QueryDetailResponse(BaseModel):
     model_used: str | None = None
     latency_ms: int | None = None
     token_count: int | None = None
+    prompt_tokens: int | None = None
+    prompt_version: str | None = None
     is_pinned: bool = False
     compared_to_query_id: str | None = None
     trust_components: dict[str, Any] = {}
