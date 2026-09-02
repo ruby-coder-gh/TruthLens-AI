@@ -25,6 +25,7 @@ import {
   Square,
   RotateCcw,
   Download,
+  RefreshCw,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -34,7 +35,7 @@ import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
 import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
-import { QueryWebSocket } from '../api/websocket';
+import { QueryWebSocket, WS_RECONNECT_MAX } from '../api/websocket';
 import type { Source } from '../api/types';
 import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
@@ -51,6 +52,21 @@ const MAX_TEXTAREA_ROWS = 6;
 // Retrieval window for the "Expand search scope" action — wider than the
 // default (5). Backend clamps to its own MAX_TOP_K, so overshooting is safe.
 const WIDE_SEARCH_TOP_K = 12;
+
+// Error-code → headline shown on a failed bubble. `connection_lost` /
+// `auth_expired` come from the WebSocket client after its reconnect budget
+// (or the token refresh) is exhausted.
+const ERROR_TITLES: Record<string, string> = {
+  connection_error: 'Connection lost',
+  connection_lost: 'Connection lost',
+  auth_error: 'Authentication error',
+  auth_expired: 'Session expired',
+  RESUME_UNAVAILABLE: 'Answer no longer available',
+  stream_ended: 'Answer incomplete',
+};
+
+/** Codes whose recovery hint is "reconnect or start over". */
+const CONNECTION_ERROR_CODES = new Set(['connection_error', 'connection_lost']);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,6 +92,8 @@ interface ChatMessage {
   queryId: string | null;
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
+  /** 1-based reconnect attempt currently in flight, or null when connected. */
+  reconnectAttempt: number | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -214,6 +232,7 @@ export default function ChatPage() {
         queryId: null,
         error: null,
         status: 'complete',
+        reconnectAttempt: null,
       };
 
       // Add pending assistant message
@@ -233,6 +252,7 @@ export default function ChatPage() {
         queryId: null,
         error: null,
         status: 'pending',
+        reconnectAttempt: null,
       };
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -291,7 +311,10 @@ export default function ChatPage() {
                 ? {
                     ...m,
                     status: 'complete' as const,
-                    queryId: result.query_id,
+                    reconnectAttempt: null,
+                    // The `ack` id is authoritative; never clobber it with an
+                    // empty one.
+                    queryId: result.query_id || m.queryId,
                     latencyMs: result.latency_ms,
                     modelUsed: result.model_used,
                     tokenCount: result.token_count,
@@ -314,11 +337,15 @@ export default function ChatPage() {
               // not a failure, so keep (or set) the neutral `cancelled` state instead
               // of flipping to the red error state.
               if (code === 'CANCELLED' || m.status === 'cancelled') {
-                return { ...m, status: 'cancelled' as const };
+                return { ...m, status: 'cancelled' as const, reconnectAttempt: null };
               }
-              return { ...m, status: 'error' as const, error: { code, message } };
+              return { ...m, status: 'error' as const, error: { code, message }, reconnectAttempt: null };
             }),
           );
+          // Every terminal error releases the composer — including the ones the
+          // socket only reports after a failed reconnect (`connection_lost`,
+          // `auth_expired`). A dropped socket used to report nothing at all,
+          // which left `isStreaming` true and the textarea disabled forever.
           setIsStreaming(false);
           setStreamingMessageId(null);
           streamingMsgIdRef.current = null;
@@ -327,6 +354,58 @@ export default function ChatPage() {
 
         onProgress: (phase: string) => {
           setPipelinePhase(phase);
+        },
+
+        // The socket dropped mid-answer and is retrying — keep the partial
+        // answer and the streaming lock in place, just say so on the bubble.
+        onReconnecting: (attempt: number) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, reconnectAttempt: attempt } : m,
+            ),
+          );
+        },
+
+        onReconnected: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, reconnectAttempt: null } : m,
+            ),
+          );
+        },
+
+        // The server accepted the query — learn its id now rather than waiting
+        // for `complete`, which a dropped stream may never deliver.
+        onAck: (ackQueryId: string) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, queryId: ackQueryId } : m,
+            ),
+          );
+        },
+
+        // The buffered stream expired and the query is being re-run, so the
+        // answer on screen is stale. Every field below is *appended* to as the
+        // stream arrives — without this reset the re-run's answer would be
+        // concatenated onto the old partial one and sources would be doubled.
+        onStreamRestart: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: '',
+                    sources: [],
+                    guardrail: null,
+                    trustScore: null,
+                    trustComponents: {},
+                    servedFromCache: false,
+                    queryId: null,
+                    error: null,
+                  }
+                : m,
+            ),
+          );
         },
       }, convId, topK, forceRefresh);
 
@@ -1100,6 +1179,18 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             aria-atomic="false"
             aria-busy={isMessageStreaming}
           >
+            {/* Reconnecting — the socket dropped mid-answer and is resuming */}
+            {isMessageStreaming && message.reconnectAttempt !== null && (
+              <div
+                role="status"
+                aria-label={`Reconnecting, attempt ${message.reconnectAttempt} of ${WS_RECONNECT_MAX}`}
+                className="flex items-center gap-1.5 self-start rounded-full border border-gold/30 bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold"
+              >
+                <RefreshCw size={11} className="animate-spin" aria-hidden="true" />
+                {`Reconnecting… (${message.reconnectAttempt}/${WS_RECONNECT_MAX})`}
+              </div>
+            )}
+
             {/* Pending state */}
             {message.status === 'pending' && (
               <div className="flex items-center gap-2 py-2">
@@ -1278,16 +1369,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 <div className="flex-1 text-sm">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-medium text-red">
-                      {message.error.code === 'connection_error'
-                        ? 'Connection lost'
-                        : message.error.code === 'auth_error'
-                          ? 'Authentication error'
-                          : 'Query failed'}
+                      {ERROR_TITLES[message.error.code] ?? 'Query failed'}
                     </p>
                     <RetryButton onClick={onRetry} />
                   </div>
                   <p className="mt-0.5 text-text-muted">{message.error.message}</p>
-                  {message.error.code === 'connection_error' && (
+                  {CONNECTION_ERROR_CODES.has(message.error.code) && (
                     <p className="mt-1 text-xs text-text-dim">
                       Try reconnecting or starting a new conversation.
                     </p>

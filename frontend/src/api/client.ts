@@ -121,7 +121,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
-async function attemptTokenRefresh(): Promise<boolean> {
+export async function attemptTokenRefresh(): Promise<boolean> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
   }

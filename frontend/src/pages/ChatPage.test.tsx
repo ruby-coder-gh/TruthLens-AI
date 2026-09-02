@@ -4,11 +4,25 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import ChatPage from './ChatPage';
+import { queryApi } from '../api/client';
 import type { QueryWebSocketCallbacks } from '../api/websocket';
+import type { Source } from '../api/types';
+
+function makeSource(overrides: Partial<Source> = {}): Source {
+  return {
+    chunk_id: 'chunk-1',
+    document_id: 'doc-1',
+    excerpt: 'Revenue grew by 12% year over year.',
+    relevance_score: 0.9,
+    document_name: 'Alpha Report',
+    matched_chunks: 1,
+    ...overrides,
+  };
+}
 
 vi.mock('../api/client', () => ({
   feedbackApi: { submit: vi.fn() },
-  queryApi: { exportMarkdown: vi.fn() },
+  queryApi: { exportMarkdown: vi.fn().mockResolvedValue({ blob: new Blob(['#']), filename: 'a.md' }) },
 }));
 
 const { mockConnect, mockDisconnect, mockCancel, instances } = vi.hoisted(() => ({
@@ -59,7 +73,9 @@ vi.mock('../api/websocket', () => {
       instances.push(this);
     }
   }
-  return { QueryWebSocket: MockQueryWebSocket };
+  // Mirrors WS_RECONNECT_BACKOFF_MS.length in ../api/websocket — the real
+  // value is asserted in websocket.test.ts, so a change there fails loudly.
+  return { QueryWebSocket: MockQueryWebSocket, WS_RECONNECT_MAX: 4 };
 });
 
 function renderChatPage() {
@@ -73,6 +89,9 @@ function renderChatPage() {
 
 describe('ChatPage', () => {
   beforeEach(() => {
+    // The Markdown export clicks a generated <a download>; jsdom can't navigate
+    // and logs "Not implemented" for it.
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     instances.length = 0;
     mockConnect.mockClear();
     mockDisconnect.mockClear();
@@ -115,9 +134,15 @@ describe('ChatPage', () => {
 
     expect(screen.getByText('The report shows steady growth.')).toBeInTheDocument();
 
+    // The id is learned at `ack`, well before `complete`, and an empty
+    // `complete.query_id` must not clobber it.
+    act(() => {
+      callbacks.onAck?.('q-1');
+    });
+
     act(() => {
       callbacks.onComplete?.({
-        query_id: 'q-1',
+        query_id: '',
         latency_ms: 842,
         model_used: 'qwen3:4b',
         token_count: 12,
@@ -128,6 +153,9 @@ describe('ChatPage', () => {
     expect(screen.getByText('842ms')).toBeInTheDocument();
     expect(screen.getByText('qwen3:4b')).toBeInTheDocument();
     expect(screen.getByLabelText('Copy response')).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText('Export as Markdown'));
+    expect(queryApi.exportMarkdown).toHaveBeenCalledWith('q-1');
   });
 
   it('shows an error and a Retry action when onError fires', async () => {
@@ -159,5 +187,128 @@ describe('ChatPage', () => {
     await user.click(screen.getByRole('button', { name: /stop generating/i }));
 
     expect(mockCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a Reconnecting badge on the streaming bubble and clears it on reconnect', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    const textarea = screen.getByLabelText('Type your question');
+    await user.type(textarea, 'A question over a flaky link');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.('Partial ans');
+    });
+    expect(screen.queryByRole('status', { name: /reconnecting/i })).not.toBeInTheDocument();
+
+    act(() => {
+      callbacks.onReconnecting?.(2);
+    });
+
+    expect(screen.getByRole('status', { name: /reconnecting/i })).toHaveTextContent(
+      'Reconnecting… (2/4)',
+    );
+    // The partial answer stays on screen while the client resumes.
+    expect(screen.getByText('Partial ans')).toBeInTheDocument();
+
+    act(() => {
+      callbacks.onReconnected?.();
+    });
+
+    expect(screen.queryByRole('status', { name: /reconnecting/i })).not.toBeInTheDocument();
+  });
+
+  it('replaces the stale partial answer when the stream restarts from scratch', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'A question whose buffer expires');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.('Hel');
+      callbacks.onSource?.(makeSource());
+    });
+    expect(screen.getByText('Hel')).toBeInTheDocument();
+
+    // The buffer expired, so the client re-ran the query — everything already
+    // rendered belongs to a stream that no longer exists.
+    act(() => {
+      callbacks.onStreamRestart?.();
+    });
+    act(() => {
+      callbacks.onToken?.('Hello');
+      callbacks.onSource?.(makeSource());
+    });
+
+    // Appended rather than replaced, this would read "HelHello" with the source
+    // listed twice (and duplicate React keys).
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+    expect(screen.queryByText('HelHello')).not.toBeInTheDocument();
+
+    act(() => {
+      callbacks.onComplete?.({
+        query_id: 'q-2',
+        latency_ms: 500,
+        model_used: 'qwen3:4b',
+        token_count: 1,
+        from_cache: false,
+      });
+    });
+
+    // Evidence surfaces once the answer completes: one card, not two.
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^sources/i })).toHaveTextContent('1');
+    expect(screen.getAllByText('Revenue grew by 12% year over year.')).toHaveLength(1);
+  });
+
+  it('releases the composer when a resumed stream ends without completing', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'A truncated answer');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onError?.('stream_ended', 'Stream ended without completion');
+    });
+
+    expect(screen.getByLabelText('Type your question')).not.toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Answer incomplete');
+    expect(screen.getByRole('button', { name: /retry this question/i })).toBeInTheDocument();
+  });
+
+  it('re-enables the composer and offers Retry when the connection is lost for good', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'A doomed question');
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByLabelText('Type your question')).toBeDisabled();
+
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onReconnecting?.(4);
+    });
+    act(() => {
+      callbacks.onError?.('connection_lost', 'Lost connection to the server.');
+    });
+
+    // The textarea used to stay locked forever, because a dropped socket
+    // reported nothing at all.
+    expect(screen.getByLabelText('Type your question')).not.toBeDisabled();
+    expect(screen.queryByRole('status', { name: /reconnecting/i })).not.toBeInTheDocument();
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Connection lost');
+    expect(alert).toHaveTextContent('Lost connection to the server.');
+    expect(screen.getByRole('button', { name: /retry this question/i })).toBeInTheDocument();
   });
 });
