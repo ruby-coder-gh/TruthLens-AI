@@ -684,6 +684,11 @@ async def get_evaluation_history(
                 refusal_accuracy=r.refusal_accuracy,
                 golden_set_version=r.golden_set_version,
                 notes=r.notes,
+                status=r.status,
+                prompt_version_id=r.prompt_version_id,
+                model_used=r.model_used,
+                subset=r.subset,
+                verdict=r.verdict,
             )
             for r in runs
         ],

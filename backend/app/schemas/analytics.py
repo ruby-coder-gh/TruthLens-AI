@@ -59,5 +59,10 @@ class EvalRunResponse(BaseModel):
     refusal_accuracy: float | None = None
     golden_set_version: str | None = None
     notes: str | None = None
+    status: str = "passed"
+    prompt_version_id: str | None = None
+    model_used: str | None = None
+    subset: str | None = None
+    verdict: str | None = None
 
     _serialize_run_at = field_serializer("run_at")(utc_iso)
