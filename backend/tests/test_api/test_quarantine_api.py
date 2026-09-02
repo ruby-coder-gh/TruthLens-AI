@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 
 import pytest
 from httpx import AsyncClient
@@ -510,31 +511,60 @@ class TestReleaseAtomicity:
         assert retry.json()["status"] == "released"
 
 
-def _assert_quarantine_query_never_joins_chunks(captured_sql: list[str]) -> None:
-    """Fix round 2, item 2: the original `"FROM chunks" in s.upper()` check
-    was vacuous (an all-caps haystack can never contain a lowercase-"hunks"
-    needle) and, once corrected to `"FROM CHUNKS"`, also caught an unrelated
-    pre-existing over-fetch: `check_workspace_access` loads `Workspace`,
-    whose `documents` relationship is `lazy="selectin"` and whose
-    `Document.chunks` is *also* `lazy="selectin"` — so *every*
-    workspace-scoped endpoint in the app (not just this one) already emits
-    a `FROM chunks` query before this endpoint's own code even runs. That
-    chain is pre-existing, unrelated to F7a, and out of this lane's scope
-    (see the report's Fix round 2 section).
+def _count_from_chunks(captured_sql: list[str]) -> int:
+    """Count statements whose SQL text references the `chunks` table.
 
-    What finding #4 actually requires — and what this asserts — is that
-    *this endpoint's own* SQL (identified by referencing
-    `chunk_quarantines`) never itself joins/selects `chunks`. `chunk_index`
-    and `quarantined_chunk_count` both contain "chunk" but never the
-    substring "CHUNKS", so this is a precise, non-vacuous check.
+    Case-insensitive on purpose (fix round 2 found the original
+    `"FROM chunks" in s.upper()` check vacuous — an all-caps haystack can
+    never contain a lowercase-"hunks" needle); `.upper()` on both sides
+    makes the comparison correct regardless of driver-side casing/quoting.
     """
-    quarantine_queries = [
-        s for s in captured_sql if "CHUNK_QUARANTINES" in s.upper().replace("`", "")
-    ]
-    assert quarantine_queries, "expected at least one chunk_quarantines query"
-    assert not any(
-        "CHUNKS" in s.upper().replace("`", "") for s in quarantine_queries
-    ), quarantine_queries
+    return sum(1 for s in captured_sql if "FROM CHUNKS" in s.upper().replace("`", ""))
+
+
+def _assert_no_new_chunks_overfetch(baseline_sql: list[str], quarantine_sql: list[str]) -> None:
+    """Fix round 3: a substring-scoped check (only inspect statements that
+    also mention `chunk_quarantines`) is blind to a full-`Document`-entity
+    reversion -- `Document.chunks` firing as a *separate* eager-selectin
+    statement (`SELECT ... FROM chunks WHERE chunks.document_id IN (...)`)
+    contains no `chunk_quarantines` text at all, so that scoped check
+    passed silently on exactly the regression it was meant to catch (the
+    reviewer reproduced this).
+
+    `check_workspace_access` (used by every workspace-scoped endpoint,
+    including this one) loads `Workspace`, whose `documents` relationship
+    is `lazy="selectin"` and whose `Document.chunks` is *also*
+    `lazy="selectin"` -- so a `FROM chunks` statement selecting
+    `chunks.content` already fires before any quarantine-specific code
+    runs, for reasons entirely unrelated to F7a (see the Fix round 2
+    report section) -- empirically confirmed: the baseline request below
+    (which shares the same dependency chain but never touches quarantine)
+    contains that exact statement too. A literal "zero anywhere" check on
+    either signal would therefore be unsatisfiable through no fault of
+    this endpoint's own code, so both checks are *deltas* against the
+    baseline's exact statement multiset (via `Counter`) rather than
+    absolute counts/presence: the quarantine request must not fire more
+    `FROM CHUNKS` statements, nor any additional statement selecting a
+    chunk body (`chunks.content`), than the baseline already does. Any
+    statement text unique to (or repeated more often in) the quarantine
+    capture is a genuine, endpoint-introduced over-fetch.
+    """
+    baseline_count = _count_from_chunks(baseline_sql)
+    quarantine_count = _count_from_chunks(quarantine_sql)
+    assert quarantine_count <= baseline_count, (
+        f"quarantine request emitted {quarantine_count} 'FROM chunks' statement(s), "
+        f"more than the {baseline_count} caused by the shared dependency chain alone:\n"
+        f"baseline={baseline_sql}\nquarantine={quarantine_sql}"
+    )
+
+    def _content_statements(sql: list[str]) -> Counter:
+        return Counter(s for s in sql if "CHUNKS.CONTENT" in s.upper().replace("`", ""))
+
+    excess_content = _content_statements(quarantine_sql) - _content_statements(baseline_sql)
+    assert not excess_content, (
+        f"quarantine request selected chunk bodies (chunks.content) beyond what the "
+        f"shared dependency baseline already causes: {list(excess_content.elements())}"
+    )
 
 
 @pytest.mark.asyncio
@@ -544,10 +574,12 @@ class TestQuarantineListDoesNotOverfetch:
     async def test_list_endpoint_does_not_touch_chunks_table(
         self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, test_engine
     ):
+        from sqlalchemy import event
+
         from app.models.chunk import Chunk
 
         workspace_id, doc = await _make_workspace_and_document(client, auth_headers, test_db)
-        # Seed real, large chunk rows for the document — if the endpoint's
+        # Seed real, large chunk rows for the document -- if the endpoint's
         # SQL ever selects from `chunks` (e.g. via an eager `document`
         # relationship walk), this content would appear in captured queries.
         for i in range(5):
@@ -555,29 +587,44 @@ class TestQuarantineListDoesNotOverfetch:
         await test_db.commit()
         await _seed_quarantine_row(test_db, workspace_id, doc.id, chunk_index=99)
 
-        captured_sql: list[str] = []
-
-        def _capture(conn, cursor, statement, parameters, context, executemany):
-            captured_sql.append(statement)
-
-        from sqlalchemy import event
-
         sync_engine = test_engine.sync_engine
-        event.listen(sync_engine, "before_cursor_execute", _capture)
+
+        # Baseline: same `check_workspace_access` dependency chain, no
+        # quarantine listing at all.
+        baseline_sql: list[str] = []
+
+        def _capture_baseline(conn, cursor, statement, parameters, context, executemany):
+            baseline_sql.append(statement)
+
+        event.listen(sync_engine, "before_cursor_execute", _capture_baseline)
+        try:
+            baseline_resp = await client.get(f"/api/workspaces/{workspace_id}", headers=auth_headers)
+        finally:
+            event.remove(sync_engine, "before_cursor_execute", _capture_baseline)
+        assert baseline_resp.status_code == 200
+
+        quarantine_sql: list[str] = []
+
+        def _capture_quarantine(conn, cursor, statement, parameters, context, executemany):
+            quarantine_sql.append(statement)
+
+        event.listen(sync_engine, "before_cursor_execute", _capture_quarantine)
         try:
             resp = await client.get(
                 f"/api/workspaces/{workspace_id}/review-queue/quarantine", headers=auth_headers
             )
         finally:
-            event.remove(sync_engine, "before_cursor_execute", _capture)
+            event.remove(sync_engine, "before_cursor_execute", _capture_quarantine)
 
         assert resp.status_code == 200
         assert resp.json()["data"][0]["document_name"] == "report.txt"
-        _assert_quarantine_query_never_joins_chunks(captured_sql)
+        _assert_no_new_chunks_overfetch(baseline_sql, quarantine_sql)
 
     async def test_admin_list_endpoint_does_not_touch_chunks_table(
         self, client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession, test_engine
     ):
+        from sqlalchemy import event
+
         from app.models.chunk import Chunk
 
         workspace_id, doc = await _make_workspace_and_document(client, auth_headers, test_db)
@@ -586,22 +633,35 @@ class TestQuarantineListDoesNotOverfetch:
         await test_db.commit()
         await _seed_quarantine_row(test_db, workspace_id, doc.id, chunk_index=99)
 
-        captured_sql: list[str] = []
-
-        def _capture(conn, cursor, statement, parameters, context, executemany):
-            captured_sql.append(statement)
-
-        from sqlalchemy import event
-
         sync_engine = test_engine.sync_engine
-        event.listen(sync_engine, "before_cursor_execute", _capture)
+
+        # Baseline: same admin-auth dependency chain (router-level
+        # `get_current_admin`), no Workspace load and no quarantine listing.
+        baseline_sql: list[str] = []
+
+        def _capture_baseline(conn, cursor, statement, parameters, context, executemany):
+            baseline_sql.append(statement)
+
+        event.listen(sync_engine, "before_cursor_execute", _capture_baseline)
+        try:
+            baseline_resp = await client.get("/api/admin/stats", headers=admin_headers)
+        finally:
+            event.remove(sync_engine, "before_cursor_execute", _capture_baseline)
+        assert baseline_resp.status_code == 200
+
+        quarantine_sql: list[str] = []
+
+        def _capture_quarantine(conn, cursor, statement, parameters, context, executemany):
+            quarantine_sql.append(statement)
+
+        event.listen(sync_engine, "before_cursor_execute", _capture_quarantine)
         try:
             resp = await client.get("/api/admin/quarantine", headers=admin_headers)
         finally:
-            event.remove(sync_engine, "before_cursor_execute", _capture)
+            event.remove(sync_engine, "before_cursor_execute", _capture_quarantine)
 
         assert resp.status_code == 200
-        _assert_quarantine_query_never_joins_chunks(captured_sql)
+        _assert_no_new_chunks_overfetch(baseline_sql, quarantine_sql)
 
 
 @pytest.mark.asyncio
