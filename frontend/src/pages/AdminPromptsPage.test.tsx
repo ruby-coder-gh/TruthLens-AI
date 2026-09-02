@@ -160,11 +160,38 @@ describe('AdminPromptsPage', () => {
     expect(faithfulness).toHaveTextContent(/pass/i);
   });
 
-  it('disables Promote for a draft and enables it for a staged version', async () => {
+  // BUG-4 regression: gating Promote on `staged` made the 409 unreachable —
+  // a failed eval is precisely what leaves (or returns) a version to `draft`,
+  // so the gate dialog and its Force promote button were dead code.
+  it('enables Promote for a draft as well as a staged version', async () => {
     renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
 
-    expect(await screen.findByRole('button', { name: 'Promote answer v3' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Promote answer v3' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Promote answer v2' })).toBeEnabled();
+    // `active` never offers Promote at all.
+    expect(screen.queryByRole('button', { name: 'Promote answer v1' })).not.toBeInTheDocument();
+  });
+
+  it('opens the gate dialog and force-promotes from a draft whose eval failed', async () => {
+    const user = userEvent.setup();
+    promote.mockRejectedValueOnce(gateError());
+    promote.mockResolvedValueOnce({ ...draftVersion, status: 'active' });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: 'Promote answer v3' }));
+
+    // The unforced call is what surfaces the server's verdict.
+    await waitFor(() => expect(promote).toHaveBeenCalledWith('p-draft', false));
+
+    const dialog = await screen.findByRole('dialog', { name: /promotion blocked/i });
+    expect(within(dialog).getByRole('row', { name: /faithfulness/i })).toHaveTextContent('0.05');
+    expect(within(dialog).getByRole('row', { name: /trust/i })).toHaveTextContent('0.46');
+
+    await user.click(within(dialog).getByRole('button', { name: /^force promote$/i }));
+    await user.click(within(dialog).getByRole('button', { name: /confirm force promote/i }));
+
+    await waitFor(() => expect(promote).toHaveBeenLastCalledWith('p-draft', true));
   });
 
   it('shows the failed metrics and a Force promote button when the gate refuses', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/utils';
 import AdminAuditLogPage from './AdminAuditLogPage';
@@ -132,6 +132,64 @@ describe('AdminAuditLogPage — filters and export', () => {
     await waitFor(() => expect(mockedAdminApi.exportLogs).toHaveBeenCalled());
     expect(await screen.findByText('Export blew up')).toBeInTheDocument();
     expect(mockedDownloadBlob).not.toHaveBeenCalled();
+  });
+
+  // BUG-2 regression: `audit.export` / `usage.export` rows carry no
+  // `resource_id`, and `user_id` is `ondelete=SET NULL`. Dereferencing either
+  // threw `Cannot read properties of null` inside the row map, which took the
+  // whole page down with a render error — permanently, since the row persists.
+  it('renders a row whose user_id, resource_id and details are all null', async () => {
+    mockedAdminApi.logs.mockResolvedValue({
+      data: [
+        {
+          id: 'log-null',
+          user_id: null,
+          action: 'audit.export',
+          resource_type: 'audit_log',
+          resource_id: null,
+          details: null,
+          ip_address: null,
+          created_at: '2026-08-15T11:00:00Z',
+        },
+        SAMPLE_LOGS.data[0],
+      ],
+      meta: { total: 2, page: 1, page_size: 10 },
+    });
+
+    renderWithProviders(<AdminAuditLogPage />);
+
+    // The page renders at all — and the null row is present, not skipped.
+    const row = await screen.findByRole('row', { name: /audit\.export/i });
+    expect(within(row).getAllByText('—')).toHaveLength(3);
+    // The healthy row alongside it is unaffected.
+    expect(screen.getByRole('row', { name: /user\.login/i })).toBeInTheDocument();
+  });
+
+  it('expands a row with null details instead of silently doing nothing', async () => {
+    mockedAdminApi.logs.mockResolvedValue({
+      data: [
+        {
+          id: 'log-null',
+          user_id: null,
+          action: 'audit.export',
+          resource_type: 'audit_log',
+          resource_id: null,
+          details: null,
+          created_at: '2026-08-15T11:00:00Z',
+        },
+      ],
+      meta: { total: 1, page: 1, page_size: 10 },
+    });
+
+    renderWithProviders(<AdminAuditLogPage />);
+    await screen.findByText('audit.export');
+
+    await userEvent.click(screen.getByRole('button', { name: /expand row/i }));
+
+    expect(await screen.findByText('Full details')).toBeInTheDocument();
+    expect(screen.getByText('No additional details recorded.')).toBeInTheDocument();
+    // Every nullable field in the detail panel falls back to an em dash.
+    expect(screen.getByText('IP address').nextElementSibling).toHaveTextContent('—');
   });
 
   it('sends an end-of-day date_to on export as well as on the list query', async () => {

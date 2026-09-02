@@ -103,6 +103,19 @@ interface ChatMessage {
   sufficiency?: SufficiencyVerdict | null;
 }
 
+interface StartQueryOptions {
+  /** Widen the retrieval window for this run only (Search wider). */
+  topK?: number;
+  /** Bypass the server-side query cache (Regenerate). */
+  forceRefresh?: boolean;
+  /**
+   * Retry: reuse the user turn already in the transcript and replace this
+   * errored/cancelled assistant bubble in place, instead of appending a
+   * duplicate question below the stale error card.
+   */
+  replaceAssistantId?: string;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatLatency(ms: number): string {
@@ -204,7 +217,8 @@ export default function ChatPage() {
 
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
-    (queryText: string, topK?: number, forceRefresh = false) => {
+    (queryText: string, options: StartQueryOptions = {}) => {
+      const { topK, forceRefresh = false, replaceAssistantId } = options;
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       // Tear down any previous socket before creating a new one — otherwise the
@@ -262,7 +276,21 @@ export default function ChatPage() {
         reconnectAttempt: null,
       };
 
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setMessages((prev) => {
+        if (replaceAssistantId) {
+          const idx = prev.findIndex((m) => m.id === replaceAssistantId);
+          if (idx !== -1) {
+            // A retry re-runs the question already in the transcript: swap the
+            // errored bubble for the fresh pending one in place, rather than
+            // appending a second copy of the question below a still-clickable
+            // "Retry" card that can never succeed again.
+            const next = prev.slice();
+            next[idx] = assistantMsg;
+            return next;
+          }
+        }
+        return [...prev, userMsg, assistantMsg];
+      });
       setStreamingMessageId(assistantMsgId);
       streamingMsgIdRef.current = assistantMsgId;
       setIsStreaming(true);
@@ -450,7 +478,7 @@ export default function ChatPage() {
     if (isStreaming) return;
     const last = lastUserQuestion();
     if (last) {
-      startQuery(last, WIDE_SEARCH_TOP_K);
+      startQuery(last, { topK: WIDE_SEARCH_TOP_K });
     } else {
       textareaRef.current?.focus();
     }
@@ -526,7 +554,10 @@ export default function ChatPage() {
       if (idx <= 0) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content);
+      // Replace the failed bubble rather than appending after it — otherwise
+      // the transcript keeps a dead "Connection lost / Retry" card above a
+      // second echo of the same question.
+      startQuery(precedingUser.content, { replaceAssistantId: assistantMsgId });
     },
     [messages, startQuery],
   );
@@ -537,7 +568,7 @@ export default function ChatPage() {
       if (idx <= 0 || isStreaming) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content, undefined, true);
+      startQuery(precedingUser.content, { forceRefresh: true });
     },
     [isStreaming, messages, startQuery],
   );

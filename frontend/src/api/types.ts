@@ -263,14 +263,21 @@ export interface AdminStats {
   query_cache_hit_rate?: number;
 }
 
+/**
+ * Mirrors `audit_logs` exactly: `user_id` is an `ondelete=SET NULL` FK, and
+ * `resource_id` / `details` / `ip_address` are all nullable columns. They were
+ * typed non-null here, which is how an `audit.export` row (no `resource_id`)
+ * white-screened the whole audit-log page — the compiler had no reason to
+ * object to `entry.resource_id.slice(...)`.
+ */
 export interface AuditLogEntry {
   id: string;
-  user_id: string;
+  user_id: string | null;
   action: string;
   resource_type: string;
-  resource_id: string;
-  details?: Record<string, unknown>;
-  ip_address?: string;
+  resource_id: string | null;
+  details?: Record<string, unknown> | null;
+  ip_address?: string | null;
   created_at: string;
 }
 
@@ -672,9 +679,15 @@ export interface GoldenListResponse {
   meta: {
     page: number;
     page_size: number;
+    /** Rows matching the *requested* filter — so `?source=promoted&status=pending`
+     *  is the pending-approval count. */
     total: number;
     source: 'builtin' | 'promoted' | 'all';
+    /** Echoes the requested `status` filter; `null` when it was omitted. */
+    status?: GoldenApprovalStatus | null;
     builtin_count: number;
+    /** All promoted rows regardless of status — deliberately *not* a
+     *  pending count. Read `meta.total` off a `status=pending` list for that. */
     promoted_count: number;
     golden_set_version: string;
   };

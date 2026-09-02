@@ -81,6 +81,17 @@ export default function AdminGoldenPage() {
 
   const entries = goldenQuery.data?.data ?? [];
 
+  // The approval backlog, so it stays visible while the admin is looking at the
+  // `approved` or `all` filter. Sourced from `?source=promoted&status=pending`
+  // per the backend contract — `meta.promoted_count` counts pending *and*
+  // approved rows, so it is not a substitute.
+  const pendingCountQuery = useQuery({
+    queryKey: [...GOLDEN_KEY, 'pending-count'],
+    queryFn: () => adminApi.golden.list({ source: 'promoted', status: 'pending', page_size: 1 }),
+    select: (response) => response.meta.total,
+  });
+  const pendingCount = pendingCountQuery.data ?? 0;
+
   const invalidateGolden = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: GOLDEN_KEY });
   }, [queryClient]);
@@ -113,6 +124,11 @@ export default function AdminGoldenPage() {
           <PageHeader
             title="Golden set approvals"
             description="Editor-promoted answers wait here for an admin to approve before they can gate prompt promotion."
+            actions={pendingCountQuery.isSuccess ? (
+              <Badge color={pendingCount > 0 ? 'orange' : 'gray'}>
+                {pendingCount === 1 ? '1 awaiting approval' : `${pendingCount} awaiting approval`}
+              </Badge>
+            ) : null}
           />
         </motion.div>
 
