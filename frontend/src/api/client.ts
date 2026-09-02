@@ -44,6 +44,11 @@ import type {
   GoldenPromoteRequest,
   GoldenEntryResponse,
   GoldenListResponse,
+  UsageQueryParams,
+  UsageReportResponse,
+  PricingResponse,
+  AuditLogFilters,
+  AuditLogExportFormat,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -113,6 +118,25 @@ async function parseErrorResponse(res: Response): Promise<ApiError> {
   } catch {
     return new ApiError(`Request failed (${res.status})`, res.status);
   }
+}
+
+// Blob-download endpoints mint their filename server-side (it usually embeds
+// a UTC timestamp the client can't reproduce deterministically), so it must
+// be read back off the response rather than hardcoded.
+function parseFilenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(header);
+  if (quotedMatch) return quotedMatch[1];
+  const bareMatch = /filename=([^;]+)/i.exec(header);
+  return bareMatch ? bareMatch[1].trim() : null;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -459,8 +483,8 @@ export const adminApi = {
   stats: (): Promise<AdminStats> =>
     request('/admin/stats'),
 
-  logs: (params?: Record<string, unknown>): Promise<PaginatedResponse<AuditLogEntry>> =>
-    request(`/admin/logs${buildQuery(params)}`),
+  logs: (params?: AuditLogFilters): Promise<PaginatedResponse<AuditLogEntry>> =>
+    request(`/admin/logs${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   evaluation: <T = unknown>(): Promise<T> =>
     request('/admin/evaluation'),
@@ -526,6 +550,40 @@ export const adminApi = {
 
   deleteGolden: (entryId: string): Promise<void> =>
     request(`/admin/golden/${entryId}`, { method: 'DELETE' }),
+
+  // ── Usage & cost reporting ───────────────────────────────────────────────
+  getUsage: (params?: UsageQueryParams): Promise<UsageReportResponse> =>
+    request(`/admin/usage${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  getUsagePricing: (): Promise<PricingResponse> =>
+    request('/admin/usage/pricing'),
+
+  // Bespoke fetch — CSV blob (Content-Disposition attachment), not JSON, so
+  // it can't go through the JSON-locked `request()` helper.
+  exportUsage: async (params?: UsageQueryParams): Promise<{ blob: Blob; filename: string }> => {
+    const query = buildQuery({ format: 'csv', ...(params as Record<string, unknown> | undefined) });
+    const res = await fetch(`${API_BASE}/admin/usage/export${query}`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    const blob = await res.blob();
+    const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+      ?? `usage-${params?.group_by ?? 'model'}-export.csv`;
+    return { blob, filename };
+  },
+
+  // ── Audit log export ─────────────────────────────────────────────────────
+  // Bespoke fetch — CSV/JSON blob (Content-Disposition attachment).
+  exportLogs: async (
+    format: AuditLogExportFormat,
+    filters?: AuditLogFilters,
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const query = buildQuery({ format, ...(filters as Record<string, unknown> | undefined) });
+    const res = await fetch(`${API_BASE}/admin/logs/export${query}`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    const blob = await res.blob();
+    const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+      ?? `audit-log-export.${format}`;
+    return { blob, filename };
+  },
 };
 
 // ─── Collection API ─────────────────────────────────────────────────────────

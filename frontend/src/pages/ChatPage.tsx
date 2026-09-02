@@ -41,6 +41,7 @@ import type { QueryEdgeCase, Source, SufficiencyVerdict } from '../api/types';
 import AbstentionCard from '../components/AbstentionCard';
 import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
+import { downloadBlob } from '../utils/download';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -559,14 +560,7 @@ export default function ChatPage() {
     async (queryId: string) => {
       try {
         const { blob, filename } = await queryApi.exportMarkdown(queryId);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, filename);
       } catch {
         addToast('Failed to export', 'error');
       }
