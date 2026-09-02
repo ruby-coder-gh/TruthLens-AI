@@ -109,7 +109,10 @@ describe('ReviewQueuePage', () => {
     renderPage();
 
     const tab = await screen.findByRole('tab', { name: /quarantined content/i });
-    expect(tab).toHaveTextContent('1');
+    // The count badge is fed by a different query than the tab label, so
+    // `findByRole` can resolve a beat before the count lands. Poll for it —
+    // asserting synchronously here is a race that shows up under load.
+    await waitFor(() => expect(tab).toHaveTextContent('1'));
 
     await user.click(tab);
 

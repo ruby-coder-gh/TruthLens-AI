@@ -20,6 +20,7 @@ import {
   ClipboardList,
   ClipboardCheck,
   FolderOpen,
+  GitBranch,
   Menu,
   X,
 } from 'lucide-react';
@@ -62,6 +63,7 @@ const navItems: NavItem[] = [
   { label: 'Analytics', path: '/admin/analytics', icon: BarChart3, adminOnly: true },
   { label: 'Settings', path: '/admin/settings', icon: Settings, adminOnly: true },
   { label: 'Audit Log', path: '/admin/audit-log', icon: ClipboardList, adminOnly: true },
+  { label: 'Prompts', path: '/admin/prompts', icon: GitBranch, adminOnly: true },
   { label: 'Collections', path: '/admin/collections', icon: FolderOpen, adminOnly: true },
   { label: 'API Catalog', path: '/api-catalog', icon: BookOpen, adminOnly: true },
 ];
@@ -192,6 +194,7 @@ export default function Layout() {
     if (path === '/admin/analytics') return location.pathname === '/admin/analytics';
     if (path === '/admin/settings') return location.pathname === '/admin/settings';
     if (path === '/admin/audit-log') return location.pathname === '/admin/audit-log';
+    if (path === '/admin/prompts') return location.pathname === '/admin/prompts';
     if (path === '/admin/collections') return location.pathname === '/admin/collections';
     return location.pathname.startsWith(path);
   };

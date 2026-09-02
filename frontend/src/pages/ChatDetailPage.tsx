@@ -153,6 +153,9 @@ export default function ChatDetailPage() {
                 {query.model_used && (
                   <Badge color="gray">{query.model_used}</Badge>
                 )}
+                {query.prompt_version && (
+                  <Badge color="purple" className="font-mono">prompt {query.prompt_version}</Badge>
+                )}
               </div>
             </div>
           </div>

@@ -83,4 +83,49 @@ describe('api/client', () => {
       expect(apiErr.detail).toBe('Workspace not found');
     }
   });
+
+  // The prompt promote gate answers 409 through the app's standard error
+  // envelope, and AdminPromptsPage reads the machine-readable body off
+  // `ApiError.details`. This binds `parseErrorResponse` to that contract.
+  it('ApiError.details carries the error envelope details (promote gate 409)', async () => {
+    const details = {
+      detail: 'eval_gate_failed',
+      reason: 'thresholds_not_met',
+      failed_metrics: ['faithfulness', 'trust'],
+      thresholds: {
+        min_faithfulness: 0.6,
+        min_trust: 0.5,
+        min_context_precision: 0.5,
+        refusal_accuracy_min: 0.7,
+      },
+      scores: { faithfulness: 0.05, trust: 0.46, refusal_accuracy: 1, context_precision: null },
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      async () => new Response(
+        JSON.stringify({ error: { code: 'CONFLICT', message: 'eval_gate_failed', details } }),
+        { status: 409 },
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { adminApi, ApiError } = await import('./client');
+
+    try {
+      await adminApi.prompts.promote('pv-1');
+      expect.unreachable('expected promote to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as InstanceType<typeof ApiError>;
+      expect(apiErr.status).toBe(409);
+      expect(apiErr.message).toBe('eval_gate_failed');
+      expect(apiErr.details).toEqual(details);
+    }
+
+    // A 409 is not a 401, so nothing is retried, and an unforced promote must
+    // not send `?force=`.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain('/admin/prompts/pv-1/promote');
+    expect(url).not.toContain('force');
+  });
 });
