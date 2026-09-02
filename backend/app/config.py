@@ -93,6 +93,15 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 64
     CHUNK_SEPARATORS: list[str] = ["\n\n", "\n", ".", "!", "?", ",", " ", ""]
 
+    # ─── Ingest-time Prompt-Injection Quarantine (F7a) ───────
+    # detect_injection() was written for short, adversarial user queries; run
+    # unfiltered over ordinary document prose it over-triggers (see
+    # app/ingestion/quarantine.py INGEST_EXCLUDED_PATTERNS). Only patterns at
+    # or above QUARANTINE_MIN_SEVERITY, and not in that exclusion set, ever
+    # quarantine a chunk.
+    QUARANTINE_ENABLED: bool = True
+    QUARANTINE_MIN_SEVERITY: str = "high"
+
     # ─── Query Rewriting ──────────────────────
     REWRITE_ENABLED: bool = True
     REWRITE_TEMPERATURE: float = 0.2

@@ -3,6 +3,7 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.chunk import Chunk
+from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.query import Query
 from app.models.feedback import Feedback
 from app.models.audit_log import AuditLog
@@ -25,6 +26,7 @@ __all__ = [
     "WorkspaceMember",
     "Document",
     "Chunk",
+    "ChunkQuarantine",
     "Query",
     "Feedback",
     "AuditLog",

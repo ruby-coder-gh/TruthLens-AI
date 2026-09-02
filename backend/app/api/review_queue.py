@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,13 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db, require_workspace_editor
 from app.core.exceptions import AppException, ConflictException, InvalidInputException, NotFoundException
+from app.ingestion.chunker import ChunkResult, _count_tokens
+from app.ingestion.embedder import embed
+from app.ingestion.indexer import store
 from app.models.audit_log import AuditLog
+from app.models.chunk import Chunk
+from app.models.chunk_quarantine import ChunkQuarantine
+from app.models.document import Document
 from app.models.golden_entry import GoldenEntry
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.query_cache import bump_workspace_document_version
 from app.schemas.common import PaginatedResponse
 from app.schemas.golden import GoldenEntryResponse, GoldenPromoteRequest
+from app.schemas.quarantine import QuarantineActionResponse, QuarantineChunkResponse, to_quarantine_response
 from app.schemas.review import (
     ReviewQueueCountResponse,
     ReviewQueueItem,
@@ -28,6 +37,7 @@ from app.schemas.review import (
     ReviewQueueSettingsUpdate,
     ReviewQueueUpdate,
 )
+from app.utils.logger import logger
 
 router = APIRouter(tags=["review queue"])
 
@@ -287,3 +297,207 @@ async def promote_query_to_golden_set(
         }),
     ))
     return GoldenEntryResponse.from_row(entry)
+
+
+# ─── Ingest-time prompt-injection quarantine (F7a) ────────────────────────
+
+
+@router.get(
+    "/workspaces/{workspace_id}/review-queue/quarantine",
+    response_model=PaginatedResponse[QuarantineChunkResponse],
+)
+async def list_quarantined_chunks(
+    workspace_id: str,
+    status: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    workspace: Workspace = Depends(check_workspace_access),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List chunks quarantined at ingestion time for a workspace (editor role).
+
+    Joins `Document.original_filename` explicitly rather than walking the
+    `ChunkQuarantine.document` relationship (which is `lazy="raise"`) —
+    `Document.chunks` is `lazy="selectin"`, so loading full `Document` ORM
+    objects here would eagerly pull every full chunk body for every listed
+    document's source document.
+    """
+    await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
+    filters = [ChunkQuarantine.workspace_id == workspace.id]
+    if status:
+        filters.append(ChunkQuarantine.status == status)
+
+    total = (await db.execute(select(func.count(ChunkQuarantine.id)).where(*filters))).scalar() or 0
+    rows = (await db.execute(
+        select(ChunkQuarantine, Document.original_filename)
+        .outerjoin(Document, Document.id == ChunkQuarantine.document_id)
+        .where(*filters)
+        .order_by(ChunkQuarantine.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )).all()
+
+    return PaginatedResponse(
+        data=[to_quarantine_response(record, document_name) for record, document_name in rows],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+async def _get_quarantine_or_404(db: AsyncSession, workspace_id: str, quarantine_id: str) -> ChunkQuarantine:
+    record = (await db.execute(
+        select(ChunkQuarantine).where(
+            ChunkQuarantine.id == quarantine_id, ChunkQuarantine.workspace_id == workspace_id
+        )
+    )).scalar_one_or_none()
+    if not record:
+        raise NotFoundException("Quarantined chunk", quarantine_id)
+    return record
+
+
+@router.post(
+    "/workspaces/{workspace_id}/review-queue/quarantine/{quarantine_id}/release",
+    response_model=QuarantineActionResponse,
+)
+async def release_quarantined_chunk(
+    workspace_id: str,
+    quarantine_id: str,
+    workspace: Workspace = Depends(check_workspace_access),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-embed + store a single quarantined chunk and mark it released.
+
+    Idempotent by design: `indexer.store()` opens and commits its *own*
+    session (Chroma + BM25 + the `chunks` row), independently of this
+    request's transaction. If this request fails anywhere after `store()`
+    durably succeeds but before its own commit, a retry must not re-run
+    `store()` (it would crash on `uq_document_index`) — it detects the
+    already-persisted `chunks` row and treats the chunk as already released.
+
+    The status flip + audit + count updates are flushed *before* calling
+    `store()`; if `store()` raises, we return 502 and let the request's
+    session roll back (via `get_db`'s exception handling) so nothing here
+    is left half-applied.
+    """
+    await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
+    record = await _get_quarantine_or_404(db, workspace.id, quarantine_id)
+    if record.status != "quarantined":
+        raise ConflictException(f"Quarantined chunk already {record.status}")
+
+    document = (await db.execute(
+        select(Document).where(Document.id == record.document_id)
+    )).scalar_one_or_none()
+    if not document:
+        raise NotFoundException("Document", record.document_id)
+
+    already_stored = (await db.execute(
+        select(Chunk.id).where(
+            Chunk.document_id == record.document_id, Chunk.index == record.chunk_index
+        )
+    )).scalar_one_or_none() is not None
+
+    record.status = "released"
+    record.reviewed_by = current_user.id
+    record.reviewed_at = datetime.now(timezone.utc)
+    document.quarantined_chunk_count = max((document.quarantined_chunk_count or 0) - 1, 0)
+    if not already_stored:
+        document.chunk_count = (document.chunk_count or 0) + 1
+    await bump_workspace_document_version(db, workspace.id)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="chunk.release",
+        resource_type="chunk_quarantine",
+        resource_id=record.id,
+        details=json.dumps({
+            "workspace_id": workspace.id,
+            "document_id": record.document_id,
+            "chunk_index": record.chunk_index,
+            "pattern": record.pattern,
+            "already_stored": already_stored,
+        }),
+    ))
+    await db.flush()
+
+    if not already_stored:
+        chunk_result = ChunkResult(
+            id=str(uuid.uuid4()),
+            document_id=record.document_id,
+            index=record.chunk_index,
+            content=record.content,
+            token_count=_count_tokens(record.content),
+        )
+        try:
+            embeddings = await embed([chunk_result], document_name=document.original_filename)
+            await store(
+                chunks=[chunk_result],
+                embeddings=embeddings,
+                workspace_id=workspace.id,
+                document_id=record.document_id,
+            )
+        except Exception as exc:
+            logger.error(
+                "chunk_release_store_failed",
+                quarantine_id=record.id,
+                document_id=record.document_id,
+                error=str(exc),
+            )
+            raise AppException(
+                code="RELEASE_STORE_FAILED",
+                message="Failed to store the released chunk in the vector index. "
+                "The chunk remains quarantined; please retry.",
+                status_code=502,
+            ) from exc
+
+    return QuarantineActionResponse(id=record.id, status=record.status, message="Chunk released and re-indexed")  # type: ignore[arg-type]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/review-queue/quarantine/{quarantine_id}/dismiss",
+    response_model=QuarantineActionResponse,
+)
+async def dismiss_quarantined_chunk(
+    workspace_id: str,
+    quarantine_id: str,
+    workspace: Workspace = Depends(check_workspace_access),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently dismiss a quarantined chunk; it stays excluded from retrieval.
+
+    `documents.quarantined_chunk_count` tracks rows still pending review
+    (`status == "quarantined"`), so dismissing — like releasing — decrements
+    it; the chunk itself remains permanently excluded from retrieval.
+    """
+    await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
+    record = await _get_quarantine_or_404(db, workspace.id, quarantine_id)
+    if record.status != "quarantined":
+        raise ConflictException(f"Quarantined chunk already {record.status}")
+
+    document = (await db.execute(
+        select(Document).where(Document.id == record.document_id)
+    )).scalar_one_or_none()
+
+    record.status = "dismissed"
+    record.reviewed_by = current_user.id
+    record.reviewed_at = datetime.now(timezone.utc)
+    if document is not None:
+        document.quarantined_chunk_count = max((document.quarantined_chunk_count or 0) - 1, 0)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="chunk.dismiss",
+        resource_type="chunk_quarantine",
+        resource_id=record.id,
+        details=json.dumps({
+            "workspace_id": workspace.id,
+            "document_id": record.document_id,
+            "chunk_index": record.chunk_index,
+            "pattern": record.pattern,
+        }),
+    ))
+    await db.flush()
+    return QuarantineActionResponse(id=record.id, status=record.status, message="Chunk dismissed")  # type: ignore[arg-type]

@@ -31,11 +31,23 @@ class Document(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     collection_id: Mapped[str | None] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"), nullable=True, index=True)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    quarantined_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="documents", lazy="selectin")
     uploader = relationship("User", back_populates="documents_uploaded", lazy="selectin")
     chunks = relationship("Chunk", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
+    # Default lazy loading ("select", i.e. no `lazy=` kwarg) keeps
+    # `cascade="all, delete-orphan"` working (confirmed empirically: 0
+    # orphan rows after `session.delete(doc)`) without eagerly loading every
+    # quarantined chunk's full `content` on every Document fetch (workspace
+    # list, list-all, search, single-doc). Only `lazy="noload"` breaks the
+    # cascade (a "noload" collection is never populated, so nothing gets
+    # cascaded); `selectin` works too but needlessly over-fetches on every
+    # read path, which is exactly what this relationship must not do.
+    quarantines = relationship(
+        "ChunkQuarantine", back_populates="document", cascade="all, delete-orphan"
+    )
     collection = relationship("Collection", back_populates="documents", lazy="selectin")
     comparison_results = relationship("ComparisonResult", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
 

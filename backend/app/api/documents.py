@@ -7,7 +7,7 @@ import json
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
@@ -180,6 +180,7 @@ async def upload_document(
         error_message=doc.error_message,
         uploaded_by=doc.uploaded_by,
         tags=doc.tags or [],
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -228,6 +229,7 @@ async def list_documents(
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
                 tags=d.tags or [],
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -266,6 +268,7 @@ async def get_document(
         page_count=doc.page_count,
         chunk_count=doc.chunk_count,
         status=doc.status,
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         chunks=[
@@ -427,6 +430,7 @@ async def list_all_documents(
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
                 tags=d.tags or [],
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -480,6 +484,17 @@ async def reindex_document(
     # Schedule background processing via asyncio
     file_path = settings.upload_path / doc.filename
     if file_path.exists():
+        # Clear the existing vector index (Chroma/BM25) and `chunks` rows
+        # before re-ingesting. `run_ingestion_pipeline`/`store()` only
+        # INSERT — they don't upsert-by-document — so re-running ingestion
+        # without this first would crash on `uq_document_index` for every
+        # previously-stored chunk index (including released quarantine
+        # chunks) and leave stale Chroma/BM25 entries beyond the new chunk
+        # count.
+        from app.ingestion.indexer import delete_document as delete_index
+        await delete_index(workspace_id, doc.id)
+        await db.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+
         asyncio.create_task(
             process_document_background(
                 document_id=doc.id,
@@ -510,6 +525,7 @@ async def process_document_background(
     """Background task: process document through ingestion pipeline."""
     from app.database import async_session_factory
     from app.graph.ingestion_graph import run_ingestion_pipeline
+    from app.models.chunk_quarantine import ChunkQuarantine
 
     logger.info("background_ingestion_start", document_id=document_id)
 
@@ -535,9 +551,62 @@ async def process_document_background(
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
         if doc:
+            # A fresh scan is authoritative for this run — supersede (never
+            # accumulate) prior quarantine state. This also makes reindex
+            # correct: without clearing first, re-running ingestion on the
+            # same poisoned document would double (triple, ...) the
+            # persisted rows and `quarantined_chunk_count` on every run.
+            # Previously "released" rows are deliberately included in the
+            # wipe — a reindex re-scans from scratch, so a chunk that was
+            # manually released before is re-evaluated like any other and,
+            # if still flagged, must go back through review.
+            await session.execute(
+                delete(ChunkQuarantine).where(ChunkQuarantine.document_id == document_id)
+            )
+
+            # The scan step runs before embed/store, so its findings are a
+            # real security signal worth keeping even if a later pipeline
+            # stage crashed — persist on both the success and failure
+            # branches below.
+            quarantined_items = ingest_result.get("quarantined") or []
+            for item in quarantined_items:
+                session.add(ChunkQuarantine(
+                    document_id=document_id,
+                    workspace_id=workspace_id,
+                    chunk_index=item["index"],
+                    content=item["content"],
+                    pattern=item.get("pattern"),
+                    severity=item.get("severity"),
+                    status="quarantined",
+                ))
+            doc.quarantined_chunk_count = len(quarantined_items)
+            if quarantined_items:
+                session.add(AuditLog(
+                    user_id=doc.uploaded_by,
+                    action="document.quarantine",
+                    resource_type="document",
+                    resource_id=document_id,
+                    details=json.dumps({
+                        "count": len(quarantined_items),
+                        "patterns": sorted({
+                            item["pattern"] for item in quarantined_items if item.get("pattern")
+                        }),
+                    }),
+                ))
+
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+                if doc.chunk_count == 0 and quarantined_items:
+                    # Every chunk was quarantined: not a pipeline failure
+                    # (nothing crashed) but the document has zero
+                    # retrievable content pending human review. Surface
+                    # that via error_message rather than a silent
+                    # "ready, 0 chunks" state; status stays "ready" since
+                    # the document itself was processed successfully.
+                    doc.error_message = f"All {len(quarantined_items)} chunks quarantined for review"
+                else:
+                    doc.error_message = None
                 await bump_workspace_document_version(session, workspace_id)
             else:
                 doc.status = "failed"

@@ -79,6 +79,33 @@ class TestGenerationInput:
         assert "source" in DEFAULT_SYSTEM_PROMPT.lower()
 
 
+class TestPromptSpotlighting:
+    """F7a: context blocks are wrapped in spotlight markers; system prompt warns about them."""
+
+    def test_context_blocks_wrapped_in_spotlight_markers(self):
+        contexts = [{"content": "Some retrieved text.", "document_name": "doc1.pdf"}]
+        text = _build_context_text(contexts)
+        assert "<<<source:1>>>" in text
+        assert "<<<end>>>" in text
+        assert "[source:1]" in text
+        assert "Some retrieved text." in text
+
+    def test_multiple_context_blocks_each_get_own_markers(self):
+        contexts = [
+            {"content": "Content A", "document_name": "doc1.pdf"},
+            {"content": "Content B", "document_name": "doc2.pdf"},
+        ]
+        text = _build_context_text(contexts)
+        assert "<<<source:1>>>" in text
+        assert "<<<source:2>>>" in text
+        assert text.count("<<<end>>>") == 2
+
+    def test_system_prompt_warns_markers_are_data_not_instructions(self):
+        prompt = DEFAULT_SYSTEM_PROMPT.lower()
+        assert "<<<source" in prompt or "markers" in prompt
+        assert "never" in prompt or "not instructions" in prompt or "untrusted" in prompt
+
+
 class TestStreamer:
     """Test streamer utilities."""
 
