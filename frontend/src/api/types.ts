@@ -535,6 +535,58 @@ export interface EvalRunNotes {
   [key: string]: unknown;
 }
 
+// ─── Usage & cost reporting ───────────────────────────────────────────────────
+export type UsageGroupBy = 'user' | 'workspace' | 'model';
+
+export interface UsageQueryParams {
+  group_by?: UsageGroupBy;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface UsageRow {
+  key: string;
+  label: string;
+  queries: number;
+  output_tokens: number;
+  prompt_tokens: number;
+  avg_latency_ms: number;
+  cache_hits: number;
+  est_cost_usd: number;
+}
+
+export interface UsageTotals {
+  queries: number;
+  output_tokens: number;
+  prompt_tokens: number;
+  avg_latency_ms: number;
+  cache_hits: number;
+  est_cost_usd: number;
+}
+
+export interface UsagePeriod {
+  from: string | null;
+  to: string | null;
+}
+
+export type PricingSource = 'config' | 'none';
+
+export interface UsageReportResponse {
+  rows: UsageRow[];
+  totals: UsageTotals;
+  pricing_source: PricingSource;
+  period: UsagePeriod;
+}
+
+export interface ModelPricingRate {
+  input_per_1k: number;
+  output_per_1k: number;
+}
+
+export interface PricingResponse {
+  pricing: Record<string, ModelPricingRate>;
+}
+
 // ─── Audit log filters & export ──────────────────────────────────────────────
 export interface AuditLogFilters {
   page?: number;

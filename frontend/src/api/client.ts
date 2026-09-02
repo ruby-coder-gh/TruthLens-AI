@@ -36,6 +36,9 @@ import type {
   ReviewQueueItem,
   ReviewQueueCount,
   Annotation,
+  UsageQueryParams,
+  UsageReportResponse,
+  PricingResponse,
   AuditLogFilters,
   AuditLogExportFormat,
 } from './types';
@@ -508,6 +511,25 @@ export const adminApi = {
 
   updateSettings: (data: Record<string, unknown>): Promise<Record<string, unknown>> =>
     request('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // ── Usage & cost reporting ───────────────────────────────────────────────
+  getUsage: (params?: UsageQueryParams): Promise<UsageReportResponse> =>
+    request(`/admin/usage${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  getUsagePricing: (): Promise<PricingResponse> =>
+    request('/admin/usage/pricing'),
+
+  // Bespoke fetch — CSV blob (Content-Disposition attachment), not JSON, so
+  // it can't go through the JSON-locked `request()` helper.
+  exportUsage: async (params?: UsageQueryParams): Promise<{ blob: Blob; filename: string }> => {
+    const query = buildQuery({ format: 'csv', ...(params as Record<string, unknown> | undefined) });
+    const res = await fetch(`${API_BASE}/admin/usage/export${query}`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    const blob = await res.blob();
+    const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+      ?? `usage-${params?.group_by ?? 'model'}-export.csv`;
+    return { blob, filename };
+  },
 
   // ── Audit log export ─────────────────────────────────────────────────────
   // Bespoke fetch — CSV/JSON blob (Content-Disposition attachment).

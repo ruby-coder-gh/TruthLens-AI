@@ -17,7 +17,11 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock3,
+  DollarSign,
+  Download,
   MessageSquare,
   Play,
   Shield,
@@ -29,7 +33,17 @@ import { pageTransition, staggerContainer, staggerItem } from '../components/mot
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
-import type { EvalRunNotes, EvalRunResponse, EvalThresholds } from '../api/types';
+import { downloadBlob } from '../utils/download';
+import type {
+  EvalRunNotes,
+  EvalRunResponse,
+  EvalThresholds,
+  ModelPricingRate,
+  PricingSource,
+  UsageGroupBy,
+  UsageRow,
+  UsageTotals,
+} from '../api/types';
 
 type FlaggedAnswer = {
   id: string;
@@ -79,6 +93,59 @@ const CATEGORY_METRIC_LABELS: Record<string, string> = {
 
 const EVAL_POLL_INTERVAL_MS = 15_000;
 const EVAL_POLL_MAX_TRIES = 4;
+
+const USAGE_GROUP_BY_OPTIONS: Array<{ value: UsageGroupBy; label: string }> = [
+  { value: 'user', label: 'User' },
+  { value: 'workspace', label: 'Workspace' },
+  { value: 'model', label: 'Model' },
+];
+
+type UsageSortKey = 'queries' | 'tokens' | 'cost';
+
+const USAGE_SORT_COLUMNS: Array<{ key: UsageSortKey; label: string }> = [
+  { key: 'queries', label: 'Queries' },
+  { key: 'tokens', label: 'Tokens' },
+  { key: 'cost', label: 'Est. Cost' },
+];
+
+const ZERO_USAGE_TOTALS: UsageTotals = {
+  queries: 0,
+  output_tokens: 0,
+  prompt_tokens: 0,
+  avg_latency_ms: 0,
+  cache_hits: 0,
+  est_cost_usd: 0,
+};
+
+function isoDateDaysAgo(days: number): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function usageSortValue(row: UsageRow | UsageTotals, key: UsageSortKey): number {
+  if (key === 'queries') return row.queries;
+  if (key === 'tokens') return row.output_tokens + row.prompt_tokens;
+  return row.est_cost_usd;
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(4)}`;
+}
+
+function formatPricingCaption(
+  pricing: Record<string, ModelPricingRate>,
+  pricingSource: PricingSource,
+): string {
+  const entries = Object.entries(pricing);
+  if (pricingSource === 'none' || entries.length === 0) {
+    return 'Estimated — no pricing configured for any model; costs shown as $0.';
+  }
+  const parts = entries.map(
+    ([model, rate]) => `${model} $${rate.input_per_1k}/1K in · $${rate.output_per_1k}/1K out`,
+  );
+  return `Estimated — rates: ${parts.join(', ')}.`;
+}
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
   const num = typeof value === 'number' ? value : Number(value);
@@ -211,6 +278,20 @@ export default function AdminAnalyticsPage() {
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollAttemptsRef = useRef(0);
 
+  // ── Usage & cost reporting (`usage` tab) ──────────────────────────────────
+  const [usageGroupBy, setUsageGroupBy] = useState<UsageGroupBy>('model');
+  const [usageDateFrom, setUsageDateFrom] = useState(() => isoDateDaysAgo(30));
+  const [usageDateTo, setUsageDateTo] = useState(() => isoDateDaysAgo(0));
+  const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
+  const [usageTotals, setUsageTotals] = useState<UsageTotals>(ZERO_USAGE_TOTALS);
+  const [usagePricing, setUsagePricing] = useState<Record<string, ModelPricingRate>>({});
+  const [usagePricingSource, setUsagePricingSource] = useState<PricingSource>('none');
+  const [usageLoading, setUsageLoading] = useState(true);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [usageExporting, setUsageExporting] = useState(false);
+  const [usageSortKey, setUsageSortKey] = useState<UsageSortKey>('queries');
+  const [usageSortDir, setUsageSortDir] = useState<'asc' | 'desc'>('desc');
+
   const loadAnalytics = useCallback(async (silentRefresh: boolean) => {
     if (silentRefresh) {
       setRefreshing(true);
@@ -301,6 +382,84 @@ export default function AdminAnalyticsPage() {
   }, [loadAnalytics]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const loadUsage = useCallback(async () => {
+    setUsageLoading(true);
+    setUsageError(null);
+
+    try {
+      const [usageData, pricingData] = await Promise.all([
+        adminApi.getUsage({ group_by: usageGroupBy, date_from: usageDateFrom, date_to: usageDateTo }),
+        adminApi.getUsagePricing(),
+      ]);
+
+      const rowsRaw = extractData<Record<string, unknown>>(usageData?.rows);
+      const normalizedRows: UsageRow[] = rowsRaw.map((item, idx) => ({
+        key: String(item.key ?? `row-${idx}`),
+        label: String(item.label ?? item.key ?? 'Unknown'),
+        queries: toFiniteNumber(item.queries, 0),
+        output_tokens: toFiniteNumber(item.output_tokens, 0),
+        prompt_tokens: toFiniteNumber(item.prompt_tokens, 0),
+        avg_latency_ms: toFiniteNumber(item.avg_latency_ms, 0),
+        cache_hits: toFiniteNumber(item.cache_hits, 0),
+        est_cost_usd: toFiniteNumber(item.est_cost_usd, 0),
+      }));
+      setUsageRows(normalizedRows);
+
+      const totalsRaw = (usageData?.totals ?? {}) as unknown as Record<string, unknown>;
+      setUsageTotals({
+        queries: toFiniteNumber(totalsRaw.queries, 0),
+        output_tokens: toFiniteNumber(totalsRaw.output_tokens, 0),
+        prompt_tokens: toFiniteNumber(totalsRaw.prompt_tokens, 0),
+        avg_latency_ms: toFiniteNumber(totalsRaw.avg_latency_ms, 0),
+        cache_hits: toFiniteNumber(totalsRaw.cache_hits, 0),
+        est_cost_usd: toFiniteNumber(totalsRaw.est_cost_usd, 0),
+      });
+
+      setUsagePricingSource(usageData?.pricing_source ?? 'none');
+      setUsagePricing(pricingData?.pricing ?? {});
+    } catch {
+      setUsageError('Unable to load the usage report right now.');
+      setUsageRows([]);
+      setUsageTotals(ZERO_USAGE_TOTALS);
+    } finally {
+      setUsageLoading(false);
+    }
+  }, [usageGroupBy, usageDateFrom, usageDateTo]);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    void loadUsage();
+  }, [loadUsage]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const handleExportUsage = useCallback(async () => {
+    setUsageExporting(true);
+    try {
+      const { blob, filename } = await adminApi.exportUsage({
+        group_by: usageGroupBy,
+        date_from: usageDateFrom,
+        date_to: usageDateTo,
+      });
+      downloadBlob(blob, filename);
+      addToast('Usage report exported.', 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to export usage report.', 'error');
+    } finally {
+      setUsageExporting(false);
+    }
+  }, [usageGroupBy, usageDateFrom, usageDateTo, addToast]);
+
+  const handleUsageSort = useCallback((key: UsageSortKey) => {
+    setUsageSortKey((prevKey) => {
+      if (prevKey !== key) {
+        setUsageSortDir('desc');
+      } else {
+        setUsageSortDir((prevDir) => (prevDir === 'desc' ? 'asc' : 'desc'));
+      }
+      return key;
+    });
+  }, []);
+
   const totalQueries = useMemo(
     () => queriesOverTimeData.reduce((sum, point) => sum + point.queries, 0),
     [queriesOverTimeData],
@@ -342,6 +501,21 @@ export default function AdminAnalyticsPage() {
     });
     return ordered.map((key) => ({ key, label: CATEGORY_LABELS[key] ?? key, data: perCategory[key]! }));
   }, [evalNotes]);
+
+  const sortedUsageRows = useMemo(() => {
+    const sorted = [...usageRows];
+    sorted.sort((a, b) => {
+      const diff = usageSortValue(a, usageSortKey) - usageSortValue(b, usageSortKey);
+      return usageSortDir === 'asc' ? diff : -diff;
+    });
+    return sorted;
+  }, [usageRows, usageSortKey, usageSortDir]);
+
+  const usageGroupByLabel = USAGE_GROUP_BY_OPTIONS.find((opt) => opt.value === usageGroupBy)?.label ?? 'Group';
+  const usagePricingCaption = useMemo(
+    () => formatPricingCaption(usagePricing, usagePricingSource),
+    [usagePricing, usagePricingSource],
+  );
 
   // ── Run evaluation (async, queued) ────────────────────────────────────────
   const stopPolling = useCallback(() => {
@@ -399,6 +573,7 @@ export default function AdminAnalyticsPage() {
   const tabs = [
     { id: 'overview', label: 'Overview', icon: <BarChart3 size={14} /> },
     { id: 'ragas', label: 'RAGAS Metrics', icon: <Shield size={14} /> },
+    { id: 'usage', label: 'Usage & Cost', icon: <DollarSign size={14} /> },
   ];
   const overviewCards = [
     {
@@ -752,6 +927,139 @@ export default function AdminAnalyticsPage() {
                   ) : null}
                 </div>
               )
+            ) : activeTab === 'usage' ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div
+                    className="inline-flex gap-1 rounded-xl glass p-1"
+                    role="group"
+                    aria-label="Group usage by"
+                  >
+                    {USAGE_GROUP_BY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setUsageGroupBy(opt.value)}
+                        aria-pressed={usageGroupBy === opt.value}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                          usageGroupBy === opt.value
+                            ? 'border-primary/30 bg-primary/15 text-primary-soft'
+                            : 'border-transparent text-text-muted hover:bg-card-2 hover:text-text'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="usage-date-from" className="flex items-center gap-1.5 text-xs text-text-muted">
+                      From
+                      <input
+                        id="usage-date-from"
+                        type="date"
+                        value={usageDateFrom}
+                        max={usageDateTo}
+                        onChange={(e) => setUsageDateFrom(e.target.value)}
+                        className="glass-input rounded-lg px-2 py-1.5 text-xs text-text focus:outline-none"
+                      />
+                    </label>
+                    <label htmlFor="usage-date-to" className="flex items-center gap-1.5 text-xs text-text-muted">
+                      To
+                      <input
+                        id="usage-date-to"
+                        type="date"
+                        value={usageDateTo}
+                        min={usageDateFrom}
+                        onChange={(e) => setUsageDateTo(e.target.value)}
+                        className="glass-input rounded-lg px-2 py-1.5 text-xs text-text focus:outline-none"
+                      />
+                    </label>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => { void handleExportUsage(); }}
+                      loading={usageExporting}
+                      disabled={usageExporting || sortedUsageRows.length === 0}
+                    >
+                      <Download size={14} />
+                      Export CSV
+                    </Button>
+                  </div>
+                </div>
+
+                {usageLoading ? (
+                  <StateBlock role="status">Loading usage report…</StateBlock>
+                ) : usageError ? (
+                  <StateBlock tone="danger" role="alert">{usageError}</StateBlock>
+                ) : sortedUsageRows.length === 0 ? (
+                  <EmptyState
+                    icon={<DollarSign size={24} />}
+                    title="No usage recorded"
+                    description="No queries were recorded for the selected filters."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="overflow-x-auto rounded-xl border border-border/60">
+                      <table className="w-full min-w-[640px] text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-border bg-card-2/60 text-text-dim">
+                            <th className="px-3 py-2 font-medium uppercase tracking-[0.06em]">{usageGroupByLabel}</th>
+                            {USAGE_SORT_COLUMNS.map((col) => (
+                              <th key={col.key} className="px-3 py-2 font-medium uppercase tracking-[0.06em]">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUsageSort(col.key)}
+                                  aria-sort={
+                                    usageSortKey === col.key
+                                      ? (usageSortDir === 'asc' ? 'ascending' : 'descending')
+                                      : 'none'
+                                  }
+                                  className="inline-flex items-center gap-1 hover:text-text"
+                                >
+                                  {col.label}
+                                  {usageSortKey === col.key ? (
+                                    usageSortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+                                  ) : null}
+                                </button>
+                              </th>
+                            ))}
+                            <th className="px-3 py-2 font-medium uppercase tracking-[0.06em]">Avg Latency</th>
+                            <th className="px-3 py-2 font-medium uppercase tracking-[0.06em]">Cache Hits</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedUsageRows.map((row) => (
+                            <tr key={row.key} className="border-b border-border/50 last:border-b-0">
+                              <td className="px-3 py-2 font-medium text-text">{row.label}</td>
+                              <td className="px-3 py-2 tabular-nums text-text-muted">{row.queries.toLocaleString()}</td>
+                              <td className="px-3 py-2 tabular-nums text-text-muted">
+                                {(row.output_tokens + row.prompt_tokens).toLocaleString()}
+                              </td>
+                              <td className="px-3 py-2 tabular-nums text-text-muted">{formatUsd(row.est_cost_usd)}</td>
+                              <td className="px-3 py-2 tabular-nums text-text-muted">{Math.round(row.avg_latency_ms)}ms</td>
+                              <td className="px-3 py-2 tabular-nums text-text-muted">{row.cache_hits.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-border bg-card-2/40 font-semibold text-text">
+                            <td className="px-3 py-2">Total</td>
+                            <td className="px-3 py-2 tabular-nums">{usageTotals.queries.toLocaleString()}</td>
+                            <td className="px-3 py-2 tabular-nums">
+                              {(usageTotals.output_tokens + usageTotals.prompt_tokens).toLocaleString()}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{formatUsd(usageTotals.est_cost_usd)}</td>
+                            <td className="px-3 py-2 tabular-nums">{Math.round(usageTotals.avg_latency_ms)}ms</td>
+                            <td className="px-3 py-2 tabular-nums">{usageTotals.cache_hits.toLocaleString()}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <p className="text-xs text-text-dim">{usagePricingCaption}</p>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
