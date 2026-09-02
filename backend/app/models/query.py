@@ -48,6 +48,10 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Non-standard terminations of the pipeline. NULL = a normal generated
+    # answer; "insufficient_evidence" = the evidence-sufficiency gate abstained
+    # before any LLM call.
+    edge_case: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="queries", lazy="selectin")

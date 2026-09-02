@@ -6,7 +6,7 @@ import asyncio
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_serializer, field_validator
 from sqlalchemy import case, func, or_, select
@@ -19,10 +19,12 @@ from app.core.auth import hash_password
 from app.core.refresh_tokens import revoke_all_refresh_tokens
 from app.core.deps import get_current_admin, get_db
 from app.core.exceptions import ConflictException, NotFoundException
+from app.evaluation.golden_store import golden_counts, golden_set_version, load_promoted_entries
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.eval_run import EvalRun
 from app.models.feedback import Feedback
+from app.models.golden_entry import GoldenEntry
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -37,6 +39,7 @@ from app.schemas.analytics import (
     UserActivityResponse,
 )
 from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
+from app.schemas.golden import GoldenEntryResponse
 from app.schemas.user import UserResponse
 from app.utils.logger import logger
 
@@ -722,3 +725,97 @@ async def update_admin_settings(body: AdminSettingsUpdate):
         _settings_overrides["rate_limit_enabled"] = body.rate_limit_enabled
 
     return await get_admin_settings()
+
+
+# ─── Golden set (F7b) ────────────────────────────────────────────────
+
+
+def _builtin_golden_responses() -> list[GoldenEntryResponse]:
+    """Builtin dataset entries in the same response shape as promoted rows.
+
+    Synthetic ``builtin:<n>`` ids: the hard-coded dataset has no primary keys,
+    and DELETE only ever matches a real ``golden_entries`` row, so a builtin
+    entry can never be removed through this API.
+    """
+    from evaluation.golden_dataset import get_golden_dataset
+
+    return [
+        GoldenEntryResponse(
+            id=f"builtin:{index}",
+            question=entry.question,
+            reference_answer=entry.reference_answer,
+            source_documents=list(entry.source_documents),
+            expected_grounding=entry.expected_grounding,
+            category=entry.category,
+            difficulty=entry.difficulty,
+            notes=entry.notes or None,
+            source="builtin",
+        )
+        for index, entry in enumerate(get_golden_dataset())
+    ]
+
+
+@router.get("/golden", response_model=PaginatedResponse[GoldenEntryResponse])
+async def list_golden_entries(
+    source: Literal["promoted", "builtin", "all"] = "promoted",
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """List golden-set entries with the version + builtin/promoted counts.
+
+    Paginates over an in-memory merge: the builtin dataset is a fixed ~100-entry
+    Python list, so there is nothing to gain from pushing this into SQL.
+    """
+    page = max(1, page)
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+    entries: list[GoldenEntryResponse] = []
+    if source in ("builtin", "all"):
+        entries.extend(_builtin_golden_responses())
+    if source in ("promoted", "all"):
+        entries.extend(GoldenEntryResponse.from_row(row) for row in await load_promoted_entries(db))
+    offset = (page - 1) * page_size
+    counts = await golden_counts(db)
+    return PaginatedResponse(
+        data=entries[offset:offset + page_size],
+        meta={
+            "page": page,
+            "page_size": page_size,
+            "total": len(entries),
+            "source": source,
+            "builtin_count": counts["builtin"],
+            "promoted_count": counts["promoted"],
+            "golden_set_version": await golden_set_version(db),
+        },
+    )
+
+
+@router.delete("/golden/{entry_id}", status_code=204)
+async def delete_golden_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retire a promoted golden entry (builtin entries are not deletable)."""
+    entry = (await db.execute(
+        select(GoldenEntry).where(GoldenEntry.id == entry_id)
+    )).scalar_one_or_none()
+    if not entry:
+        raise NotFoundException("GoldenEntry", entry_id)
+
+    # Snapshot before the delete: the instance is unusable once flushed.
+    details = json.dumps({
+        "source_query_id": entry.source_query_id,
+        "category": entry.category,
+        "workspace_id": entry.workspace_id,
+    })
+    await db.delete(entry)
+    await db.flush()
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="golden.delete",
+        resource_type="golden_entry",
+        resource_id=entry_id,
+        details=details,
+    ))
+    return None
