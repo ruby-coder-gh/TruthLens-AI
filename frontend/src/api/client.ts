@@ -36,6 +36,8 @@ import type {
   ReviewQueueItem,
   ReviewQueueCount,
   Annotation,
+  BulkDocumentAction,
+  BulkDocumentResponse,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -316,11 +318,17 @@ export const documentApi = {
   delete: (workspaceId: string, documentId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}`, { method: 'DELETE' }),
 
-  listAll: (params?: { status?: string; search?: string; file_type?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
+  listAll: (params?: { status?: string; search?: string; file_type?: string; tags?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
     request(`/documents${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   reindex: (workspaceId: string, docId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${docId}/reindex`, { method: 'POST' }),
+
+  bulk: (action: BulkDocumentAction, documentIds: string[], tags?: string[]): Promise<BulkDocumentResponse> =>
+    request('/admin/documents/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ action, document_ids: documentIds, ...(tags ? { tags } : {}) }),
+    }),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
