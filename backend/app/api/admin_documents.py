@@ -7,12 +7,15 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.config import settings
 from app.core.deps import get_current_admin, get_db
 from app.models.audit_log import AuditLog
+from app.models.chunk import Chunk
+from app.models.comparison import ComparisonResult
 from app.models.document import Document
 from app.models.user import User
 from app.query_cache import bump_workspace_document_version
@@ -29,6 +32,29 @@ router = APIRouter(
     tags=["admin documents"],
     dependencies=[Depends(get_current_admin)],
 )
+
+# Relationships we never need for a bulk action (tags/status/filename/
+# mime_type are the only columns any action touches). Document.chunks in
+# particular is lazy="selectin" with an unbounded Text body per row, so
+# without this a 200-doc bulk call would pull every chunk's full content
+# into memory on every call.
+_BULK_LOAD_OPTIONS = (
+    noload(Document.chunks),
+    noload(Document.comparison_results),
+    noload(Document.workspace),
+    noload(Document.uploader),
+    noload(Document.collection),
+)
+
+# Strong references to fire-and-forget reindex tasks so they aren't
+# garbage-collected mid-flight (asyncio only weakly tracks tasks with no
+# other referent); each task removes itself once done.
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _track(task: asyncio.Task[None]) -> None:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _reindex_one(
@@ -65,22 +91,43 @@ async def _bulk_delete(
     doc_ids = [doc.id for doc in docs]
     errors = await delete_documents(workspace_id, doc_ids)
 
-    deleted_any = False
+    to_delete_ids: list[str] = []
     for doc in docs:
         error = errors.get(doc.id)
         if error:
             results[doc.id] = BulkDocumentResult(id=doc.id, status="failed", error=error)
             continue
 
-        file_path = settings.upload_path / doc.filename
-        if file_path.exists():
-            file_path.unlink()
+        # Vectors are already gone (irreversibly) at this point. Best-effort
+        # file cleanup must never abort the batch: a stray OSError here used
+        # to propagate out of the request, roll back the whole session, and
+        # leave rows/audit-log/version-bump undone even though the vectors
+        # for THIS workspace were already deleted for real.
+        warning: str | None = None
+        try:
+            file_path = settings.upload_path / doc.filename
+            if file_path.exists():
+                file_path.unlink()
+        except OSError as e:
+            warning = f"file cleanup failed: {e}"
+            logger.warning("bulk_delete_file_cleanup_failed", document_id=doc.id, error=str(e))
 
-        await db.delete(doc)
-        results[doc.id] = BulkDocumentResult(id=doc.id, status="ok")
-        deleted_any = True
+        to_delete_ids.append(doc.id)
+        results[doc.id] = BulkDocumentResult(id=doc.id, status="ok", warning=warning)
 
-    if deleted_any:
+    if to_delete_ids:
+        # Bulk-delete via Core statements instead of `await db.delete(doc)`
+        # per row. Two reasons: (1) avoids the ORM loading every chunk's
+        # full Text body + comparison_results into memory just to cascade
+        # them one object at a time; (2) this app runs on SQLite without
+        # `PRAGMA foreign_keys=ON` set anywhere (verified — no pragma is
+        # issued at connection time), so the `ondelete="CASCADE"` on
+        # Chunk/ComparisonResult's FK is metadata-only and is NOT enforced
+        # by the database itself. Relying on it here would silently orphan
+        # rows. Delete children explicitly, then the parent.
+        await db.execute(delete(Chunk).where(Chunk.document_id.in_(to_delete_ids)))
+        await db.execute(delete(ComparisonResult).where(ComparisonResult.document_id.in_(to_delete_ids)))
+        await db.execute(delete(Document).where(Document.id.in_(to_delete_ids)))
         await bump_workspace_document_version(db, workspace_id)
 
 
@@ -103,7 +150,7 @@ async def _bulk_reindex(
     for doc in docs:
         file_path = settings.upload_path / doc.filename
         if file_path.exists():
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _reindex_one(
                     document_id=doc.id,
                     workspace_id=workspace_id,
@@ -113,6 +160,7 @@ async def _bulk_reindex(
                     semaphore=semaphore,
                 )
             )
+            _track(task)
         else:
             logger.warning("bulk_reindex_missing_file", document_id=doc.id, filename=doc.filename)
         results[doc.id] = BulkDocumentResult(id=doc.id, status="accepted")
@@ -141,12 +189,18 @@ async def bulk_document_action(
     db: AsyncSession = Depends(get_db),
 ) -> BulkDocumentResponse:
     """Run delete/reindex/tag/untag across up to 200 documents, grouped by workspace."""
-    found = await db.execute(select(Document).where(Document.id.in_(body.document_ids)))
+    # Dedupe while preserving order: a repeated id must count once in the
+    # summary/audit log, not once per occurrence in the request body.
+    doc_ids = list(dict.fromkeys(body.document_ids))
+
+    found = await db.execute(
+        select(Document).options(*_BULK_LOAD_OPTIONS).where(Document.id.in_(doc_ids))
+    )
     found_docs = {doc.id: doc for doc in found.scalars().all()}
 
     results: dict[str, BulkDocumentResult] = {
         doc_id: BulkDocumentResult(id=doc_id, status="failed", error="not found")
-        for doc_id in body.document_ids
+        for doc_id in doc_ids
         if doc_id not in found_docs
     }
 
@@ -168,15 +222,21 @@ async def bulk_document_action(
         for docs in by_workspace.values():
             _bulk_untag(docs, body.tags or [], results)
 
-    ordered_results = [results[doc_id] for doc_id in body.document_ids]
+    ordered_results = [results[doc_id] for doc_id in doc_ids]
     summary = BulkDocumentSummary()
+    ok_ids: list[str] = []
+    accepted_ids: list[str] = []
+    failed_ids: list[str] = []
     for item in ordered_results:
         if item.status == "ok":
             summary.ok += 1
+            ok_ids.append(item.id)
         elif item.status == "accepted":
             summary.accepted += 1
+            accepted_ids.append(item.id)
         else:
             summary.failed += 1
+            failed_ids.append(item.id)
 
     db.add(
         AuditLog(
@@ -185,9 +245,13 @@ async def bulk_document_action(
             resource_type="document",
             details=json.dumps(
                 {
-                    "count": len(body.document_ids),
+                    "count": len(doc_ids),
                     "tags": body.tags,
                     "summary": summary.model_dump(),
+                    "document_ids": doc_ids,
+                    "ok_ids": ok_ids,
+                    "accepted_ids": accepted_ids,
+                    "failed_ids": failed_ids,
                 }
             ),
         )

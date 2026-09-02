@@ -166,3 +166,52 @@ async def test_list_all_documents_tags_filter_and_semantics(
     ids = [d["id"] for d in resp.json()["data"]]
     assert doc_both.id in ids
     assert doc_one.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_all_documents_tags_filter_escapes_like_wildcards(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """A literal "_"/"%" in a tag value must not act as a SQL LIKE wildcard."""
+    ws = Workspace(name="Escape WS", owner_id=test_user.id)
+    test_db.add(ws)
+    await test_db.commit()
+    await test_db.refresh(ws)
+
+    doc_exact = Document(
+        workspace_id=ws.id,
+        filename=f"{uuid.uuid4().hex}.txt",
+        original_filename="exact.txt",
+        mime_type="text/plain",
+        file_size=1,
+        status="ready",
+        tags=["q1_2026"],
+    )
+    doc_wild = Document(
+        workspace_id=ws.id,
+        filename=f"{uuid.uuid4().hex}.txt",
+        original_filename="wild.txt",
+        mime_type="text/plain",
+        file_size=1,
+        status="ready",
+        tags=["q1x2026"],
+    )
+    test_db.add_all([doc_exact, doc_wild])
+    await test_db.commit()
+    await test_db.refresh(doc_exact)
+    await test_db.refresh(doc_wild)
+
+    # "_" in "q1_2026" must match literally, not as a single-char wildcard
+    # that would also match "q1x2026".
+    resp = await client.get("/api/documents?tags=q1_2026", headers=admin_headers)
+    assert resp.status_code == 200
+    ids = [d["id"] for d in resp.json()["data"]]
+    assert doc_exact.id in ids
+    assert doc_wild.id not in ids
+
+    # A bare "%" must not match every tagged document.
+    resp = await client.get("/api/documents?tags=%25", headers=admin_headers)
+    assert resp.status_code == 200
+    ids = [d["id"] for d in resp.json()["data"]]
+    assert doc_exact.id not in ids
+    assert doc_wild.id not in ids

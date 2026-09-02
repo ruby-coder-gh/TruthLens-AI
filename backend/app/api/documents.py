@@ -54,6 +54,11 @@ MAX_PAGE_SIZE = 100
 MAX_DETAIL_CHUNKS = 200
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcards in a user-supplied value (paired with ``escape="\\\\"``)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.post("/workspaces/{workspace_id}/documents", response_model=DocumentResponse, status_code=202)
 async def upload_document(
     workspace_id: str,
@@ -392,11 +397,13 @@ async def list_all_documents(
     # every requested tag). Implemented as a LIKE against the serialized JSON
     # array — adequate at current scale on SQLite. A Postgres deployment
     # should switch this to a `tags @> ARRAY[...]` / JSONB containment query.
+    # The tag value itself must be LIKE-escaped: unescaped "%"/"_" in a tag
+    # (e.g. "q1_2026") are SQL wildcards and would match unrelated tags.
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
     for tag in tag_list:
-        tag_pattern = f'%"{tag}"%'
-        query = query.where(Document.tags.like(tag_pattern))
-        count_query = count_query.where(Document.tags.like(tag_pattern))
+        tag_pattern = f'%"{_escape_like(tag)}"%'
+        query = query.where(Document.tags.like(tag_pattern, escape="\\"))
+        count_query = count_query.where(Document.tags.like(tag_pattern, escape="\\"))
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0

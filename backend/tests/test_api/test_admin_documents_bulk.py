@@ -110,7 +110,9 @@ async def test_bulk_action_unknown_id_reported_failed_not_found(
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["results"] == [{"id": missing_id, "status": "failed", "error": "not found"}]
+    assert body["results"] == [
+        {"id": missing_id, "status": "failed", "error": "not found", "warning": None}
+    ]
     assert body["summary"] == {"ok": 0, "accepted": 0, "failed": 1}
 
 
@@ -256,15 +258,19 @@ async def test_bulk_reindex_respects_concurrency_semaphore(
     for doc in docs:
         (settings.upload_path / doc.filename).write_text("content")
 
+    import app.api.admin_documents as admin_documents_module
+
     concurrent = 0
     max_concurrent = 0
+    max_tracked = 0
     lock = asyncio.Lock()
 
     async def fake_process(**kwargs):
-        nonlocal concurrent, max_concurrent
+        nonlocal concurrent, max_concurrent, max_tracked
         async with lock:
             concurrent += 1
             max_concurrent = max(max_concurrent, concurrent)
+            max_tracked = max(max_tracked, len(admin_documents_module._background_tasks))
         await asyncio.sleep(0.05)
         async with lock:
             concurrent -= 1
@@ -283,6 +289,16 @@ async def test_bulk_reindex_respects_concurrency_semaphore(
         await asyncio.gather(*pending)
 
     assert max_concurrent == 2
+
+    # Tasks must be held in the module-level tracking set while in flight
+    # (asyncio.create_task's return value is otherwise the only strong
+    # reference keeping a fire-and-forget task alive, so with 6 tasks fired
+    # here a GC pass between requests could otherwise silently drop one).
+    assert max_tracked > 0
+
+    # Each fired task removes itself from the tracking set via its
+    # done-callback once finished, so nothing lingers after they drain.
+    assert len(admin_documents_module._background_tasks) == 0
 
     for doc in docs:
         (settings.upload_path / doc.filename).unlink(missing_ok=True)
@@ -379,3 +395,173 @@ async def test_bulk_action_writes_single_audit_log_row(
     details = json.loads(rows[0].details)
     assert details["count"] == 3
     assert details["tags"] == ["audited"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_audit_log_includes_document_ids_and_status_lists(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """The audit row for an irreversible bulk delete records the affected ids, not just a count."""
+    ws = await _make_workspace(test_db, test_user)
+    docs = [await _make_document(test_db, ws.id) for _ in range(2)]
+    doc_ids = [d.id for d in docs]
+
+    async def fake_delete_documents(workspace_id: str, document_ids: list[str]) -> dict[str, str | None]:
+        return dict.fromkeys(document_ids)
+
+    with patch("app.ingestion.indexer.delete_documents", side_effect=fake_delete_documents):
+        resp = await client.post(
+            "/api/admin/documents/bulk",
+            json={"action": "delete", "document_ids": doc_ids},
+            headers=admin_headers,
+        )
+    assert resp.status_code == 200
+
+    result = await test_db.execute(select(AuditLog).where(AuditLog.action == "document.bulk_delete"))
+    row = result.scalars().one()
+    details = json.loads(row.details)
+    assert details["count"] == 2
+    assert set(details["document_ids"]) == set(doc_ids)
+    assert set(details["ok_ids"]) == set(doc_ids)
+    assert details["failed_ids"] == []
+    assert details["accepted_ids"] == []
+
+
+# ── Dedupe ───────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_action_dedupes_duplicate_ids(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """A repeated id in document_ids counts once in results/summary/audit, not once per occurrence."""
+    ws = await _make_workspace(test_db, test_user)
+    doc = await _make_document(test_db, ws.id)
+
+    resp = await client.post(
+        "/api/admin/documents/bulk",
+        json={"action": "tag", "document_ids": [doc.id, doc.id, doc.id], "tags": ["dup"]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["results"]) == 1
+    assert body["summary"] == {"ok": 1, "accepted": 0, "failed": 0}
+
+    result = await test_db.execute(select(AuditLog).where(AuditLog.action == "document.bulk_tag"))
+    row = result.scalars().one()
+    details = json.loads(row.details)
+    assert details["count"] == 1
+    assert details["document_ids"] == [doc.id]
+
+
+# ── Eager loading (performance/correctness) ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_action_does_not_eager_load_chunks_or_relationships(
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    test_db: AsyncSession,
+    test_user: User,
+    test_engine,
+):
+    """Bulk actions must not pull chunk bodies or unrelated relationships into memory.
+
+    Document.chunks/.comparison_results/.workspace/.uploader/.collection are
+    all lazy="selectin", so an unguarded `select(Document)` issues a separate
+    SELECT per relationship (and chunks.content is unbounded Text) for every
+    id in the batch. Regression-test this by capturing every SQL statement
+    the request issues and asserting none of them touch the chunks table.
+    """
+    from sqlalchemy import event
+
+    from app.models.chunk import Chunk
+
+    ws = await _make_workspace(test_db, test_user)
+    doc = await _make_document(test_db, ws.id, tags=["x"])
+    for i in range(5):
+        test_db.add(Chunk(document_id=doc.id, index=i, content="x" * 5000, token_count=1))
+    await test_db.commit()
+
+    statements: list[str] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    sync_engine = test_engine.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", _capture)
+    try:
+        resp = await client.post(
+            "/api/admin/documents/bulk",
+            json={"action": "tag", "document_ids": [doc.id], "tags": ["y"]},
+            headers=admin_headers,
+        )
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", _capture)
+
+    assert resp.status_code == 200
+    assert not any("chunks" in s.lower() for s in statements), (
+        "bulk action queried the chunks table; Document.chunks should be noload()ed"
+    )
+
+
+# ── File-cleanup resilience ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_file_cleanup_failure_does_not_abort_batch(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """An OSError unlinking a doc's upload file must not roll back the whole delete batch.
+
+    Vectors are already irreversibly deleted by the time file cleanup runs;
+    letting a stray OSError propagate would roll back the row delete, the
+    version bump, and the audit log even though the vectors are gone for
+    good — the worse outcome. The row must still be removed and the item
+    reported "ok" with a warning.
+    """
+    from pathlib import Path
+
+    ws = await _make_workspace(test_db, test_user)
+    doc = await _make_document(test_db, ws.id)
+
+    target_path = settings.upload_path / doc.filename
+    settings.upload_path.mkdir(parents=True, exist_ok=True)
+    target_path.write_text("content")
+
+    original_unlink = Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self == target_path:
+            raise OSError("disk error")
+        return original_unlink(self, *args, **kwargs)
+
+    async def fake_delete_documents(workspace_id: str, document_ids: list[str]) -> dict[str, str | None]:
+        return dict.fromkeys(document_ids)
+
+    try:
+        with patch("app.ingestion.indexer.delete_documents", side_effect=fake_delete_documents), patch.object(
+            Path, "unlink", flaky_unlink
+        ):
+            resp = await client.post(
+                "/api/admin/documents/bulk",
+                json={"action": "delete", "document_ids": [doc.id]},
+                headers=admin_headers,
+            )
+    finally:
+        if target_path.exists():
+            original_unlink(target_path)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    result = body["results"][0]
+    assert result["status"] == "ok"
+    assert result["warning"] is not None
+    assert "disk error" in result["warning"]
+
+    remaining = await test_db.execute(select(Document).where(Document.id == doc.id))
+    assert remaining.scalar_one_or_none() is None
+
+    await test_db.refresh(ws)
+    assert ws.document_version == 1

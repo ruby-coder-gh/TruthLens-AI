@@ -89,6 +89,7 @@ class BulkDocumentResult(BaseModel):
     id: str
     status: Literal["ok", "accepted", "failed"]
     error: str | None = None
+    warning: str | None = None
 
 
 class BulkDocumentSummary(BaseModel):
