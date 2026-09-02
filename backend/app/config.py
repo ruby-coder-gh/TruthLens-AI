@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     RETRIEVAL_RERANK_WEIGHT: float = 0.6
     RETRIEVAL_MIN_SCORE: float = 0.3
 
+    # ─── Evidence Sufficiency Gate ─────────────
+    # Abstain instead of generating when retrieval is too thin. The floor is on
+    # the cross-encoder rerank_score: BAAI/bge-reranker-v2-m3 has num_labels==1,
+    # so sentence-transformers applies a Sigmoid and the score is a calibrated
+    # relevance probability in (0, 1). 0.35 sits below the model's own 0.5
+    # decision boundary (marginal matches still get answered) and far above the
+    # near-zero cluster of irrelevant chunks.
+    SUFFICIENCY_GATE_ENABLED: bool = True
+    SUFFICIENCY_MIN_RERANK_SCORE: float = 0.35
+    SUFFICIENCY_MIN_SUPPORTING: int = 1
+
     # ─── Guardrail ────────────────────────────
     GUARDRAIL_THRESHOLD: float = 0.7
     GUARDRAIL_MAX_RETRIES: int = 3
@@ -82,10 +93,27 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 64
     CHUNK_SEPARATORS: list[str] = ["\n\n", "\n", ".", "!", "?", ",", " ", ""]
 
+    # ─── Ingest-time Prompt-Injection Quarantine (F7a) ───────
+    # detect_injection() was written for short, adversarial user queries; run
+    # unfiltered over ordinary document prose it over-triggers (see
+    # app/ingestion/quarantine.py INGEST_EXCLUDED_PATTERNS). Only patterns at
+    # or above QUARANTINE_MIN_SEVERITY, and not in that exclusion set, ever
+    # quarantine a chunk.
+    QUARANTINE_ENABLED: bool = True
+    QUARANTINE_MIN_SEVERITY: str = "high"
+
     # ─── Query Rewriting ──────────────────────
-    REWRITE_ENABLED: bool = True
+    # Off by default: measured against the shipped qwen3 model the rewriter
+    # returned empty content on 6/6 queries (the <think> block never closes
+    # within the budget, so langchain-ollama yields nothing) while costing
+    # 7-30s each. Enable it only with a non-reasoning model.
+    REWRITE_ENABLED: bool = False
     REWRITE_TEMPERATURE: float = 0.2
-    REWRITE_MAX_TOKENS: int = 256
+    REWRITE_MAX_TOKENS: int = 1024
+    # Reasoning models (qwen3) can burn the whole budget inside a <think> block and
+    # return nothing usable. Bound the wait so a rewrite miss costs a few seconds,
+    # not a minute, and the pipeline falls back to the original query.
+    REWRITE_TIMEOUT_SECONDS: int = 12
 
     # ─── Query Cache ─────────────────────────
     QUERY_CACHE_ENABLED: bool = True
@@ -101,17 +129,56 @@ class Settings(BaseSettings):
     REVIEW_QUEUE_TRUST_THRESHOLD: float = 0.5
     QUERY_PIN_LIMIT: int = 20
 
+    # ─── Usage & Cost Reporting ────────────────
+    # JSON map of model name -> {"input_per_1k": float, "output_per_1k": float}.
+    # Models absent from the map (e.g. local Ollama models) cost $0.
+    MODEL_PRICING_JSON: str = "{}"
+
+    # ─── Audit Export ──────────────────────────
+    AUDIT_EXPORT_MAX_ROWS: int = 50000
+
+    # ─── Bulk Document Operations ─────────────
+    BULK_REINDEX_CONCURRENCY: int = 3
+
     # ─── Evaluation ───────────────────────────
     EVAL_MIN_FAITHFULNESS: float = 0.6
     EVAL_MIN_TRUST: float = 0.5
     EVAL_MIN_CONTEXT_PRECISION: float = 0.5
     EVAL_REFUSAL_ACCURACY_MIN: float = 0.7
+    # An eval run still marked `running` after this long is presumed dead (the
+    # worker crashed or the process restarted mid-run). Stale rows are ignored
+    # by the promotion gate and lazily marked `error`, so a lost background
+    # task can never permanently wedge a prompt version.
+    EVAL_RUN_STALE_SECONDS: int = 1800
+    # A smoke run samples the builtin set down to 5 entries, so keeping *every*
+    # approved promoted entry would let a bulk promoter dominate the unweighted
+    # metric means the promotion gate reads. Cap their share instead; the subset
+    # is chosen deterministically (oldest first by created_at, id).
+    EVAL_SMOKE_PROMOTED_LIMIT: int = 10
 
     # ─── JWT Auth ────────────────────────────
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     JWT_ALGORITHM: str = "HS256"
     JWT_ISSUER: str = "veritasrag"
+
+    # ─── WebSocket Stream Resume ──────────────
+    # How long a finished stream stays replayable after its last frame, and how
+    # many per-query buffers the in-memory registry may hold at once.
+    WS_RESUME_TTL_SECONDS: int = 120
+    WS_RESUME_MAX_BUFFERS: int = 500
+    # Per-buffer frame ceiling. One streamed token is one frame (~410 B), so this
+    # bounds a single answer's replay buffer at roughly 0.6 MB. A stream that
+    # exceeds it keeps streaming but stops being resumable (its buffer is
+    # released and dropped) — never truncated, which would put gaps in `seq`.
+    WS_RESUME_MAX_FRAMES_PER_BUFFER: int = 1500
+    # Concurrent in-flight /ws/query pipelines per user. Because a disconnect no
+    # longer cancels the pipeline, this is what stops repeated connect-query-drop
+    # cycles from piling up generations.
+    WS_MAX_INFLIGHT_PER_USER: int = 3
+    # How long shutdown waits for detached pipelines to finish persisting before
+    # the DB engine is disposed.
+    WS_SHUTDOWN_DRAIN_SECONDS: int = 10
 
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True

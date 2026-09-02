@@ -1,7 +1,9 @@
-"""Golden-set regression harness for the RAG evaluation loop.
+"""Golden-set regression suite for the RAG evaluation loop.
 
-This module houses a single dependency-injected harness (``run_golden_eval``)
-that is exercised two ways:
+The dependency-injected harness itself (``run_golden_eval``) lives in
+``app.evaluation.golden_runner`` so the admin prompt-promotion gate scores a
+candidate prompt with the very same code this suite regresses. Here it is
+exercised two ways:
 
 * a FAST smoke test that runs on every default ``pytest`` invocation with
   deterministic mock functions — zero external deps, no Ollama, no models; and
@@ -16,252 +18,17 @@ test proves the pipeline meets the quality thresholds in ``settings``.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import pytest
 
 from app.config import settings
+from app.evaluation.golden_runner import GenerateFn, GuardrailFn, TrustFn, run_golden_eval
 from app.generation.generator import GenerationInput, GenerationResult
 from app.generation.guardrail import GuardrailResult
 from app.models.eval_run import EvalRun
-
-# Type aliases for the injected pipeline functions.
-GenerateFn = Callable[[GenerationInput], Awaitable[GenerationResult]]
-GuardrailFn = Callable[[str, list[dict[str, Any]]], Awaitable[GuardrailResult]]
-TrustFn = Callable[..., Awaitable[Any]]
-RagasFn = Callable[..., Awaitable[Any]]
-
-
-# ─── Helpers ──────────────────────────────────────────────────────
-
-
-def _backend_dir() -> Path:
-    """Resolve the backend/ directory robustly regardless of cwd.
-
-    This file lives at ``backend/tests/test_evaluation/`` so the backend root
-    is three levels up.
-    """
-    return Path(__file__).resolve().parents[2]
-
-
-def golden_set_version() -> str:
-    """Return a short content hash of the golden dataset source file.
-
-    Two eval runs over the same dataset get the same version string; any edit
-    to ``golden_dataset.py`` changes it. Used to stamp ``EvalRun`` rows.
-    """
-    dataset_path = _backend_dir() / "evaluation" / "golden_dataset.py"
-    digest = hashlib.sha1(dataset_path.read_bytes()).hexdigest()
-    return digest[:12]
-
-
-# Phrases a well-behaved system emits when it declines to answer. Kept in sync
-# with the generator's DEFAULT_SYSTEM_PROMPT ("I cannot find this information
-# in your documents.") and the golden reference answers for unanswerable
-# entries ("This question cannot be answered from the available documents.").
-_REFUSAL_MARKERS = (
-    "cannot find this information",
-    "cannot be answered",
-    "cannot be fully answered",
-    "cannot answer",
-    "can't answer",
-    "cannot be found",
-    "no information",
-    "not contain",
-    "don't have enough",
-    "do not have enough",
-    "unable to answer",
-    "i don't know",
-)
-
-
-def _did_refuse(answer: str, guardrail: GuardrailResult) -> bool:
-    """Refusal predicate for an unanswerable entry.
-
-    The system is considered to have correctly refused when ANY of:
-
-    * the answer is empty / trivially short (nothing substantive was asserted);
-    * the answer contains an explicit "cannot answer" style disclaimer; or
-    * the guardrail support (entailment) score is below the configured
-      threshold — i.e. whatever was said is not grounded in the context.
-
-    A single clear predicate that works for both the mocked smoke path and the
-    real pipeline: for out-of-corpus questions a faithful system either says it
-    cannot answer or produces an ungrounded (low-support) answer.
-    """
-    text = (answer or "").strip().lower()
-    if len(text) < 15:
-        return True
-    if any(marker in text for marker in _REFUSAL_MARKERS):
-        return True
-    if guardrail is not None and guardrail.score < settings.GUARDRAIL_THRESHOLD:
-        return True
-    return False
-
-
-def _mean(values: list[float]) -> float | None:
-    """Mean of a list, or None when empty (so we never divide by zero)."""
-    return sum(values) / len(values) if values else None
-
-
-async def run_golden_eval(
-    entries: list[Any],
-    *,
-    generate_fn: GenerateFn,
-    guardrail_fn: GuardrailFn,
-    trust_fn: TrustFn,
-    ragas_fn: RagasFn | None = None,
-    db: Any,
-) -> EvalRun:
-    """Run the golden-set evaluation harness and persist a single EvalRun.
-
-    For each entry: generate an answer, run the guardrail against the entry's
-    reference context, then compute the trust score. Per-entry faithfulness and
-    trust are recorded. For ``expected_grounding is False`` entries we track
-    whether the system refused (``refusal_accuracy = refused / unanswerable``).
-    Overall means plus per-category / per-difficulty breakdowns are aggregated.
-    ``context_precision`` is computed via ``ragas_fn`` when provided, tolerating
-    a ``None`` return (ragas package absent).
-
-    Exactly one ``EvalRun`` row is inserted with the six metric columns (None
-    where not computed), ``golden_set_version`` and a JSON ``notes`` breakdown.
-    The persisted row is returned.
-    """
-    faithfulness_scores: list[float] = []
-    trust_scores: list[float] = []
-    relevance_scores: list[float] = []
-
-    unanswerable_total = 0
-    refused_total = 0
-
-    # For ragas context-precision (only when a ragas_fn is supplied).
-    ragas_queries: list[str] = []
-    ragas_answers: list[str] = []
-    ragas_contexts: list[list[str]] = []
-    ragas_ground_truth: list[str] = []
-
-    # Breakdown accumulators.
-    per_category: dict[str, dict[str, list[float]]] = {}
-    per_difficulty: dict[str, dict[str, list[float]]] = {}
-
-    def _bucket(store: dict[str, dict[str, list[float]]], key: str) -> dict[str, list[float]]:
-        return store.setdefault(str(key), {"faithfulness": [], "trust": []})
-
-    for entry in entries:
-        # Reference answer is used as the (synthetic) retrieved context so the
-        # harness stays self-contained — no real retrieval / vector store.
-        ref = entry.reference_answer
-        contexts: list[dict[str, Any]] = (
-            [{"content": ref, "chunk_id": "gd-ref", "score": 1.0, "document_id": "gd-ref"}]
-            if ref
-            else []
-        )
-
-        gen_input = GenerationInput(query=entry.question, contexts=contexts)
-        gen_result = await generate_fn(gen_input)
-        answer = getattr(gen_result, "text", "") or ""
-
-        guardrail = await guardrail_fn(answer, contexts)
-        trust = await trust_fn(
-            retrieval_results=contexts,
-            guardrail_result=guardrail,
-            generation_result=gen_result,
-            query=entry.question,
-        )
-
-        faithfulness = float(getattr(guardrail, "score", 0.0) or 0.0)
-        trust_overall = float(getattr(trust, "overall", 0.0) or 0.0)
-        relevance = float(getattr(trust, "relevance", 0.0) or 0.0)
-
-        faithfulness_scores.append(faithfulness)
-        trust_scores.append(trust_overall)
-        relevance_scores.append(relevance)
-
-        cat_bucket = _bucket(per_category, entry.category)
-        cat_bucket["faithfulness"].append(faithfulness)
-        cat_bucket["trust"].append(trust_overall)
-
-        diff_bucket = _bucket(per_difficulty, entry.difficulty)
-        diff_bucket["faithfulness"].append(faithfulness)
-        diff_bucket["trust"].append(trust_overall)
-
-        # Refusal accuracy denominator = entries that SHOULD be refused.
-        if not entry.expected_grounding:
-            unanswerable_total += 1
-            if _did_refuse(answer, guardrail):
-                refused_total += 1
-
-        # Collect ragas inputs (only used when ragas_fn provided).
-        if ragas_fn is not None:
-            ragas_queries.append(entry.question)
-            ragas_answers.append(answer)
-            ragas_contexts.append([c["content"] for c in contexts])
-            ragas_ground_truth.append(ref)
-
-    # ─── Aggregate ───
-    overall_faithfulness = _mean(faithfulness_scores)
-    overall_trust = _mean(trust_scores)
-    overall_relevance = _mean(relevance_scores)
-    refusal_accuracy = (
-        refused_total / unanswerable_total if unanswerable_total else None
-    )
-
-    context_precision: float | None = None
-    if ragas_fn is not None and ragas_queries:
-        ragas_scores = await ragas_fn(
-            queries=ragas_queries,
-            answers=ragas_answers,
-            contexts=ragas_contexts,
-            ground_truth=ragas_ground_truth,
-        )
-        # ragas_fn may return None (or a RagasScores with None fields) when the
-        # ragas package is unavailable — tolerate both, store None.
-        if ragas_scores is not None:
-            context_precision = getattr(ragas_scores, "context_precision", None)
-
-    def _summarise(store: dict[str, dict[str, list[float]]]) -> dict[str, Any]:
-        return {
-            key: {
-                "count": len(vals["faithfulness"]),
-                "faithfulness": _mean(vals["faithfulness"]),
-                "trust": _mean(vals["trust"]),
-            }
-            for key, vals in store.items()
-        }
-
-    breakdown = {
-        "total_entries": len(entries),
-        "unanswerable_total": unanswerable_total,
-        "refused_total": refused_total,
-        "overall": {
-            "faithfulness": overall_faithfulness,
-            "trust": overall_trust,
-            "relevance": overall_relevance,
-            "refusal_accuracy": refusal_accuracy,
-            "context_precision": context_precision,
-        },
-        "per_category": _summarise(per_category),
-        "per_difficulty": _summarise(per_difficulty),
-    }
-
-    eval_run = EvalRun(
-        faithfulness=overall_faithfulness,
-        context_precision=context_precision,
-        context_recall=None,
-        answer_relevance=overall_relevance,
-        answer_correctness=None,
-        refusal_accuracy=refusal_accuracy,
-        golden_set_version=golden_set_version(),
-        notes=json.dumps(breakdown, default=str),
-    )
-    db.add(eval_run)
-    await db.commit()
-    await db.refresh(eval_run)
-    return eval_run
 
 
 # ─── Deterministic mocks (fast smoke test) ────────────────────────

@@ -9,6 +9,7 @@ from app.ingestion.chunker import ChunkResult, chunk
 from app.ingestion.embedder import EmbeddingResult, embed
 from app.ingestion.indexer import store
 from app.ingestion.loader import load
+from app.ingestion.quarantine import scan_chunks
 from app.utils.logger import logger
 
 
@@ -32,6 +33,7 @@ class IngestionState:
         self.chunks: list[ChunkResult] = []
         self.embeddings: list[EmbeddingResult] = []
         self.chunk_count: int = 0
+        self.quarantined: list[dict[str, Any]] = []
         self.error: str | None = None
 
 
@@ -85,6 +87,18 @@ async def run_ingestion_pipeline(
         if not state.chunks:
             raise ValueError(f"No chunks generated from {state.original_filename}")
 
+        # 2.5 Scan for prompt injection — quarantined text never reaches
+        # embed/store, so it never enters Chroma/BM25.
+        logger.info("ingestion_phase", phase="scan", document_id=document_id, chunks=len(state.chunks))
+        state.chunks, state.quarantined = scan_chunks(state.chunks)
+        if state.quarantined:
+            logger.warning(
+                "ingestion_chunks_quarantined",
+                document_id=document_id,
+                count=len(state.quarantined),
+                patterns=[item["pattern"] for item in state.quarantined],
+            )
+
         # 3. Embed
         logger.info("ingestion_phase", phase="embed", document_id=document_id, chunks=len(state.chunks))
         state.embeddings = await embed(state.chunks, document_name=state.original_filename)
@@ -107,6 +121,7 @@ async def run_ingestion_pipeline(
             "status": "success",
             "chunk_count": state.chunk_count,
             "error": None,
+            "quarantined": state.quarantined,
         }
 
     except Exception as e:
@@ -120,4 +135,5 @@ async def run_ingestion_pipeline(
             "status": "failed",
             "chunk_count": 0,
             "error": str(e),
+            "quarantined": state.quarantined,
         }

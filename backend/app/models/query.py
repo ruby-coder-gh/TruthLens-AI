@@ -35,6 +35,10 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Content hash of the system prompt that produced this answer — see
+    # `app.prompts.registry`. NULL for rows written before prompt pinning.
+    prompt_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Fresh-answer comparison lineage. The original answer remains immutable.
     compared_to_query_id: Mapped[str | None] = mapped_column(
         ForeignKey("queries.id", ondelete="SET NULL"), nullable=True, index=True
@@ -48,6 +52,10 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Non-standard terminations of the pipeline. NULL = a normal generated
+    # answer; "insufficient_evidence" = the evidence-sufficiency gate abstained
+    # before any LLM call.
+    edge_case: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="queries", lazy="selectin")
@@ -63,6 +71,8 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
         Index("idx_queries_trust_score", "trust_score"),
         Index("idx_queries_cache_lookup", "workspace_id", "normalized_query", "document_version", "created_at"),
         Index("idx_queries_review_queue", "workspace_id", "review_status", "trust_score"),
+        Index("idx_queries_prompt_version", "prompt_version"),
+        Index("idx_queries_model_created", "model_used", "created_at"),
     )
 
     def __repr__(self) -> str:

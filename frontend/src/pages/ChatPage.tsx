@@ -25,6 +25,7 @@ import {
   Square,
   RotateCcw,
   Download,
+  RefreshCw,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -34,10 +35,13 @@ import { useToast } from '../components/toast-context';
 import { PageShell } from '../components/PageWrappers';
 import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
-import { QueryWebSocket } from '../api/websocket';
-import type { Source } from '../api/types';
+import { QueryWebSocket, WS_RECONNECT_MAX } from '../api/websocket';
+import type { QueryCompleteResult } from '../api/websocket';
+import type { QueryEdgeCase, Source, SufficiencyVerdict } from '../api/types';
+import AbstentionCard from '../components/AbstentionCard';
 import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
+import { downloadBlob } from '../utils/download';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -51,6 +55,21 @@ const MAX_TEXTAREA_ROWS = 6;
 // Retrieval window for the "Expand search scope" action — wider than the
 // default (5). Backend clamps to its own MAX_TOP_K, so overshooting is safe.
 const WIDE_SEARCH_TOP_K = 12;
+
+// Error-code → headline shown on a failed bubble. `connection_lost` /
+// `auth_expired` come from the WebSocket client after its reconnect budget
+// (or the token refresh) is exhausted.
+const ERROR_TITLES: Record<string, string> = {
+  connection_error: 'Connection lost',
+  connection_lost: 'Connection lost',
+  auth_error: 'Authentication error',
+  auth_expired: 'Session expired',
+  RESUME_UNAVAILABLE: 'Answer no longer available',
+  stream_ended: 'Answer incomplete',
+};
+
+/** Codes whose recovery hint is "reconnect or start over". */
+const CONNECTION_ERROR_CODES = new Set(['connection_error', 'connection_lost']);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,6 +95,25 @@ interface ChatMessage {
   queryId: string | null;
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
+  /** 1-based reconnect attempt currently in flight, or null when connected. */
+  reconnectAttempt: number | null;
+  // F7c — set from the `complete` frame when the sufficiency gate abstained.
+  // `sufficiency` is absent on the cache-replay path (see AbstentionCard).
+  edgeCase?: QueryEdgeCase | null;
+  sufficiency?: SufficiencyVerdict | null;
+}
+
+interface StartQueryOptions {
+  /** Widen the retrieval window for this run only (Search wider). */
+  topK?: number;
+  /** Bypass the server-side query cache (Regenerate). */
+  forceRefresh?: boolean;
+  /**
+   * Retry: reuse the user turn already in the transcript and replace this
+   * errored/cancelled assistant bubble in place, instead of appending a
+   * duplicate question below the stale error card.
+   */
+  replaceAssistantId?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -179,7 +217,8 @@ export default function ChatPage() {
 
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
-    (queryText: string, topK?: number, forceRefresh = false) => {
+    (queryText: string, options: StartQueryOptions = {}) => {
+      const { topK, forceRefresh = false, replaceAssistantId } = options;
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       // Tear down any previous socket before creating a new one — otherwise the
@@ -214,6 +253,7 @@ export default function ChatPage() {
         queryId: null,
         error: null,
         status: 'complete',
+        reconnectAttempt: null,
       };
 
       // Add pending assistant message
@@ -233,9 +273,24 @@ export default function ChatPage() {
         queryId: null,
         error: null,
         status: 'pending',
+        reconnectAttempt: null,
       };
 
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setMessages((prev) => {
+        if (replaceAssistantId) {
+          const idx = prev.findIndex((m) => m.id === replaceAssistantId);
+          if (idx !== -1) {
+            // A retry re-runs the question already in the transcript: swap the
+            // errored bubble for the fresh pending one in place, rather than
+            // appending a second copy of the question below a still-clickable
+            // "Retry" card that can never succeed again.
+            const next = prev.slice();
+            next[idx] = assistantMsg;
+            return next;
+          }
+        }
+        return [...prev, userMsg, assistantMsg];
+      });
       setStreamingMessageId(assistantMsgId);
       streamingMsgIdRef.current = assistantMsgId;
       setIsStreaming(true);
@@ -284,18 +339,23 @@ export default function ChatPage() {
           );
         },
 
-        onComplete: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number; from_cache: boolean }) => {
+        onComplete: (result: QueryCompleteResult) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
                 ? {
                     ...m,
                     status: 'complete' as const,
-                    queryId: result.query_id,
+                    reconnectAttempt: null,
+                    // The `ack` id is authoritative; never clobber it with an
+                    // empty one.
+                    queryId: result.query_id || m.queryId,
                     latencyMs: result.latency_ms,
                     modelUsed: result.model_used,
                     tokenCount: result.token_count,
                     servedFromCache: result.from_cache,
+                    edgeCase: result.edge_case ?? null,
+                    sufficiency: result.sufficiency ?? null,
                   }
                 : m,
             ),
@@ -314,11 +374,15 @@ export default function ChatPage() {
               // not a failure, so keep (or set) the neutral `cancelled` state instead
               // of flipping to the red error state.
               if (code === 'CANCELLED' || m.status === 'cancelled') {
-                return { ...m, status: 'cancelled' as const };
+                return { ...m, status: 'cancelled' as const, reconnectAttempt: null };
               }
-              return { ...m, status: 'error' as const, error: { code, message } };
+              return { ...m, status: 'error' as const, error: { code, message }, reconnectAttempt: null };
             }),
           );
+          // Every terminal error releases the composer — including the ones the
+          // socket only reports after a failed reconnect (`connection_lost`,
+          // `auth_expired`). A dropped socket used to report nothing at all,
+          // which left `isStreaming` true and the textarea disabled forever.
           setIsStreaming(false);
           setStreamingMessageId(null);
           streamingMsgIdRef.current = null;
@@ -327,6 +391,58 @@ export default function ChatPage() {
 
         onProgress: (phase: string) => {
           setPipelinePhase(phase);
+        },
+
+        // The socket dropped mid-answer and is retrying — keep the partial
+        // answer and the streaming lock in place, just say so on the bubble.
+        onReconnecting: (attempt: number) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, reconnectAttempt: attempt } : m,
+            ),
+          );
+        },
+
+        onReconnected: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, reconnectAttempt: null } : m,
+            ),
+          );
+        },
+
+        // The server accepted the query — learn its id now rather than waiting
+        // for `complete`, which a dropped stream may never deliver.
+        onAck: (ackQueryId: string) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, queryId: ackQueryId } : m,
+            ),
+          );
+        },
+
+        // The buffered stream expired and the query is being re-run, so the
+        // answer on screen is stale. Every field below is *appended* to as the
+        // stream arrives — without this reset the re-run's answer would be
+        // concatenated onto the old partial one and sources would be doubled.
+        onStreamRestart: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: '',
+                    sources: [],
+                    guardrail: null,
+                    trustScore: null,
+                    trustComponents: {},
+                    servedFromCache: false,
+                    queryId: null,
+                    error: null,
+                  }
+                : m,
+            ),
+          );
         },
       }, convId, topK, forceRefresh);
 
@@ -362,7 +478,7 @@ export default function ChatPage() {
     if (isStreaming) return;
     const last = lastUserQuestion();
     if (last) {
-      startQuery(last, WIDE_SEARCH_TOP_K);
+      startQuery(last, { topK: WIDE_SEARCH_TOP_K });
     } else {
       textareaRef.current?.focus();
     }
@@ -438,7 +554,10 @@ export default function ChatPage() {
       if (idx <= 0) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content);
+      // Replace the failed bubble rather than appending after it — otherwise
+      // the transcript keeps a dead "Connection lost / Retry" card above a
+      // second echo of the same question.
+      startQuery(precedingUser.content, { replaceAssistantId: assistantMsgId });
     },
     [messages, startQuery],
   );
@@ -449,7 +568,7 @@ export default function ChatPage() {
       if (idx <= 0 || isStreaming) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content, undefined, true);
+      startQuery(precedingUser.content, { forceRefresh: true });
     },
     [isStreaming, messages, startQuery],
   );
@@ -472,14 +591,7 @@ export default function ChatPage() {
     async (queryId: string) => {
       try {
         const { blob, filename } = await queryApi.exportMarkdown(queryId);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, filename);
       } catch {
         addToast('Failed to export', 'error');
       }
@@ -521,6 +633,9 @@ export default function ChatPage() {
     );
 
   const lastAssistantHasError = lastAssistantMessage?.status === 'error';
+  // F7c — an abstention has no generated answer to verify; the evidence panel
+  // must show the "Abstained" terminus instead of a green verified pipeline.
+  const lastAssistantAbstained = lastAssistantMessage?.edgeCase === 'insufficient_evidence';
 
   const latestSources = lastAssistantMessage?.sources ?? [];
   // An errored generation never has real verification/trust data — even if a
@@ -668,6 +783,8 @@ export default function ChatPage() {
                       }}
                       onRetry={() => handleRetry(msg.id)}
                       onRegenerate={() => handleRegenerate(msg.id)}
+                      onRephrase={handleRephrase}
+                      workspaceId={workspaceId}
                       onSourceClick={(source, _e, msgId, index) => {
                         const markerId = `cite-${msgId}-${index}`;
                         const targetId = `source-${source.chunk_id}`;
@@ -783,6 +900,7 @@ export default function ChatPage() {
           isLoading={isStreaming && !pipelinePhase}
           isStreaming={isStreaming}
           hasError={lastAssistantHasError}
+          abstained={lastAssistantAbstained}
           sidebarOpen={effectiveSidebarOpen}
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           pipelinePhase={pipelinePhase}
@@ -1043,6 +1161,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onRetry,
   onRegenerate,
   onSourceClick,
+  onRephrase,
+  workspaceId,
 }: {
   message: ChatMessage;
   onCopy: (text: string) => void;
@@ -1051,10 +1171,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onRetry: () => void;
   onRegenerate: () => void;
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
+  /** F7c — "Rephrase" chip on the abstention card (the textarea ref lives on the page). */
+  onRephrase?: () => void;
+  workspaceId?: string;
 }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
-  const isComplete = message.status === 'complete';
+  // F7c — the sufficiency gate abstained: nothing was generated, so the normal
+  // complete-card (citations, trust ring, feedback thumbs) must not render.
+  const isAbstained = message.edgeCase === 'insufficient_evidence';
+  const isComplete = message.status === 'complete' && !isAbstained;
   const isError = message.status === 'error';
   const isCancelled = message.status === 'cancelled';
   const isMessageStreaming = message.status === 'pending' || message.status === 'streaming';
@@ -1100,6 +1226,18 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             aria-atomic="false"
             aria-busy={isMessageStreaming}
           >
+            {/* Reconnecting — the socket dropped mid-answer and is resuming */}
+            {isMessageStreaming && message.reconnectAttempt !== null && (
+              <div
+                role="status"
+                aria-label={`Reconnecting, attempt ${message.reconnectAttempt} of ${WS_RECONNECT_MAX}`}
+                className="flex items-center gap-1.5 self-start rounded-full border border-gold/30 bg-gold/15 px-2.5 py-1 text-[11px] font-medium text-gold"
+              >
+                <RefreshCw size={11} className="animate-spin" aria-hidden="true" />
+                {`Reconnecting… (${message.reconnectAttempt}/${WS_RECONNECT_MAX})`}
+              </div>
+            )}
+
             {/* Pending state */}
             {message.status === 'pending' && (
               <div className="flex items-center gap-2 py-2">
@@ -1146,6 +1284,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   <RetryButton onClick={onRetry} />
                 </div>
               </>
+            )}
+
+            {/* Abstained — evidence-sufficiency gate refused before generation (F7c) */}
+            {isAbstained && message.status === 'complete' && (
+              <AbstentionCard
+                answer={message.content}
+                sufficiency={message.sufficiency}
+                workspaceId={workspaceId}
+                onRephrase={onRephrase}
+              />
             )}
 
             {/* Complete content — full card */}
@@ -1278,16 +1426,12 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 <div className="flex-1 text-sm">
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-medium text-red">
-                      {message.error.code === 'connection_error'
-                        ? 'Connection lost'
-                        : message.error.code === 'auth_error'
-                          ? 'Authentication error'
-                          : 'Query failed'}
+                      {ERROR_TITLES[message.error.code] ?? 'Query failed'}
                     </p>
                     <RetryButton onClick={onRetry} />
                   </div>
                   <p className="mt-0.5 text-text-muted">{message.error.message}</p>
-                  {message.error.code === 'connection_error' && (
+                  {CONNECTION_ERROR_CODES.has(message.error.code) && (
                     <p className="mt-1 text-xs text-text-dim">
                       Try reconnecting or starting a new conversation.
                     </p>

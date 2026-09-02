@@ -72,13 +72,28 @@ async def rewrite(
 
         messages.append(("human", query))
 
-        response = await asyncio.to_thread(llm.invoke, messages)
+        # ChatOllama has no `timeout` field (langchain-ollama 1.1.0), so a
+        # provider-level timeout is silently dropped — bound the wait here or a
+        # reasoning model can stall the whole query for half a minute.
+        response = await asyncio.wait_for(
+            asyncio.to_thread(llm.invoke, messages),
+            timeout=settings.REWRITE_TIMEOUT_SECONDS,
+        )
         rewritten = _strip_reasoning(response.content).strip('"').strip("'").strip()
 
         # Reasoning models can return an empty string once <think> blocks are
         # stripped. Never hand an empty query downstream — fall back to the original.
         if not rewritten:
-            logger.info("query_rewrite_empty_fallback", original_length=len(query))
+            # A reasoning model that never closed its <think> block returns empty
+            # content with done_reason="length". Log loudly: a silent fallback on
+            # every query looks identical to a working rewriter.
+            metadata = getattr(response, "response_metadata", {}) or {}
+            logger.warning(
+                "query_rewrite_empty_fallback",
+                original_length=len(query),
+                done_reason=metadata.get("done_reason"),
+                eval_count=metadata.get("eval_count"),
+            )
             return query
 
         logger.info(
@@ -87,6 +102,14 @@ async def rewrite(
             rewritten_length=len(rewritten),
         )
         return rewritten
+
+    except TimeoutError:
+        logger.warning(
+            "query_rewrite_timeout",
+            timeout_seconds=settings.REWRITE_TIMEOUT_SECONDS,
+            original_length=len(query),
+        )
+        return query
 
     except Exception as e:
         logger.warning("query_rewrite_failed", error=str(e), query=query[:100])

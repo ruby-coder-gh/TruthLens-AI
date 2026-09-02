@@ -7,4 +7,12 @@ declare module 'diff' {
   }
 
   export function diffWordsWithSpace(oldText: string, newText: string): Change[];
+
+  export interface DiffLinesOptions {
+    ignoreWhitespace?: boolean;
+    newlineIsToken?: boolean;
+    stripTrailingCr?: boolean;
+  }
+
+  export function diffLines(oldText: string, newText: string, options?: DiffLinesOptions): Change[];
 }

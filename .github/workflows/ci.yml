@@ -94,6 +94,9 @@ jobs:
       - name: Type check
         run: npm exec tsc -- --noEmit
 
+      - name: Run tests
+        run: npm run test:run
+
   eval-regression:
     # Nightly / manual only — the full golden-set eval needs Ollama and is far
     # too slow for every push/PR. Skipped on push and pull_request events.

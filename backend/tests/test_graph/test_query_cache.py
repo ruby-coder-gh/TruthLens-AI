@@ -30,6 +30,7 @@ async def _create_cached_query(
     *,
     document_version: int | None = None,
     created_at: datetime | None = None,
+    prompt_version: str | None = None,
 ) -> Query:
     query = Query(
         workspace_id=workspace.id,
@@ -45,6 +46,7 @@ async def _create_cached_query(
         model_used="test-model",
         latency_ms=123,
         token_count=12,
+        prompt_version=prompt_version,
         created_at=created_at or datetime.now(timezone.utc),
     )
     test_db.add(query)
@@ -149,3 +151,97 @@ async def test_cache_misses_after_ttl_expiry(monkeypatch, test_db: AsyncSession,
     )
 
     assert hit is None
+
+
+# ─── Prompt-version invalidation ──────────────────────────────────
+#
+# Promoting a new system prompt must take effect immediately: an answer written
+# by the previous prompt is no longer a valid cached reply for the same
+# question, even though workspace/document_version/TTL all still match.
+
+
+@pytest.mark.asyncio
+async def test_same_prompt_version_still_hits(monkeypatch, test_db: AsyncSession, test_user: User):
+    monkeypatch.setattr(settings, "QUERY_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "QUERY_CACHE_TTL_SECONDS", 3_600)
+    workspace = await _create_workspace(test_db, test_user, "Prompt cache hit")
+    await _create_cached_query(
+        test_db, workspace, test_user, "What is the policy?", prompt_version="aaaaaaaaaaaa"
+    )
+
+    hit = await lookup_cached_query(
+        test_db,
+        workspace_id=workspace.id,
+        query_text="What is the policy?",
+        document_version=workspace.document_version,
+        prompt_version="aaaaaaaaaaaa",
+    )
+
+    assert hit is not None
+    assert hit.prompt_version == "aaaaaaaaaaaa"
+
+
+@pytest.mark.asyncio
+async def test_stale_prompt_version_is_a_miss(monkeypatch, test_db: AsyncSession, test_user: User):
+    """The promoted prompt changed — the old answer must not be replayed."""
+    monkeypatch.setattr(settings, "QUERY_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "QUERY_CACHE_TTL_SECONDS", 3_600)
+    workspace = await _create_workspace(test_db, test_user, "Prompt cache miss")
+    await _create_cached_query(
+        test_db, workspace, test_user, "What is the policy?", prompt_version="aaaaaaaaaaaa"
+    )
+
+    hit = await lookup_cached_query(
+        test_db,
+        workspace_id=workspace.id,
+        query_text="What is the policy?",
+        document_version=workspace.document_version,
+        prompt_version="bbbbbbbbbbbb",
+    )
+
+    assert hit is None
+
+
+@pytest.mark.asyncio
+async def test_rows_without_a_prompt_version_are_misses(
+    monkeypatch, test_db: AsyncSession, test_user: User
+):
+    """Pre-F1 rows have no provenance, so they cannot be proven still valid."""
+    monkeypatch.setattr(settings, "QUERY_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "QUERY_CACHE_TTL_SECONDS", 3_600)
+    workspace = await _create_workspace(test_db, test_user, "Legacy row")
+    await _create_cached_query(
+        test_db, workspace, test_user, "What is the policy?", prompt_version=None
+    )
+
+    hit = await lookup_cached_query(
+        test_db,
+        workspace_id=workspace.id,
+        query_text="What is the policy?",
+        document_version=workspace.document_version,
+        prompt_version="aaaaaaaaaaaa",
+    )
+
+    assert hit is None
+
+
+@pytest.mark.asyncio
+async def test_omitting_prompt_version_keeps_the_previous_behaviour(
+    monkeypatch, test_db: AsyncSession, test_user: User
+):
+    """Callers that do not pin a prompt still match on the original key."""
+    monkeypatch.setattr(settings, "QUERY_CACHE_ENABLED", True)
+    monkeypatch.setattr(settings, "QUERY_CACHE_TTL_SECONDS", 3_600)
+    workspace = await _create_workspace(test_db, test_user, "Unpinned lookup")
+    await _create_cached_query(
+        test_db, workspace, test_user, "What is the policy?", prompt_version="aaaaaaaaaaaa"
+    )
+
+    hit = await lookup_cached_query(
+        test_db,
+        workspace_id=workspace.id,
+        query_text="What is the policy?",
+        document_version=workspace.document_version,
+    )
+
+    assert hit is not None

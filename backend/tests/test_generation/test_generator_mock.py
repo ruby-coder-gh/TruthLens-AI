@@ -17,10 +17,24 @@ from app.generation.generator import GenerationInput, generate, stream
 
 
 class MockResponse:
-    """Mock LangChain response."""
+    """Mock LangChain response / message chunk.
 
-    def __init__(self, content: str):
+    `usage_metadata` and `response_metadata` are only set when a test supplies
+    them, so the attribute is genuinely absent otherwise — that is the
+    "provider reported nothing" case the generator must fall back from.
+    """
+
+    def __init__(
+        self,
+        content: str,
+        usage_metadata: dict | None = None,
+        response_metadata: dict | None = None,
+    ):
         self.content = content
+        if usage_metadata is not None:
+            self.usage_metadata = usage_metadata
+        if response_metadata is not None:
+            self.response_metadata = response_metadata
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -238,3 +252,153 @@ async def test_stream_fallback(mock_ollama_module):
 
     tokens = [t async for t in stream(inp)]
     assert len(tokens) >= 1
+
+
+# ── Token accounting / prompt + model pinning ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_generate_uses_provider_usage_metadata_for_token_counts(mock_ollama_module):
+    """When the provider reports usage, it wins over the word-count estimate."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(
+        content="Two words",  # word count would be 2
+        usage_metadata={"input_tokens": 120, "output_tokens": 42},
+    )
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="q", contexts=[{"content": "c"}])
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert result.prompt_tokens == 120
+    assert result.token_count == 42
+
+
+@pytest.mark.asyncio
+async def test_generate_falls_back_to_word_count_without_usage_metadata(mock_ollama_module):
+    """Ollama builds that omit usage keep the previous estimate behaviour."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(content="one two three four")
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="q", contexts=[{"content": "c"}])
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert result.token_count == 4
+    assert result.prompt_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_generate_ignores_non_numeric_usage_values(mock_ollama_module):
+    """A malformed usage payload must not poison the token columns."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(
+        content="one two three",
+        usage_metadata={"input_tokens": None, "output_tokens": "lots"},
+    )
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="q", contexts=[{"content": "c"}])
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert result.prompt_tokens is None
+    assert result.token_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_stamps_prompt_version_hash(mock_ollama_module):
+    """Every result records the content hash of the system prompt used."""
+    from app.generation.generator import DEFAULT_SYSTEM_PROMPT
+    from app.prompts.hashing import compute_hash
+
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(content="answer")
+    mock_ollama_module(llm_instance=mock_llm)
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        default_result = await generate(GenerationInput(query="q"))
+        pinned_result = await generate(
+            GenerationInput(query="q", system_prompt="A pinned prompt.")
+        )
+
+    assert default_result.prompt_version == compute_hash(DEFAULT_SYSTEM_PROMPT)
+    assert pinned_result.prompt_version == compute_hash("A pinned prompt.")
+    assert pinned_result.prompt_version != default_result.prompt_version
+
+
+@pytest.mark.asyncio
+async def test_generate_prefers_the_model_the_provider_reports(mock_ollama_module):
+    """`model_used` comes from the response, not from config guesswork."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(
+        content="answer", response_metadata={"model": "served-model:7b"}
+    )
+    mock_ollama_module(llm_instance=mock_llm)
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(GenerationInput(query="q"))
+
+    assert result.model_used == "served-model:7b"
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_pinned_model_to_the_provider(mock_ollama_module):
+    """A prompt version may pin a model; it must reach `get_chat_llm`."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(content="answer")
+    mock_cls = MagicMock(return_value=mock_llm)
+    mock_ollama_module(llm_cls=mock_cls)
+
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        await generate(GenerationInput(query="q", model="pinned-model:1b"))
+
+    assert mock_cls.call_args.kwargs["model"] == "pinned-model:1b"
+
+
+@pytest.mark.asyncio
+async def test_stream_populates_the_metadata_sink(mock_ollama_module):
+    """`stream()` surfaces usage/model off the chunks for the WS path."""
+    mock_llm = MagicMock()
+
+    async def async_chunks(_):
+        yield MockResponse("Hello ")
+        yield MockResponse(
+            "world",
+            usage_metadata={"input_tokens": 77, "output_tokens": 9},
+            response_metadata={"model": "served-model:7b"},
+        )
+
+    mock_llm.astream = async_chunks
+    mock_ollama_module(llm_instance=mock_llm)
+
+    sink: dict = {}
+    tokens = [t async for t in stream(GenerationInput(query="q"), metadata_sink=sink)]
+
+    assert tokens == ["Hello ", "world"]
+    assert sink["prompt_tokens"] == 77
+    assert sink["output_tokens"] == 9
+    assert sink["model_used"] == "served-model:7b"
+
+
+@pytest.mark.asyncio
+async def test_stream_without_provider_usage_leaves_sink_empty(mock_ollama_module):
+    """No usage reported → nothing recorded, so callers keep their estimate."""
+    mock_llm = MagicMock()
+
+    async def async_chunks(_):
+        yield MockResponse("a")
+        yield MockResponse("b")
+
+    mock_llm.astream = async_chunks
+    mock_ollama_module(llm_instance=mock_llm)
+
+    sink: dict = {}
+    [t async for t in stream(GenerationInput(query="q"), metadata_sink=sink)]
+
+    assert sink == {}

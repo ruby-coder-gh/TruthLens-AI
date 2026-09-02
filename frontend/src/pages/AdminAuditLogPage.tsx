@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock,
+  ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock, Download,
 } from 'lucide-react';
 import { Button, Badge, Input, EmptyState } from '../components/ui';
 import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
+import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
+import { downloadBlob } from '../utils/download';
+import { startOfDayIso, endOfDayIso } from '../utils/dates';
+import type { AuditLogExportFormat, AuditLogFilters } from '../api/types';
 
 // Backend audit-log actions are exact-match dotted strings like `user.login`,
 // `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
@@ -35,7 +39,31 @@ const ACTION_FILTERS = [
   { value: 'collection.delete', label: 'Collection delete' },
 ];
 
+const RESOURCE_TYPE_FILTERS = [
+  { value: '', label: 'All resource types' },
+  { value: 'user', label: 'User' },
+  { value: 'workspace', label: 'Workspace' },
+  { value: 'workspace_member', label: 'Workspace member' },
+  { value: 'document', label: 'Document' },
+  { value: 'collection', label: 'Collection' },
+  { value: 'query', label: 'Query' },
+  { value: 'investigation', label: 'Investigation' },
+  { value: 'annotation', label: 'Annotation' },
+  { value: 'audit_log', label: 'Audit log' },
+  { value: 'usage_report', label: 'Usage report' },
+];
+
 const PAGE_SIZE = 10;
+
+/** Every nullable audit column renders this instead of being dereferenced.
+ *  `user_id` is `ondelete=SET NULL`, and workspace-wide actions (`audit.export`,
+ *  `usage.export`) legitimately carry no `resource_id`. */
+const NULL_FIELD = '—';
+
+function truncateId(value: string | null | undefined, max: number): string {
+  if (!value) return NULL_FIELD;
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
@@ -55,17 +83,32 @@ function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' |
 export default function AdminAuditLogPage() {
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [userIdFilter, setUserIdFilter] = useState('');
+  const [resourceTypeFilter, setResourceTypeFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<AuditLogExportFormat | null>(null);
+
+  const { addToast } = useToast();
+
+  // Same filters power both the paginated list and the (unpaginated) export —
+  // kept in one place so "Export CSV/JSON" always reflects what's on screen.
+  const activeFilters: AuditLogFilters = useMemo(() => ({
+    ...(actionFilter ? { action: actionFilter } : {}),
+    ...(search ? { q: search } : {}),
+    ...(userIdFilter ? { user_id: userIdFilter } : {}),
+    ...(resourceTypeFilter ? { resource_type: resourceTypeFilter } : {}),
+    // Bare YYYY-MM-DD inputs parse as midnight — normalize date_to to the
+    // last instant of the day so the selected end day is inclusive.
+    ...(dateFrom ? { date_from: startOfDayIso(dateFrom) } : {}),
+    ...(dateTo ? { date_to: endOfDayIso(dateTo) } : {}),
+  }), [actionFilter, search, userIdFilter, resourceTypeFilter, dateFrom, dateTo]);
 
   const logsQuery = useQuery({
-    queryKey: ['admin', 'logs', page, actionFilter, search],
-    queryFn: () => adminApi.logs({
-      page,
-      page_size: PAGE_SIZE,
-      ...(actionFilter ? { action: actionFilter } : {}),
-      ...(search ? { q: search } : {}),
-    }),
+    queryKey: ['admin', 'logs', page, activeFilters],
+    queryFn: () => adminApi.logs({ page, page_size: PAGE_SIZE, ...activeFilters }),
     placeholderData: (prev) => prev,
   });
 
@@ -90,6 +133,39 @@ export default function AdminAuditLogPage() {
     setActionFilter(value);
     setPage(1);
   }
+
+  function handleUserIdFilterChange(value: string) {
+    setUserIdFilter(value);
+    setPage(1);
+  }
+
+  function handleResourceTypeFilterChange(value: string) {
+    setResourceTypeFilter(value);
+    setPage(1);
+  }
+
+  function handleDateFromChange(value: string) {
+    setDateFrom(value);
+    setPage(1);
+  }
+
+  function handleDateToChange(value: string) {
+    setDateTo(value);
+    setPage(1);
+  }
+
+  const handleExport = useCallback(async (format: AuditLogExportFormat) => {
+    setExportingFormat(format);
+    try {
+      const { blob, filename } = await adminApi.exportLogs(format, activeFilters);
+      downloadBlob(blob, filename);
+      addToast(`Audit log exported as ${format.toUpperCase()}.`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to export audit log.', 'error');
+    } finally {
+      setExportingFormat(null);
+    }
+  }, [activeFilters, addToast]);
 
   return (
     <motion.div variants={pageTransition} initial="initial" animate="animate">
@@ -134,6 +210,77 @@ export default function AdminAuditLogPage() {
             <RefreshCw size={14} className="animate-spin text-primary" />
           </div>
         )}
+      </motion.div>
+
+      {/* Advanced filters + export */}
+      <motion.div
+        className="flex flex-wrap items-end gap-3"
+        variants={{ initial: { opacity: 0.99, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.3, delay: 0.08 } } }}
+      >
+        <div className="w-44">
+          <Input
+            placeholder="Filter by user ID"
+            value={userIdFilter}
+            onChange={(e) => handleUserIdFilterChange(e.target.value)}
+          />
+        </div>
+        <div className="relative">
+          <select
+            value={resourceTypeFilter}
+            onChange={(e) => handleResourceTypeFilterChange(e.target.value)}
+            className="w-44 appearance-none rounded-lg border border-border bg-bg-soft/80 backdrop-blur-sm px-3 py-2.5 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            aria-label="Filter by resource type"
+          >
+            {RESOURCE_TYPE_FILTERS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-dim" />
+        </div>
+        <label htmlFor="audit-log-date-from" className="flex items-center gap-1.5 text-xs text-text-muted">
+          From
+          <input
+            id="audit-log-date-from"
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => handleDateFromChange(e.target.value)}
+            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+          />
+        </label>
+        <label htmlFor="audit-log-date-to" className="flex items-center gap-1.5 text-xs text-text-muted">
+          To
+          <input
+            id="audit-log-date-to"
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => handleDateToChange(e.target.value)}
+            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+          />
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void handleExport('csv'); }}
+            loading={exportingFormat === 'csv'}
+            disabled={exportingFormat !== null}
+          >
+            <Download size={14} />
+            Export CSV
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void handleExport('json'); }}
+            loading={exportingFormat === 'json'}
+            disabled={exportingFormat !== null}
+          >
+            <Download size={14} />
+            Export JSON
+          </Button>
+        </div>
       </motion.div>
 
       {/* Table */}
@@ -203,17 +350,19 @@ export default function AdminAuditLogPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                          {entry.user_id.length > 16 ? `${entry.user_id.slice(0, 16)}...` : entry.user_id}
+                          {truncateId(entry.user_id, 16)}
                         </td>
                         <td className="px-4 py-3">
                           <Badge color={actionBadgeColor(entry.action)}>{entry.action}</Badge>
                         </td>
                         <td className="px-4 py-3">
                           <span className="text-text-muted text-xs">{entry.resource_type}</span>
-                          <span className="ml-1 font-mono text-[10px] text-text-dim">#{entry.resource_id.slice(0, 8)}</span>
+                          <span className="ml-1 font-mono text-[10px] text-text-dim">
+                            {entry.resource_id ? `#${entry.resource_id.slice(0, 8)}` : NULL_FIELD}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-text-dim text-xs max-w-[200px] truncate">
-                          {entry.details ? JSON.stringify(entry.details).slice(0, 60) : '—'}
+                          {entry.details ? JSON.stringify(entry.details).slice(0, 60) : NULL_FIELD}
                         </td>
                       </motion.tr>
                     );
@@ -226,8 +375,10 @@ export default function AdminAuditLogPage() {
           {/* Expanded row */}
           <AnimatePresence>
             {expandedId && (() => {
+              // Rows with no `details` (an export, a login) must still open —
+              // bailing on a null field made the chevron a silent no-op.
               const entry = logs.find((e) => e.id === expandedId);
-              if (!entry?.details) return null;
+              if (!entry) return null;
               return (
                 <motion.div
                   key="expanded-detail"
@@ -240,9 +391,27 @@ export default function AdminAuditLogPage() {
                     <Shield size={14} className="text-primary-soft" />
                     <span className="text-xs font-medium text-text-muted">Full details</span>
                   </div>
-                  <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
-                    {JSON.stringify(entry.details, null, 2)}
-                  </pre>
+                  <dl className="mb-3 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+                    <div>
+                      <dt className="text-text-dim">User ID</dt>
+                      <dd className="font-mono text-text break-all">{entry.user_id ?? NULL_FIELD}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-text-dim">Resource ID</dt>
+                      <dd className="font-mono text-text break-all">{entry.resource_id ?? NULL_FIELD}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-text-dim">IP address</dt>
+                      <dd className="font-mono text-text break-all">{entry.ip_address ?? NULL_FIELD}</dd>
+                    </div>
+                  </dl>
+                  {entry.details ? (
+                    <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
+                      {JSON.stringify(entry.details, null, 2)}
+                    </pre>
+                  ) : (
+                    <p className="text-xs text-text-dim">No additional details recorded.</p>
+                  )}
                 </motion.div>
               );
             })()}

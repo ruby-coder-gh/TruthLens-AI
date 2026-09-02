@@ -9,12 +9,22 @@ from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
+from app.database import async_session_factory
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.prompts.registry import get_active as get_active_prompt
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query, expand
 from app.retrieval.reranker import rerank
+from app.retrieval.sufficiency import (
+    ABSTAIN_MODEL_NAME,
+    ABSTAIN_TRUST_SCORE,
+    EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    abstention_trust_components,
+    assess_sufficiency,
+    build_abstention,
+)
 
 
 class CRAGState(TypedDict):
@@ -54,6 +64,9 @@ class CRAGState(TypedDict):
     # Metadata
     model_used: str
     latency_ms: int
+    prompt_version: str | None
+    token_count: int | None
+    prompt_tokens: int | None
     error: str | None
 
 
@@ -105,7 +118,7 @@ async def _expand_node(state: CRAGState) -> dict:
     return {"rewritten_query": new_query, "retrieval_attempts": state.get("retrieval_attempts", 0) + 1}
 
 
-def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "fallback"]:
+def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "fallback", "abstain"]:
     """Check if retrieved contexts are relevant enough."""
     contexts = state.get("contexts")
 
@@ -114,7 +127,11 @@ def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "f
         max_attempts = state.get("max_retrieval_attempts", 3)
 
         if retrieval_attempts >= max_attempts:
-            return "fallback"
+            # No contexts at all: the relaxed fallback prompt would be asked to
+            # answer from an empty context block, i.e. from the model's own
+            # parametric memory. Abstain instead. The fallback is kept below for
+            # the case where contexts exist but score poorly.
+            return "abstain" if settings.SUFFICIENCY_GATE_ENABLED else "fallback"
         return "expand_query"
 
     # Check if any context has a good score
@@ -133,10 +150,17 @@ def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "f
 async def _generate_primary_node(state: CRAGState) -> dict:
     """Generate answer using primary LLM."""
     contexts = state.get("contexts", [])
+
+    # Same pinned prompt/model the standard graph and the WS path use.
+    async with async_session_factory() as db:
+        resolved_prompt = await get_active_prompt(db)
+
     gen_input = GenerationInput(
         query=state["query"],
         rewritten_query=state.get("rewritten_query"),
         contexts=contexts,
+        system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+        model=resolved_prompt.model_name,
     )
 
     result: GenerationResult = await generate_answer(gen_input)
@@ -145,7 +169,35 @@ async def _generate_primary_node(state: CRAGState) -> dict:
         "response_text": result.text,
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
+        "prompt_version": result.prompt_version or None,
+        "token_count": result.token_count,
+        "prompt_tokens": result.prompt_tokens,
         "edge_case": "normal",
+    }
+
+
+async def _abstain_node(state: CRAGState) -> dict:
+    """Structured refusal for the zero-context case — no LLM call at all.
+
+    Terminal, with trust pinned to 0.0: routing through _trust_score_node would
+    let compute_trust read the synthesised guardrail pass as faithfulness 1.0
+    and return ~0.55 for an answer backed by nothing.
+    """
+    verdict = assess_sufficiency(state.get("contexts") or [])
+    return {
+        "response_text": build_abstention(verdict),
+        "cited_spans": [],
+        "model_used": ABSTAIN_MODEL_NAME,
+        "latency_ms": 0,
+        "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
+        "guardrail_result": {
+            "passed": True,
+            "score": 1.0,
+            "unsupported_claims": [],
+            "details": "Abstained before generation: insufficient evidence.",
+        },
+        "trust_score": ABSTAIN_TRUST_SCORE,
+        "trust_components": abstention_trust_components(verdict),
     }
 
 
@@ -269,6 +321,7 @@ def build_crag_graph() -> CompiledStateGraph:
     workflow.add_node("expand_query", _expand_node)
     workflow.add_node("generate_primary", _generate_primary_node)
     workflow.add_node("generate_fallback", _generate_fallback_node)
+    workflow.add_node("abstain", _abstain_node)
     workflow.add_node("guardrail", _guardrail_node)
     workflow.add_node("trust_score", _trust_score_node)
 
@@ -283,8 +336,11 @@ def build_crag_graph() -> CompiledStateGraph:
             "generate": "generate_primary",
             "expand_query": "expand_query",
             "fallback": "generate_fallback",
+            "abstain": "abstain",
         },
     )
+
+    workflow.add_edge("abstain", END)
 
     workflow.add_conditional_edges(
         "expand_query",

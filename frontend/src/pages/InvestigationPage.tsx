@@ -23,6 +23,7 @@ import { fadeIn, fadeInScale, fadeInUp, pageTransition, staggerContainer, stagge
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { investigationApi } from '../api/client';
+import { downloadBlob } from '../utils/download';
 import type {
   InvestigationResponse,
   InvestigationReviewStatus,
@@ -164,12 +165,7 @@ export default function InvestigationPage() {
     setExportingAuditBundle(true);
     try {
       const { blob, filename } = await investigationApi.exportAuditBundle(workspaceId, result.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      link.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, filename);
       addToast('Audit bundle downloaded and export logged to the audit trail.', 'success');
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Could not prepare the audit bundle.', 'error');

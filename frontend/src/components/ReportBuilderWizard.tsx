@@ -6,6 +6,7 @@ import AnimatedInput from './premium/AnimatedInput';
 import GlowingIcon from './premium/GlowingIcon';
 import PremiumButton from './premium/PremiumButton';
 import { relevancePercent } from '../utils/relevance';
+import { downloadBlob } from '../utils/download';
 
 export interface ReportBuilderWizardProps {
   open: boolean;
@@ -210,12 +211,10 @@ export function ReportBuilderWizard({ open, onClose, sources }: ReportBuilderWiz
 
   const downloadReport = () => {
     if (!canGenerate) return;
-    const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${slugify(title) || 'evidence-package'}.md`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(
+      new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
+      `${slugify(title) || 'evidence-package'}.md`,
+    );
     setGenerated(true);
     setCopyStatus(null);
   };

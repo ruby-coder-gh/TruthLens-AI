@@ -7,13 +7,19 @@ import json
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
 
 from app.config import settings
-from app.core.deps import check_workspace_access, check_workspace_access_or_admin, get_current_user, get_db
+from app.core.deps import (
+    check_workspace_access,
+    check_workspace_access_or_admin,
+    get_accessible_workspace_ids,
+    get_current_user,
+    get_db,
+)
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
@@ -29,6 +35,7 @@ from app.schemas.document import (
 )
 from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
+from app.utils.sql import escape_like
 
 router = APIRouter(tags=["documents"])
 
@@ -168,6 +175,8 @@ async def upload_document(
         status=doc.status,
         error_message=doc.error_message,
         uploaded_by=doc.uploaded_by,
+        tags=doc.tags or [],
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -215,6 +224,8 @@ async def list_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                tags=d.tags or [],
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -253,6 +264,7 @@ async def get_document(
         page_count=doc.page_count,
         chunk_count=doc.chunk_count,
         status=doc.status,
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         chunks=[
@@ -341,6 +353,7 @@ async def list_all_documents(
     status: str | None = None,
     search: str | None = None,
     file_type: str | None = None,
+    tags: str | None = None,
     page: int = 1,
     page_size: int = 20,
     current_user: User = Depends(get_current_user),
@@ -353,26 +366,28 @@ async def list_all_documents(
     if current_user.role == "admin":
         query = select(Document)
         count_query = select(func.count(Document.id))
-        if status:
-            query = query.where(Document.status == status)
-            count_query = count_query.where(Document.status == status)
     else:
-        # Regular user: documents from workspaces they are members of
-        member_ws_ids = select(WorkspaceMember.workspace_id).where(
-            WorkspaceMember.user_id == current_user.id
-        )
-        query = select(Document).where(Document.workspace_id.in_(member_ws_ids))
-        count_query = select(func.count(Document.id)).where(Document.workspace_id.in_(member_ws_ids))
-        if status:
-            query = query.where(Document.status == status)
-            count_query = count_query.where(Document.status == status)
+        # Regular user: documents from every workspace they can access
+        # (owner OR member — get_accessible_workspace_ids covers legacy
+        # workspaces where the owner has no WorkspaceMember row).
+        accessible_ws_ids = await get_accessible_workspace_ids(db, current_user)
+        query = select(Document).where(Document.workspace_id.in_(accessible_ws_ids))
+        count_query = select(func.count(Document.id)).where(Document.workspace_id.in_(accessible_ws_ids))
+
+    if status:
+        query = query.where(Document.status == status)
+        count_query = count_query.where(Document.status == status)
 
     # Apply the same controlled filters to the data and count queries. Search
     # is server-backed, so results on later pages remain discoverable.
+    # LIKE-escaped: `search` is a substring filter, so a "%" or "_" the user
+    # typed must match itself rather than act as a wildcard.
     if search and search.strip():
-        filename_pattern = f"%{search.strip()}%"
-        query = query.where(Document.original_filename.ilike(filename_pattern))
-        count_query = count_query.where(Document.original_filename.ilike(filename_pattern))
+        filename_pattern = f"%{escape_like(search.strip())}%"
+        query = query.where(Document.original_filename.ilike(filename_pattern, escape="\\"))
+        count_query = count_query.where(
+            Document.original_filename.ilike(filename_pattern, escape="\\")
+        )
 
     allowed_types = {"pdf", "docx", "txt", "md", "csv", "json"}
     normalized_type = (file_type or "").lower().lstrip(".")
@@ -380,6 +395,18 @@ async def list_all_documents(
         extension_pattern = f"%.{normalized_type}"
         query = query.where(func.lower(Document.original_filename).like(extension_pattern))
         count_query = count_query.where(func.lower(Document.original_filename).like(extension_pattern))
+
+    # Tag filter: comma-separated list, AND semantics (a document must carry
+    # every requested tag). Implemented as a LIKE against the serialized JSON
+    # array — adequate at current scale on SQLite. A Postgres deployment
+    # should switch this to a `tags @> ARRAY[...]` / JSONB containment query.
+    # The tag value itself must be LIKE-escaped: unescaped "%"/"_" in a tag
+    # (e.g. "q1_2026") are SQL wildcards and would match unrelated tags.
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
+    for tag in tag_list:
+        tag_pattern = f'%"{escape_like(tag)}"%'
+        query = query.where(Document.tags.like(tag_pattern, escape="\\"))
+        count_query = count_query.where(Document.tags.like(tag_pattern, escape="\\"))
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -402,6 +429,8 @@ async def list_all_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                tags=d.tags or [],
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -455,6 +484,12 @@ async def reindex_document(
     # Schedule background processing via asyncio
     file_path = settings.upload_path / doc.filename
     if file_path.exists():
+        # Clear the existing vector index (Chroma/BM25) and `chunks` rows
+        # before re-ingesting — see `purge_document_index`. The bulk reindex
+        # path shares this helper so both stay in lockstep.
+        from app.ingestion.indexer import purge_document_index
+        await purge_document_index(db, workspace_id, doc.id)
+
         asyncio.create_task(
             process_document_background(
                 document_id=doc.id,
@@ -485,6 +520,7 @@ async def process_document_background(
     """Background task: process document through ingestion pipeline."""
     from app.database import async_session_factory
     from app.graph.ingestion_graph import run_ingestion_pipeline
+    from app.models.chunk_quarantine import ChunkQuarantine
 
     logger.info("background_ingestion_start", document_id=document_id)
 
@@ -510,9 +546,62 @@ async def process_document_background(
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
         if doc:
+            # A fresh scan is authoritative for this run — supersede (never
+            # accumulate) prior quarantine state. This also makes reindex
+            # correct: without clearing first, re-running ingestion on the
+            # same poisoned document would double (triple, ...) the
+            # persisted rows and `quarantined_chunk_count` on every run.
+            # Previously "released" rows are deliberately included in the
+            # wipe — a reindex re-scans from scratch, so a chunk that was
+            # manually released before is re-evaluated like any other and,
+            # if still flagged, must go back through review.
+            await session.execute(
+                delete(ChunkQuarantine).where(ChunkQuarantine.document_id == document_id)
+            )
+
+            # The scan step runs before embed/store, so its findings are a
+            # real security signal worth keeping even if a later pipeline
+            # stage crashed — persist on both the success and failure
+            # branches below.
+            quarantined_items = ingest_result.get("quarantined") or []
+            for item in quarantined_items:
+                session.add(ChunkQuarantine(
+                    document_id=document_id,
+                    workspace_id=workspace_id,
+                    chunk_index=item["index"],
+                    content=item["content"],
+                    pattern=item.get("pattern"),
+                    severity=item.get("severity"),
+                    status="quarantined",
+                ))
+            doc.quarantined_chunk_count = len(quarantined_items)
+            if quarantined_items:
+                session.add(AuditLog(
+                    user_id=doc.uploaded_by,
+                    action="document.quarantine",
+                    resource_type="document",
+                    resource_id=document_id,
+                    details=json.dumps({
+                        "count": len(quarantined_items),
+                        "patterns": sorted({
+                            item["pattern"] for item in quarantined_items if item.get("pattern")
+                        }),
+                    }),
+                ))
+
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+                if doc.chunk_count == 0 and quarantined_items:
+                    # Every chunk was quarantined: not a pipeline failure
+                    # (nothing crashed) but the document has zero
+                    # retrievable content pending human review. Surface
+                    # that via error_message rather than a silent
+                    # "ready, 0 chunks" state; status stays "ready" since
+                    # the document itself was processed successfully.
+                    doc.error_message = f"All {len(quarantined_items)} chunks quarantined for review"
+                else:
+                    doc.error_message = None
                 await bump_workspace_document_version(session, workspace_id)
             else:
                 doc.status = "failed"

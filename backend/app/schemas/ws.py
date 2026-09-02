@@ -19,6 +19,46 @@ class WSCancelPayload(BaseModel):
     pass
 
 
+class WSResumePayload(BaseModel):
+    """Client -> server: resume a stream after a reconnect.
+
+    Sent after `auth_success`. `last_seq` is the highest `seq` the client has
+    already rendered (0 = replay everything still buffered).
+    """
+
+    query_id: str
+    last_seq: int = 0
+
+
+class WSResumedPayload(BaseModel):
+    """Server -> client: sent once the replay for a `resume` has been flushed.
+
+    Emitted inside the sink's replay lock, so it is guaranteed to arrive after
+    every replayed frame and before any live frame of the resumed stream.
+
+    `live` is True when the stream is still running and now delivers to this
+    socket; False when the buffer was already complete (nothing more follows).
+    """
+
+    query_id: str
+    from_seq: int
+    replayed: int
+    live: bool
+
+
+class WSCancelAckPayload(BaseModel):
+    """Server -> client: `cancel` arrived with no query running.
+
+    A no-op cancel (e.g. Stop pressed on unmount after the stream finished) is
+    acknowledged rather than treated as an error, and leaves the buffer
+    resumable. When a query *is* cancelled the server still sends the
+    `CANCELLED` error frame instead.
+    """
+
+    query_id: str | None = None
+    cancelled: bool = False
+
+
 class WSFeedbackPayload(BaseModel):
     query_id: str
     rating: int
@@ -130,5 +170,19 @@ class WSComparisonProgressPayload(BaseModel):
 
 
 class WSMessage(BaseModel):
+    """Envelope for one WebSocket frame.
+
+    `seq` is a monotonic, gapless, 1-based counter scoped to a single `query_id`,
+    stamped by `app.api.stream_registry.StreamSink` on every frame that belongs
+    to a query stream (ack, progress, sources, token, stream_end, guardrail,
+    trust_score, complete, and that stream's error frames). It is what a client
+    replays from via the `resume` opcode.
+
+    Connection-level frames — `auth_success`, `resumed`, and errors raised before
+    a stream exists (UNAUTHORIZED, INVALID_INPUT, FORBIDDEN, RESUME_UNAVAILABLE)
+    — carry no `seq`.
+    """
+
     type: str
     payload: dict[str, Any]
+    seq: int | None = None

@@ -136,3 +136,35 @@ async def test_audit_logs_created_at_is_tz_aware(
         parsed = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
         assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
+# ─── SEC-1 (LOW): LIKE wildcards in the `q` filter ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_q_treats_wildcards_literally(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """`q` is a substring search: `_` must not act as a single-char wildcard."""
+    test_db.add_all([
+        AuditLog(action="a_b.literal", resource_type="query", resource_id="lit-1", details="{}"),
+        AuditLog(action="axb.wildcard", resource_type="query", resource_id="wild-1", details="{}"),
+    ])
+    await test_db.commit()
+
+    resp = await client.get("/api/admin/logs?q=a_b", headers=admin_headers)
+    assert resp.status_code == 200
+    ids = [row["resource_id"] for row in resp.json()["data"]]
+    assert ids == ["lit-1"]
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_q_percent_does_not_match_everything(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """A bare `%` is a literal character, not "match every row"."""
+    await _seed_logs(test_db)
+
+    resp = await client.get("/api/admin/logs?q=%25", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["total"] == 0

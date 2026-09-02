@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -50,26 +51,10 @@ class TestQueryGraph:
         assert state["workspace_id"] == "ws-1"
         assert state["guardrail_retry_count"] == 0
 
-    @pytest.mark.asyncio
-    async def test_should_continue_with_contexts(self):
-        from app.graph.query_graph import _should_continue, GraphState
-        state = GraphState(
-            query="test", workspace_id="w", query_id="q",
-            top_k=5, contexts=[{"chunk_id": "c1", "content": "test"}],
-            model_used="m", latency_ms=0,
-            rewritten_query=None, user_id=None, filters=None,
-            retrieval_results=None, reranked_results=None,
-            response_text=None, cited_spans=None,
-            guardrail_result=None, guardrail_retry_count=0,
-            trust_score=None, trust_components=None, error=None,
-        )
-        result = _should_continue(state)
-        assert result == "generate"
-
-    @pytest.mark.asyncio
-    async def test_should_continue_without_contexts(self):
-        from app.graph.query_graph import _should_continue, GraphState
-        state = GraphState(
+    @staticmethod
+    def _state(**overrides):
+        from app.graph.query_graph import GraphState
+        base = dict(
             query="test", workspace_id="w", query_id="q",
             top_k=5, contexts=[],
             model_used="m", latency_ms=0,
@@ -78,9 +63,193 @@ class TestQueryGraph:
             response_text=None, cited_spans=None,
             guardrail_result=None, guardrail_retry_count=0,
             trust_score=None, trust_components=None, error=None,
+            retrieval_attempts=0, edge_case=None,
         )
+        base.update(overrides)
+        return GraphState(**base)  # type: ignore[typeddict-item]
+
+    @pytest.mark.asyncio
+    async def test_should_continue_with_contexts(self):
+        """Well-scored contexts go to generation."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.9}])
+        result = _should_continue(state)
+        assert result == "generate"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_without_contexts(self):
+        """Empty retrieval still gets one rewrite retry before abstaining."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[])
         result = _should_continue(state)
         assert result == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_retries_when_evidence_is_weak(self):
+        """F7c: non-empty but low-scoring contexts are no longer 'good enough'."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.02}])
+        result = _should_continue(state)
+        assert result == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_abstains_once_the_retry_budget_is_spent(self):
+        """Bounded loop: retrieve -> rewrite could previously cycle forever."""
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        state = self._state(
+            contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.02}],
+            retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS,
+        )
+        result = _should_continue(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_abstains_on_empty_retrieval_after_retries(self):
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        state = self._state(contexts=[], retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS)
+        result = _should_continue(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_keeps_legacy_routing_when_the_gate_is_off(self, monkeypatch):
+        from app.config import settings
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        monkeypatch.setattr(settings, "SUFFICIENCY_GATE_ENABLED", False)
+        weak = self._state(
+            contexts=[{"chunk_id": "c1", "content": "test"}],
+            retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS,
+        )
+        empty = self._state(contexts=[], retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS)
+        assert _should_continue(weak) == "generate"
+        assert _should_continue(empty) == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_abstain_node_answers_without_calling_a_model(self):
+        from app.graph.query_graph import _abstain_node
+        state = self._state(contexts=[{"chunk_id": "c1", "document_id": "d1", "rerank_score": 0.02}])
+
+        result = await _abstain_node(state)
+
+        assert result["response_text"].startswith("I cannot find this information in your documents.")
+        assert result["edge_case"] == "insufficient_evidence"
+        assert result["model_used"] == "abstain"
+        assert result["cited_spans"] == []
+        assert result["guardrail_result"]["passed"] is True
+        assert result["trust_score"] == 0.0
+        assert result["trust_components"] == {
+            "retrieval_quality": 0.02,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_retrieve_node_counts_its_attempts(self, monkeypatch):
+        """The retry budget needs a counter that survives the rewrite loop."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_hybrid_search(*args, **kwargs):
+            return []
+
+        async def fake_rerank(*args, **kwargs):
+            return []
+
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+
+        result = await query_graph._retrieve_node(self._state(retrieval_attempts=1))
+
+        assert result["retrieval_attempts"] == 2
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_abstains_with_zero_trust_on_weak_evidence(self, monkeypatch):
+        """End-to-end: a weak-evidence run must end at trust 0.0, not at the
+        ~0.55 compute_trust would hand back for a synthesised guardrail pass."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_cache_lookup_node(state):
+            return {"cache_hit": False, "cached_query_id": None, "workspace_document_version": 0}
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return [SimpleNamespace(
+                chunk_id="c1", document_id="d1", content="unrelated text",
+                score=0.02, final_score=0.02, rerank_score=0.02, metadata={"document_name": "Doc"},
+            )]
+
+        async def fake_rerank(query, results, top_k=None):
+            return results
+
+        async def never_generate(*args, **kwargs):
+            raise AssertionError("generation must not run when the gate abstains")
+
+        monkeypatch.setattr(query_graph, "_cache_lookup_node", fake_cache_lookup_node)
+        monkeypatch.setattr(query_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(query_graph, "generate_answer", never_generate)
+
+        graph = query_graph.build_query_graph()
+        final = await graph.ainvoke(self._state(query="who signed the 1994 lease"))
+
+        assert final["edge_case"] == "insufficient_evidence"
+        assert final["model_used"] == "abstain"
+        assert final["trust_score"] == 0.0
+        assert final["trust_components"] == {
+            "retrieval_quality": 0.02,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
+        assert final["response_text"].startswith("I cannot find this information in your documents.")
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_still_reaches_generation_on_strong_evidence(self, monkeypatch):
+        """The abstain edge must not short-circuit the normal path."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_cache_lookup_node(state):
+            return {"cache_hit": False, "cached_query_id": None, "workspace_document_version": 0}
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return [SimpleNamespace(
+                chunk_id="c1", document_id="d1", content="the answer",
+                score=0.93, final_score=0.93, rerank_score=0.93, metadata={"document_name": "Doc"},
+            )]
+
+        async def fake_rerank(query, results, top_k=None):
+            return results
+
+        async def fake_generate(gen_input):
+            # `_generate_node` reads the F1 provenance fields off the result, so
+            # the stub has to carry the full `GenerationResult` shape.
+            return SimpleNamespace(
+                text="Alice signed it.", cited_spans=[], model_used="qwen3:4b", latency_ms=7,
+                prompt_version="hash-from-generator", token_count=3, prompt_tokens=42,
+            )
+
+        async def fake_guardrail(answer, contexts):
+            from app.generation.guardrail import GuardrailResult
+            return GuardrailResult(passed=True, score=0.9, unsupported_claims=[], details="ok")
+
+        monkeypatch.setattr(query_graph, "_cache_lookup_node", fake_cache_lookup_node)
+        monkeypatch.setattr(query_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(query_graph, "generate_answer", fake_generate)
+        monkeypatch.setattr(query_graph, "guardrail_check", fake_guardrail)
+
+        graph = query_graph.build_query_graph()
+        final = await graph.ainvoke(self._state(query="who signed it"))
+
+        assert final.get("edge_case") is None
+        assert final["response_text"] == "Alice signed it."
+        assert final["trust_score"] > 0.0
 
 
 class TestCRAGGraph:
@@ -181,6 +350,116 @@ class TestCRAGGraph:
         )
         result = _relevance_check(state)
         assert result == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_relevance_check_abstains_when_retrieval_came_back_empty(self):
+        """F7c: with zero contexts the relaxed fallback LLM had nothing to ground
+        on — it was pure hallucination surface. Abstain instead."""
+        from app.graph.crag_graph import _relevance_check, CRAGState
+        state = CRAGState(
+            query="test", workspace_id="w", query_id="q",
+            top_k=5, contexts=[],
+            model_used="m", latency_ms=0,
+            rewritten_query=None, user_id=None, filters=None,
+            retrieval_results=None, reranked_results=None,
+            response_text=None, cited_spans=None,
+            guardrail_result=None, guardrail_retry_count=0,
+            guardrail_max_retries=3, trust_score=None,
+            trust_components=None, retrieval_attempts=3,
+            max_retrieval_attempts=3, edge_case=None, error=None,
+        )
+        result = _relevance_check(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_crag_abstain_node_returns_the_structured_refusal(self):
+        from app.graph.crag_graph import _abstain_node, CRAGState
+        state = CRAGState(
+            query="test", workspace_id="w", query_id="q",
+            top_k=5, contexts=[],
+            model_used="m", latency_ms=0,
+            rewritten_query=None, user_id=None, filters=None,
+            retrieval_results=None, reranked_results=None,
+            response_text=None, cited_spans=None,
+            guardrail_result=None, guardrail_retry_count=0,
+            guardrail_max_retries=3, trust_score=None,
+            trust_components=None, retrieval_attempts=3,
+            max_retrieval_attempts=3, edge_case=None, error=None,
+        )
+
+        result = await _abstain_node(state)
+
+        assert result["response_text"].startswith("I cannot find this information in your documents.")
+        assert result["edge_case"] == "insufficient_evidence"
+        assert result["model_used"] == "abstain"
+        assert result["cited_spans"] == []
+        assert result["trust_score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_compiled_crag_graph_abstains_with_zero_trust(self, monkeypatch):
+        """End-to-end: empty retrieval ends at trust 0.0 without the relaxed
+        fallback LLM ever being constructed."""
+        import app.graph.crag_graph as crag_graph
+        import app.generation.provider as provider
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return []
+
+        async def fake_rerank(query, results, top_k=None):
+            return []
+
+        async def never_generate(*args, **kwargs):
+            raise AssertionError("primary generation must not run when the gate abstains")
+
+        def never_fallback_llm(*args, **kwargs):
+            raise AssertionError("fallback LLM must not run with zero contexts")
+
+        monkeypatch.setattr(crag_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(crag_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(crag_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(crag_graph, "generate_answer", never_generate)
+        monkeypatch.setattr(provider, "get_chat_llm", never_fallback_llm)
+
+        graph = crag_graph.build_crag_graph()
+        final = await graph.ainvoke({
+            "query": "who signed the 1994 lease",
+            "rewritten_query": None,
+            "workspace_id": "w",
+            "user_id": None,
+            "query_id": "q",
+            "top_k": 5,
+            "filters": None,
+            "retrieval_results": None,
+            "reranked_results": None,
+            "contexts": None,
+            "response_text": None,
+            "cited_spans": None,
+            "guardrail_result": None,
+            "guardrail_retry_count": 0,
+            "guardrail_max_retries": 3,
+            "trust_score": None,
+            "trust_components": None,
+            "retrieval_attempts": 0,
+            "max_retrieval_attempts": 1,
+            "edge_case": None,
+            "model_used": "m",
+            "latency_ms": 0,
+            "error": None,
+        })
+
+        assert final["edge_case"] == "insufficient_evidence"
+        assert final["model_used"] == "abstain"
+        assert final["trust_score"] == 0.0
+        assert final["trust_components"] == {
+            "retrieval_quality": 0.0,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
+        assert final["response_text"].startswith("I cannot find this information in your documents.")
 
     @pytest.mark.asyncio
     async def test_guardrail_decision_passed(self):
@@ -305,3 +584,105 @@ class TestIngestionGraph:
             assert result["error"] is not None
         else:
             assert result["chunk_count"] > 0
+
+
+class TestGenerateNodePromptPinning:
+    """Both graph generate nodes resolve the active prompt and record its hash."""
+
+    @staticmethod
+    def _point_graph_at_test_engine(monkeypatch, module, test_engine):
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        monkeypatch.setattr(
+            module,
+            "async_session_factory",
+            async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+        )
+
+    @staticmethod
+    def _capture_generate(monkeypatch, module, captured, result):
+        async def _generate(gen_input):
+            captured["system_prompt"] = gen_input.system_prompt
+            captured["model"] = gen_input.model
+            return result
+
+        monkeypatch.setattr(module, "generate_answer", _generate)
+
+    @staticmethod
+    def _result(**overrides):
+        from app.generation.generator import GenerationResult
+
+        defaults = dict(
+            text="answer",
+            token_count=9,
+            model_used="served:7b",
+            latency_ms=5,
+            prompt_tokens=77,
+            prompt_version="hash-from-generator",
+        )
+        defaults.update(overrides)
+        return GenerationResult(**defaults)
+
+    async def _seed_active_prompt(self, test_db, content, model_name=None):
+        from app.models.prompt_version import PromptVersion
+        from app.prompts import registry
+
+        test_db.add(
+            PromptVersion(
+                name="answer",
+                version=1,
+                content=content,
+                content_hash=registry.compute_hash(content),
+                status="active",
+                model_name=model_name,
+            )
+        )
+        await test_db.commit()
+        registry.invalidate("answer")
+
+    async def test_query_graph_uses_default_prompt_when_none_active(
+        self, monkeypatch, test_engine
+    ):
+        from app.graph import query_graph
+
+        self._point_graph_at_test_engine(monkeypatch, query_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, query_graph, captured, self._result())
+
+        out = await query_graph._generate_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] is None
+        assert captured["model"] is None
+        assert out["prompt_version"] == "hash-from-generator"
+        assert out["token_count"] == 9
+        assert out["prompt_tokens"] == 77
+
+    async def test_query_graph_threads_active_prompt_and_pinned_model(
+        self, monkeypatch, test_db, test_engine
+    ):
+        from app.graph import query_graph
+
+        await self._seed_active_prompt(test_db, "Pinned graph prompt.", "pinned:1b")
+        self._point_graph_at_test_engine(monkeypatch, query_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, query_graph, captured, self._result())
+
+        await query_graph._generate_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] == "Pinned graph prompt."
+        assert captured["model"] == "pinned:1b"
+
+    async def test_crag_graph_threads_active_prompt(self, monkeypatch, test_db, test_engine):
+        from app.graph import crag_graph
+
+        await self._seed_active_prompt(test_db, "Pinned CRAG prompt.")
+        self._point_graph_at_test_engine(monkeypatch, crag_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, crag_graph, captured, self._result())
+
+        out = await crag_graph._generate_primary_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] == "Pinned CRAG prompt."
+        assert out["prompt_version"] == "hash-from-generator"
+        assert out["token_count"] == 9
+        assert out["prompt_tokens"] == 77

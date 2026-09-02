@@ -13,11 +13,24 @@ from app.database import async_session_factory
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.prompts.registry import get_active as get_active_prompt
 from app.query_cache import cached_query_sources, get_workspace_document_version, lookup_cached_query
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
 from app.retrieval.reranker import rerank
+from app.retrieval.sufficiency import (
+    ABSTAIN_MODEL_NAME,
+    ABSTAIN_TRUST_SCORE,
+    EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    abstention_trust_components,
+    assess_sufficiency,
+    build_abstention,
+)
 from app.utils.logger import logger
+
+# Retrieval passes allowed before the graph gives up and abstains. Without a
+# budget the retrieve -> rewrite conditional edge could cycle indefinitely.
+MAX_RETRIEVAL_ATTEMPTS = 2
 
 
 class GraphState(TypedDict):
@@ -40,11 +53,14 @@ class GraphState(TypedDict):
     # Retrieval
     retrieval_results: list | None
     reranked_results: list | None
+    retrieval_attempts: int
 
     # Generation
     contexts: list[dict] | None
     response_text: str | None
     cited_spans: list | None
+    # None for a normal answer; "insufficient_evidence" when the gate abstained.
+    edge_case: str | None
 
     # Guardrail
     guardrail_result: dict | None
@@ -57,6 +73,9 @@ class GraphState(TypedDict):
     # Metadata
     model_used: str
     latency_ms: int
+    prompt_version: str | None
+    token_count: int | None
+    prompt_tokens: int | None
     error: str | None
 
 
@@ -74,11 +93,15 @@ async def _cache_lookup_node(state: GraphState) -> dict:
                 "workspace_document_version": document_version,
             }
 
+        # Keyed on the active prompt too: a promoted prompt invalidates answers
+        # the retired one produced (same reason as the WS path).
+        resolved_prompt = await get_active_prompt(session)
         cached_query = await lookup_cached_query(
             session,
             workspace_id=workspace_id,
             query_text=state["query"],
             document_version=document_version,
+            prompt_version=resolved_prompt.hash,
             force_refresh=state.get("force_refresh", False),
         )
         await session.commit()
@@ -142,6 +165,7 @@ async def _retrieve_node(state: GraphState) -> dict:
         "retrieval_results": [vars(r) if hasattr(r, "__dict__") else r for r in results],
         "reranked_results": [vars(r) if hasattr(r, "__dict__") else r for r in reranked],
         "contexts": contexts,
+        "retrieval_attempts": state.get("retrieval_attempts", 0) + 1,
     }
 
 
@@ -154,10 +178,19 @@ async def _rewrite_node(state: GraphState) -> dict:
 async def _generate_node(state: GraphState) -> dict:
     """Generate answer from retrieved contexts."""
     contexts = state.get("contexts", [])
+
+    # Resolve the pinned prompt/model for this deployment; `is_default` keeps
+    # the generator on its own DEFAULT_SYSTEM_PROMPT so nothing changes on a
+    # database with no promoted version.
+    async with async_session_factory() as db:
+        resolved_prompt = await get_active_prompt(db)
+
     gen_input = GenerationInput(
         query=state["query"],
         rewritten_query=state.get("rewritten_query"),
         contexts=contexts,
+        system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+        model=resolved_prompt.model_name,
     )
 
     result: GenerationResult = await generate_answer(gen_input)
@@ -167,6 +200,9 @@ async def _generate_node(state: GraphState) -> dict:
         "cited_spans": [vars(s) if hasattr(s, "__dict__") else {"text": s.text, "chunk_id": s.chunk_id, "start_index": s.start_index, "end_index": s.end_index} for s in result.cited_spans],
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
+        "prompt_version": result.prompt_version or None,
+        "token_count": result.token_count,
+        "prompt_tokens": result.prompt_tokens,
     }
 
 
@@ -218,12 +254,58 @@ async def _trust_score_node(state: GraphState) -> dict:
     }
 
 
-def _should_continue(state: GraphState) -> Literal["generate", "rewrite"]:
-    """Check if retrieval results are sufficient."""
-    contexts = state.get("contexts")
-    if contexts and len(contexts) > 0:
+async def _abstain_node(state: GraphState) -> dict:
+    """Answer "I don't know" without spending a generation call.
+
+    Reached when retrieval never produced evidence above the sufficiency floor.
+    The guardrail result is synthesised as a pass (nothing was asserted, so
+    there is nothing unsupported to catch) and the trust score is pinned to 0.0
+    rather than computed, matching the WebSocket abstain path exactly.
+    """
+    verdict = assess_sufficiency(state.get("contexts") or [])
+    logger.info(
+        "query_abstained",
+        query_id=state.get("query_id"),
+        reason=verdict.reason,
+        top_score=verdict.top_score,
+        searched=verdict.searched_count,
+    )
+    return {
+        "response_text": build_abstention(verdict),
+        "cited_spans": [],
+        "model_used": ABSTAIN_MODEL_NAME,
+        "latency_ms": 0,
+        "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
+        "guardrail_result": {
+            "passed": True,
+            "score": 1.0,
+            "unsupported_claims": [],
+            "details": "Abstained before generation: insufficient evidence.",
+        },
+        # Terminal: routing through _trust_score_node would let compute_trust
+        # read the synthesised guardrail pass as faithfulness 1.0 and return
+        # ~0.55 for an answer with zero evidence.
+        "trust_score": ABSTAIN_TRUST_SCORE,
+        "trust_components": abstention_trust_components(verdict),
+    }
+
+
+def _should_continue(state: GraphState) -> Literal["generate", "rewrite", "abstain"]:
+    """Route on evidence quality, not just on 'did retrieval return anything'.
+
+    Weak-but-present contexts used to go straight to generation, which is the
+    classic hallucination path. Now they get one more retrieval attempt and then
+    an explicit abstention.
+    """
+    contexts = state.get("contexts") or []
+    if assess_sufficiency(contexts).sufficient:
         return "generate"
-    return "rewrite"
+    if not settings.SUFFICIENCY_GATE_ENABLED:
+        # Legacy behaviour: any context at all is enough to try generating.
+        return "generate" if contexts else "rewrite"
+    if state.get("retrieval_attempts", 0) < MAX_RETRIEVAL_ATTEMPTS:
+        return "rewrite"
+    return "abstain"
 
 
 def build_query_graph() -> CompiledStateGraph:
@@ -240,6 +322,7 @@ def build_query_graph() -> CompiledStateGraph:
     workflow.add_node("rewrite", _rewrite_node)
     workflow.add_node("retrieve", _retrieve_node)
     workflow.add_node("generate", _generate_node)
+    workflow.add_node("abstain", _abstain_node)
     workflow.add_node("guardrail", _guardrail_node)
     workflow.add_node("trust_score", _trust_score_node)
 
@@ -260,9 +343,13 @@ def build_query_graph() -> CompiledStateGraph:
         {
             "generate": "generate",
             "rewrite": "rewrite",
+            "abstain": "abstain",
         },
     )
     workflow.add_edge("generate", "guardrail")
+    # Abstention is terminal: it carries its own guardrail result and trust
+    # score, so neither downstream node has anything left to decide.
+    workflow.add_edge("abstain", END)
     workflow.add_edge("guardrail", "trust_score")
     workflow.add_edge("trust_score", END)
 

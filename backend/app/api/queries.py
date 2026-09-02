@@ -79,9 +79,11 @@ def _to_summary(query: Query, *, is_pinned: bool = False) -> QuerySummary:
         trust_score=query.trust_score,
         guardrail_passed=query.guardrail_passed,
         model_used=query.model_used,
+        prompt_version=query.prompt_version,
         is_pinned=is_pinned,
         compared_to_query_id=query.compared_to_query_id,
         review_status=query.review_status,
+        edge_case=query.edge_case,
         created_at=query.created_at,
     )
 
@@ -100,6 +102,8 @@ def _to_detail(query: Query, *, is_pinned: bool = False) -> QueryDetailResponse:
         model_used=query.model_used,
         latency_ms=query.latency_ms,
         token_count=query.token_count,
+        prompt_tokens=query.prompt_tokens,
+        prompt_version=query.prompt_version,
         is_pinned=is_pinned,
         compared_to_query_id=query.compared_to_query_id,
         trust_components=query.trust_components or {},
@@ -107,6 +111,7 @@ def _to_detail(query: Query, *, is_pinned: bool = False) -> QueryDetailResponse:
         review_note=query.review_note,
         reviewed_by=query.reviewed_by,
         reviewed_at=query.reviewed_at,
+        edge_case=query.edge_case,
         created_at=query.created_at,
     )
 
@@ -134,15 +139,20 @@ async def _run_fresh_query(*, query: Query, user_id: str) -> dict[str, Any]:
         "workspace_document_version": 0,
         "retrieval_results": None,
         "reranked_results": None,
+        "retrieval_attempts": 0,
         "contexts": None,
         "response_text": None,
         "cited_spans": None,
+        "edge_case": None,
         "guardrail_result": None,
         "guardrail_retry_count": 0,
         "trust_score": None,
         "trust_components": None,
         "model_used": "unknown",
         "latency_ms": 0,
+        "prompt_version": None,
+        "token_count": None,
+        "prompt_tokens": None,
         "error": None,
     }
     return await graph.ainvoke(initial_state)
@@ -469,9 +479,12 @@ async def compare_query_answer(
         guardrail_passed=guardrail.get("passed"),
         model_used=result.get("model_used"),
         latency_ms=int(result.get("latency_ms") or 0),
-        token_count=None,
+        token_count=result.get("token_count"),
+        prompt_tokens=result.get("prompt_tokens"),
+        prompt_version=result.get("prompt_version"),
         compared_to_query_id=original.id,
         review_status="needs_review",
+        edge_case=result.get("edge_case"),
     )
     db.add(rerun)
     await db.flush()

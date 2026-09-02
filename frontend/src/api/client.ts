@@ -36,6 +36,25 @@ import type {
   ReviewQueueItem,
   ReviewQueueCount,
   Annotation,
+  BulkDocumentAction,
+  BulkDocumentResponse,
+  QuarantinedChunk,
+  QuarantineStatus,
+  QuarantineActionResponse,
+  GoldenPromoteRequest,
+  GoldenEntryResponse,
+  GoldenListResponse,
+  UsageQueryParams,
+  UsageReportResponse,
+  PricingResponse,
+  AuditLogFilters,
+  AuditLogExportFormat,
+  PromptVersion,
+  PromptVersionCreate,
+  PromptVersionStatus,
+  PromptDiffResponse,
+  PromptEvalQueued,
+  ActivePrompt,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -67,12 +86,19 @@ export function clearStoredTokens(): void {
 export class ApiError extends Error {
   status: number;
   detail?: string;
+  /** Structured payload from the backend's error envelope
+   *  (`{ error: { code, message, details } }`). Endpoints that fail with
+   *  machine-readable context — e.g. the prompt promote gate's 409, which
+   *  carries `{ reason, failed_metrics, thresholds, scores }` — surface it
+   *  here; most errors leave it undefined. */
+  details?: Record<string, unknown>;
 
-  constructor(message: string, status: number, detail?: string) {
+  constructor(message: string, status: number, detail?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.details = details;
   }
 }
 
@@ -101,10 +127,34 @@ async function parseErrorResponse(res: Response): Promise<ApiError> {
     const body = await res.json() as Record<string, unknown>;
     const errorBody = body.error as Record<string, unknown> | undefined;
     const message = (errorBody?.message as string) || (body.detail as string) || (body.message as string) || `Request failed (${res.status})`;
-    return new ApiError(message, res.status, body.detail as string | undefined);
+    return new ApiError(
+      message,
+      res.status,
+      body.detail as string | undefined,
+      errorBody?.details as Record<string, unknown> | undefined,
+    );
   } catch {
     return new ApiError(`Request failed (${res.status})`, res.status);
   }
+}
+
+// Blob-download endpoints mint their filename server-side (it usually embeds
+// a UTC timestamp the client can't reproduce deterministically), so it must
+// be read back off the response rather than hardcoded.
+function parseFilenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(header);
+  if (quotedMatch) return quotedMatch[1];
+  const bareMatch = /filename=([^;]+)/i.exec(header);
+  return bareMatch ? bareMatch[1].trim() : null;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
@@ -121,7 +171,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
-async function attemptTokenRefresh(): Promise<boolean> {
+export async function attemptTokenRefresh(): Promise<boolean> {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
   }
@@ -316,11 +366,17 @@ export const documentApi = {
   delete: (workspaceId: string, documentId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${documentId}`, { method: 'DELETE' }),
 
-  listAll: (params?: { status?: string; search?: string; file_type?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
+  listAll: (params?: { status?: string; search?: string; file_type?: string; tags?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<Document>> =>
     request(`/documents${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   reindex: (workspaceId: string, docId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/documents/${docId}/reindex`, { method: 'POST' }),
+
+  bulk: (action: BulkDocumentAction, documentIds: string[], tags?: string[]): Promise<BulkDocumentResponse> =>
+    request('/admin/documents/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ action, document_ids: documentIds, ...(tags ? { tags } : {}) }),
+    }),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
@@ -377,6 +433,20 @@ export const reviewQueueApi = {
     request(`/workspaces/${workspaceId}/review-queue/${queryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   settings: (workspaceId: string, reviewQueueEnabled: boolean): Promise<{ review_queue_enabled: boolean }> =>
     request(`/workspaces/${workspaceId}/review-queue/settings`, { method: 'PATCH', body: JSON.stringify({ review_queue_enabled: reviewQueueEnabled }) }),
+
+  // ─── F7b — promote a reviewed answer into the golden set ─────────────────
+  promoteGolden: (workspaceId: string, queryId: string, data: GoldenPromoteRequest): Promise<GoldenEntryResponse> =>
+    request(`/workspaces/${workspaceId}/review-queue/${queryId}/promote-golden`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // ─── F7a — ingest-time injection quarantine ──────────────────────────────
+  quarantine: {
+    list: (workspaceId: string, params?: { status?: QuarantineStatus; page?: number; page_size?: number }): Promise<PaginatedResponse<QuarantinedChunk>> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine${buildQuery(params as Record<string, unknown> | undefined)}`),
+    release: (workspaceId: string, quarantineId: string): Promise<QuarantineActionResponse> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine/${quarantineId}/release`, { method: 'POST' }),
+    dismiss: (workspaceId: string, quarantineId: string): Promise<QuarantineActionResponse> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine/${quarantineId}/dismiss`, { method: 'POST' }),
+  },
 };
 
 // ─── Collaborative Annotations API ──────────────────────────────────────────
@@ -426,13 +496,66 @@ export const feedbackApi = {
     request(`/queries/${queryId}/feedback`),
 };
 
+// ─── Admin prompt-version API (F1) ──────────────────────────────────────────
+// Declared above `adminApi` because that object literal references it eagerly
+// (a `const` declared further down would be in its temporal dead zone).
+const adminPromptsApi = {
+  list: (params?: { name?: string; status?: PromptVersionStatus }): Promise<ListResponse<PromptVersion>> =>
+    request(`/admin/prompts${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  get: (id: string): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}`),
+
+  active: (name = 'answer'): Promise<ActivePrompt> =>
+    request(`/admin/prompts/active${buildQuery({ name })}`),
+
+  create: (body: PromptVersionCreate): Promise<PromptVersion> =>
+    request('/admin/prompts', { method: 'POST', body: JSON.stringify(body) }),
+
+  // 202 — the golden-set run happens in the background. Poll `get(id)` and
+  // watch `eval.status` flip off `running`.
+  evaluate: (id: string, subset: 'smoke' | 'full' = 'smoke'): Promise<PromptEvalQueued> =>
+    request(`/admin/prompts/${id}/evaluate${buildQuery({ subset })}`, { method: 'POST' }),
+
+  // 409 when the eval gate refuses; `ApiError.details` then carries
+  // `{ reason, failed_metrics, thresholds, scores }`.
+  promote: (id: string, force = false): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}/promote${buildQuery(force ? { force: true } : undefined)}`, { method: 'POST' }),
+
+  rollback: (id: string): Promise<PromptVersion> =>
+    request(`/admin/prompts/${id}/rollback`, { method: 'POST' }),
+
+  remove: (id: string): Promise<void> =>
+    request(`/admin/prompts/${id}`, { method: 'DELETE' }),
+
+  diff: (id: string, against = 'active'): Promise<PromptDiffResponse> =>
+    request(`/admin/prompts/${id}/diff${buildQuery({ against })}`),
+};
+
+// ─── SEC-2 — golden-entry approval workflow ─────────────────────────────────
+// Declared above `adminApi` for the same reason as `adminPromptsApi`: the
+// object literal below assigns it eagerly (`golden: adminGoldenApi`), which
+// needs the binding initialized first.
+const adminGoldenApi = {
+  list: (params?: { source?: 'builtin' | 'promoted' | 'all'; status?: 'pending' | 'approved'; page?: number; page_size?: number }): Promise<GoldenListResponse> =>
+    request(`/admin/golden${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  approve: (entryId: string): Promise<GoldenEntryResponse> =>
+    request(`/admin/golden/${entryId}/approve`, { method: 'POST' }),
+
+  remove: (entryId: string): Promise<void> =>
+    request(`/admin/golden/${entryId}`, { method: 'DELETE' }),
+};
+
 // ─── Admin API ──────────────────────────────────────────────────────────────
 export const adminApi = {
+  prompts: adminPromptsApi,
+
   stats: (): Promise<AdminStats> =>
     request('/admin/stats'),
 
-  logs: (params?: Record<string, unknown>): Promise<PaginatedResponse<AuditLogEntry>> =>
-    request(`/admin/logs${buildQuery(params)}`),
+  logs: (params?: AuditLogFilters): Promise<PaginatedResponse<AuditLogEntry>> =>
+    request(`/admin/logs${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   evaluation: <T = unknown>(): Promise<T> =>
     request('/admin/evaluation'),
@@ -487,6 +610,53 @@ export const adminApi = {
 
   updateSettings: (data: Record<string, unknown>): Promise<Record<string, unknown>> =>
     request('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // ── F7a — cross-workspace quarantine list ────────────────────────────────
+  getQuarantine: (params?: { status?: QuarantineStatus; workspace_id?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<QuarantinedChunk>> =>
+    request(`/admin/quarantine${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  // ── F7b/SEC-2 — golden-set inventory + approval ──────────────────────────
+  golden: adminGoldenApi,
+
+  // Legacy flat accessors — kept for existing call sites (AdminAnalyticsPage);
+  // prefer `golden.list` / `golden.remove` in new code. Same implementation,
+  // not a duplicate.
+  getGolden: adminGoldenApi.list,
+  deleteGolden: adminGoldenApi.remove,
+
+  // ── Usage & cost reporting ───────────────────────────────────────────────
+  getUsage: (params?: UsageQueryParams): Promise<UsageReportResponse> =>
+    request(`/admin/usage${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  getUsagePricing: (): Promise<PricingResponse> =>
+    request('/admin/usage/pricing'),
+
+  // Bespoke fetch — CSV blob (Content-Disposition attachment), not JSON, so
+  // it can't go through the JSON-locked `request()` helper.
+  exportUsage: async (params?: UsageQueryParams): Promise<{ blob: Blob; filename: string }> => {
+    const query = buildQuery({ format: 'csv', ...(params as Record<string, unknown> | undefined) });
+    const res = await fetch(`${API_BASE}/admin/usage/export${query}`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    const blob = await res.blob();
+    const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+      ?? `usage-${params?.group_by ?? 'model'}-export.csv`;
+    return { blob, filename };
+  },
+
+  // ── Audit log export ─────────────────────────────────────────────────────
+  // Bespoke fetch — CSV/JSON blob (Content-Disposition attachment).
+  exportLogs: async (
+    format: AuditLogExportFormat,
+    filters?: AuditLogFilters,
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const query = buildQuery({ format, ...(filters as Record<string, unknown> | undefined) });
+    const res = await fetch(`${API_BASE}/admin/logs/export${query}`, { credentials: 'include' });
+    if (!res.ok) throw await parseErrorResponse(res);
+    const blob = await res.blob();
+    const filename = parseFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+      ?? `audit-log-export.${format}`;
+    return { blob, filename };
+  },
 };
 
 // ─── Collection API ─────────────────────────────────────────────────────────

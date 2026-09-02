@@ -274,7 +274,7 @@ export function Card({ children, className, hover = false, onClick }: CardProps)
 //  BADGE
 // ═════════════════════════════════════════════════════════════════════════════
 
-type BadgeColor = 'green' | 'orange' | 'red' | 'purple' | 'blue' | 'gray';
+export type BadgeColor = 'green' | 'orange' | 'red' | 'purple' | 'blue' | 'gray';
 
 interface BadgeProps {
   children: ReactNode;

@@ -9,6 +9,7 @@ import { queryApi } from '../api/client';
 import type { QueryDetail, Source, QueryComparison } from '../api/types';
 import AnswerComparison from '../components/AnswerComparison';
 import AnnotationThread from '../components/AnnotationThread';
+import AbstentionCard from '../components/AbstentionCard';
 import { getRelevanceMeta, getTrustBadgeColor } from '../utils/relevance';
 
 function formatDate(iso: string): string {
@@ -91,6 +92,8 @@ export default function ChatDetailPage() {
     );
   }
 
+  const abstained = query.edge_case === 'insufficient_evidence';
+
   // Map stored response_sources (DB JSON) to Source interface
   // Stored format uses: content, score, metadata.document_name
   // Source interface uses: excerpt, relevance_score, document_name
@@ -150,6 +153,9 @@ export default function ChatDetailPage() {
                 {query.model_used && (
                   <Badge color="gray">{query.model_used}</Badge>
                 )}
+                {query.prompt_version && (
+                  <Badge color="purple" className="font-mono">prompt {query.prompt_version}</Badge>
+                )}
               </div>
             </div>
           </div>
@@ -165,22 +171,35 @@ export default function ChatDetailPage() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-text">TruthLens AI</p>
-              <div className="mt-2 text-sm text-text leading-relaxed whitespace-pre-wrap">
-                {query.response_text || <span className="text-text-dim">No response</span>}
-              </div>
 
-              {/* Trust score */}
-              {query.trust_score !== undefined && (
-                <div className="mt-3 flex items-center gap-2">
-                  <Badge color={getTrustBadgeColor(query.trust_score)}>
-                    Trust Score: {query.trust_score.toFixed(2)}
-                  </Badge>
-                  {query.guardrail_passed !== undefined && (
-                    <Badge color={query.guardrail_passed ? 'green' : 'red'}>
-                      Guardrail: {query.guardrail_passed ? 'Passed' : 'Failed'}
-                    </Badge>
-                  )}
+              {/* F7c — persisted abstention: no answer was generated, so the
+                  trust/guardrail badges would be meaningless here. Historical
+                  rows carry `edge_case` but no `sufficiency` payload; the
+                  searched/score numbers already live in the answer text. */}
+              {abstained ? (
+                <div className="mt-2">
+                  <AbstentionCard answer={query.response_text} workspaceId={query.workspace_id} />
                 </div>
+              ) : (
+                <>
+                  <div className="mt-2 text-sm text-text leading-relaxed whitespace-pre-wrap">
+                    {query.response_text || <span className="text-text-dim">No response</span>}
+                  </div>
+
+                  {/* Trust score */}
+                  {query.trust_score !== undefined && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <Badge color={getTrustBadgeColor(query.trust_score)}>
+                        Trust Score: {query.trust_score.toFixed(2)}
+                      </Badge>
+                      {query.guardrail_passed !== undefined && (
+                        <Badge color={query.guardrail_passed ? 'green' : 'red'}>
+                          Guardrail: {query.guardrail_passed ? 'Passed' : 'Failed'}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
 
               {query.latency_ms !== undefined && (

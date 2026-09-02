@@ -74,6 +74,9 @@ export interface Document {
   uploaded_by: string;
   created_at: string;
   updated_at: string;
+  tags: string[];
+  /** Chunks held back by the ingest-time injection scanner (F7a). */
+  quarantined_chunk_count?: number;
 }
 
 export interface DocumentStatus {
@@ -95,6 +98,8 @@ export interface DocumentDetail {
   created_at: string;
   updated_at: string;
   chunks: Array<{ id: string; index: number; content: string; token_count: number; created_at: string }>;
+  /** Chunks held back by the ingest-time injection scanner (F7a). */
+  quarantined_chunk_count?: number;
 }
 
 // ─── Query ──────────────────────────────────────────────────────────────────
@@ -105,10 +110,14 @@ export interface QuerySummary {
   trust_score?: number;
   guardrail_passed?: boolean;
   model_used?: string;
+  /** 12-char content hash of the system prompt that produced the answer.
+   *  Null for rows written before F1. */
+  prompt_version?: string;
   is_pinned: boolean;
   compared_to_query_id?: string;
   review_status: 'needs_review' | 'reviewed' | 'dismissed';
   created_at: string;
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface QueryDetail {
@@ -122,8 +131,12 @@ export interface QueryDetail {
   guardrail_score?: number;
   guardrail_passed?: boolean;
   model_used?: string;
+  /** 12-char content hash of the system prompt that produced the answer.
+   *  Null for rows written before F1. */
+  prompt_version?: string;
   latency_ms?: number;
   token_count?: number;
+  prompt_tokens?: number;
   is_pinned: boolean;
   compared_to_query_id?: string;
   trust_components?: Record<string, number>;
@@ -132,6 +145,7 @@ export interface QueryDetail {
   reviewed_by?: string;
   reviewed_at?: string;
   created_at: string;
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface Source {
@@ -200,6 +214,21 @@ export interface ReviewQueueItem {
   reviewed_by?: string;
   reviewed_at?: string;
   created_at: string;
+  /** Non-null once this answer has been promoted into the golden set (F7b). */
+  golden_entry_id?: string | null;
+  /**
+   * SEC-2. The golden entry's approval status — `'pending'` when an editor's
+   * promotion is awaiting admin sign-off, `'approved'` once cleared (or when
+   * an admin promoted it directly). Null/undefined on rows predating the
+   * approval workflow or when `golden_entry_id` is null.
+   */
+  golden_status?: GoldenApprovalStatus | null;
+  /**
+   * F7c. The live queue no longer lists abstentions, but a promote flow reached
+   * from query history / chat detail can hand one here — and the backend then
+   * rejects any auto-filled reference answer with 422.
+   */
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface ReviewQueueCount {
@@ -234,14 +263,21 @@ export interface AdminStats {
   query_cache_hit_rate?: number;
 }
 
+/**
+ * Mirrors `audit_logs` exactly: `user_id` is an `ondelete=SET NULL` FK, and
+ * `resource_id` / `details` / `ip_address` are all nullable columns. They were
+ * typed non-null here, which is how an `audit.export` row (no `resource_id`)
+ * white-screened the whole audit-log page — the compiler had no reason to
+ * object to `entry.resource_id.slice(...)`.
+ */
 export interface AuditLogEntry {
   id: string;
-  user_id: string;
+  user_id: string | null;
   action: string;
   resource_type: string;
-  resource_id: string;
-  details?: Record<string, unknown>;
-  ip_address?: string;
+  resource_id: string | null;
+  details?: Record<string, unknown> | null;
+  ip_address?: string | null;
   created_at: string;
 }
 
@@ -498,6 +534,14 @@ export interface EvalRunResponse {
   // JSON-encoded string; may be absent on older rows. Parse defensively —
   // shape is `{ per_category?: {...}, thresholds?: {...} }`.
   notes?: string | null;
+  // ── F1 additions (rows written before migration 010 leave these null) ──
+  status?: string | null;
+  prompt_version_id?: string | null;
+  model_used?: string | null;
+  subset?: string | null;
+  /** JSON-encoded string here (unlike `PromptEvalSummary.verdict`) — parse it
+   *  defensively, exactly like `notes`. */
+  verdict?: string | null;
 }
 
 export interface EvalRunQueuedResponse {
@@ -533,4 +577,292 @@ export interface EvalRunNotes {
   };
   thresholds?: EvalThresholds;
   [key: string]: unknown;
+}
+
+// ─── Bulk document operations ────────────────────────────────────────────────
+export type BulkDocumentAction = 'delete' | 'reindex' | 'tag' | 'untag';
+
+export interface BulkDocumentRequest {
+  action: BulkDocumentAction;
+  document_ids: string[];
+  tags?: string[];
+}
+
+export interface BulkDocumentResult {
+  id: string;
+  status: 'ok' | 'accepted' | 'failed';
+  error?: string | null;
+  /** Non-fatal server-side note about an item that still succeeded (e.g. a
+   *  reindex that skipped an unreadable page). Absent on most results. */
+  warning?: string | null;
+}
+
+export interface BulkDocumentResponse {
+  results: BulkDocumentResult[];
+  summary: {
+    ok: number;
+    accepted: number;
+    failed: number;
+  };
+}
+// ─── F7a — Ingest-time injection quarantine ─────────────────────────────────
+
+export type QuarantineStatus = 'quarantined' | 'released' | 'dismissed';
+
+/**
+ * A chunk the ingest-time injection scanner held back from the index.
+ *
+ * SECURITY: `content` is attacker-controlled text (it *is* the injection
+ * payload). Render it only as a plain text node — never through a markdown or
+ * HTML renderer, and never via `dangerouslySetInnerHTML`.
+ */
+export interface QuarantinedChunk {
+  id: string;
+  workspace_id: string;
+  document_id: string;
+  document_name?: string | null;
+  chunk_index: number;
+  content: string;
+  pattern: string;
+  severity: string;
+  status: QuarantineStatus;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface QuarantineActionResponse {
+  id: string;
+  status: QuarantineStatus;
+  message: string;
+}
+
+// ─── F7b — Golden-set promotion ─────────────────────────────────────────────
+
+export type GoldenCategory = 'answerable' | 'unanswerable' | 'ambiguous';
+
+export interface GoldenPromoteRequest {
+  category: GoldenCategory;
+  reference_answer?: string;
+  difficulty?: number;
+  notes?: string;
+}
+
+/**
+ * SEC-2 — an editor-promoted entry gates admin prompt promotion, so it lands
+ * `pending` until an admin approves it. Admin-initiated promotions are
+ * auto-`approved`. Built-in entries are always `approved`.
+ */
+export type GoldenApprovalStatus = 'pending' | 'approved';
+
+export interface GoldenEntryResponse {
+  id: string;
+  question: string;
+  reference_answer: string;
+  source_documents: string[];
+  expected_grounding: boolean;
+  category: GoldenCategory;
+  difficulty: number;
+  notes?: string | null;
+  source: 'builtin' | 'promoted';
+  source_query_id?: string | null;
+  workspace_id?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  status: GoldenApprovalStatus;
+  approved_by?: string | null;
+  approved_at?: string | null;
+}
+
+export interface GoldenListResponse {
+  data: GoldenEntryResponse[];
+  meta: {
+    page: number;
+    page_size: number;
+    /** Rows matching the *requested* filter — so `?source=promoted&status=pending`
+     *  is the pending-approval count. */
+    total: number;
+    source: 'builtin' | 'promoted' | 'all';
+    /** Echoes the requested `status` filter; `null` when it was omitted. */
+    status?: GoldenApprovalStatus | null;
+    builtin_count: number;
+    /** All promoted rows regardless of status — deliberately *not* a
+     *  pending count. Read `meta.total` off a `status=pending` list for that. */
+    promoted_count: number;
+    golden_set_version: string;
+  };
+}
+
+// ─── F7c — Evidence-sufficiency gate / abstention ───────────────────────────
+
+/** `"insufficient_evidence"` today; kept open so new server-side edge cases
+ *  don't break the build before the UI knows about them. */
+export type QueryEdgeCase = 'insufficient_evidence' | (string & {});
+
+export interface SufficiencyVerdict {
+  sufficient: boolean;
+  reason: string;
+  top_score: number;
+  supporting_count: number;
+  searched_count: number;
+  document_count: number;
+}
+
+// ─── Usage & cost reporting ───────────────────────────────────────────────────
+export type UsageGroupBy = 'user' | 'workspace' | 'model';
+
+export interface UsageQueryParams {
+  group_by?: UsageGroupBy;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface UsageRow {
+  key: string;
+  label: string;
+  queries: number;
+  output_tokens: number;
+  prompt_tokens: number;
+  avg_latency_ms: number;
+  cache_hits: number;
+  est_cost_usd: number;
+}
+
+export interface UsageTotals {
+  queries: number;
+  output_tokens: number;
+  prompt_tokens: number;
+  avg_latency_ms: number;
+  cache_hits: number;
+  est_cost_usd: number;
+}
+
+export interface UsagePeriod {
+  from: string | null;
+  to: string | null;
+}
+
+export type PricingSource = 'config' | 'none';
+
+export interface UsageReportResponse {
+  rows: UsageRow[];
+  totals: UsageTotals;
+  pricing_source: PricingSource;
+  period: UsagePeriod;
+}
+
+export interface ModelPricingRate {
+  input_per_1k: number;
+  output_per_1k: number;
+}
+
+export interface PricingResponse {
+  pricing: Record<string, ModelPricingRate>;
+}
+
+// ─── Audit log filters & export ──────────────────────────────────────────────
+export interface AuditLogFilters {
+  page?: number;
+  page_size?: number;
+  action?: string;
+  q?: string;
+  user_id?: string;
+  resource_type?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export type AuditLogExportFormat = 'csv' | 'json';
+
+// ─── Prompt versions (F1: pinning + eval-gated promotion) ────────────────────
+export type PromptVersionStatus = 'draft' | 'staged' | 'active' | 'retired';
+
+/** Terminal states are `passed` / `failed` / `error` — a crashed job lands on
+ *  `error`, so pollers must stop on anything that is not `running`. */
+export type PromptEvalStatus = 'running' | 'passed' | 'failed' | 'error';
+
+export interface PromptEvalVerdict {
+  passed: boolean;
+  failed_metrics: string[];
+  thresholds: EvalThresholds;
+}
+
+/** The `eval` sub-object on `PromptVersionResponse`. Unlike `EvalRunResponse`,
+ *  `verdict` here is already parsed (the history endpoint returns a string). */
+export interface PromptEvalSummary {
+  id: string;
+  status: PromptEvalStatus;
+  subset?: string | null;
+  model_used?: string | null;
+  golden_set_version?: string | null;
+  faithfulness: number | null;
+  context_precision: number | null;
+  context_recall: number | null;
+  answer_relevance: number | null;
+  answer_correctness: number | null;
+  refusal_accuracy: number | null;
+  /** Trust lives in the eval run's `notes` JSON, so the API surfaces it here. */
+  trust: number | null;
+  verdict?: PromptEvalVerdict | null;
+  run_at?: string | null;
+}
+
+export interface PromptVersion {
+  id: string;
+  name: string;
+  version: number;
+  content: string;
+  content_hash: string;
+  status: PromptVersionStatus;
+  model_name?: string | null;
+  created_by?: string | null;
+  promoted_at?: string | null;
+  eval_run_id?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  eval?: PromptEvalSummary | null;
+}
+
+export interface PromptVersionCreate {
+  name: string;
+  content: string;
+  model_name?: string;
+  notes?: string;
+}
+
+export interface ActivePrompt {
+  name: string;
+  content: string;
+  content_hash: string;
+  model_name: string | null;
+  version: number | null;
+  version_id: string | null;
+  /** True when no row is active and the code default is being served. */
+  is_default: boolean;
+}
+
+export interface PromptDiffResponse {
+  from_id: string | null;
+  from_label: string;
+  to_id: string;
+  to_label: string;
+  /** `difflib.unified_diff` text. */
+  diff: string;
+}
+
+export interface PromptEvalQueued {
+  eval_run_id: string;
+  prompt_version_id: string;
+  subset: string;
+  status: string;
+}
+
+/** Body of the promote gate's 409, read from `ApiError.details`. */
+export interface PromptGateFailure {
+  detail?: string;
+  reason?: 'no_eval_run' | 'eval_incomplete' | 'thresholds_not_met';
+  failed_metrics?: string[];
+  thresholds?: EvalThresholds;
+  scores?: Record<string, number | null>;
 }

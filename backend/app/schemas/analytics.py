@@ -1,6 +1,7 @@
 """Analytics schemas for admin dashboard."""
 from __future__ import annotations
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, field_serializer
 from app.schemas._datetime import utc_iso
 
@@ -48,6 +49,33 @@ class AdminSettingsUpdate(BaseModel):
     trust_score_low_threshold: float | None = None
     rate_limit_enabled: bool | None = None
 
+class UsageRow(BaseModel):
+    key: str
+    label: str
+    queries: int
+    output_tokens: int
+    prompt_tokens: int
+    avg_latency_ms: float | None = None
+    cache_hits: int
+    est_cost_usd: float
+
+class UsageTotals(BaseModel):
+    queries: int
+    output_tokens: int
+    prompt_tokens: int
+    avg_latency_ms: float | None = None
+    cache_hits: int
+    est_cost_usd: float
+
+class UsageReportResponse(BaseModel):
+    rows: list[UsageRow]
+    totals: UsageTotals
+    pricing_source: Literal["config", "none"]
+    period: dict[str, str | None]
+
+class PricingResponse(BaseModel):
+    pricing: dict[str, dict[str, float]]
+
 class EvalRunResponse(BaseModel):
     id: str
     run_at: datetime
@@ -59,5 +87,10 @@ class EvalRunResponse(BaseModel):
     refusal_accuracy: float | None = None
     golden_set_version: str | None = None
     notes: str | None = None
+    status: str = "passed"
+    prompt_version_id: str | None = None
+    model_used: str | None = None
+    subset: str | None = None
+    verdict: str | None = None
 
     _serialize_run_at = field_serializer("run_at")(utc_iso)

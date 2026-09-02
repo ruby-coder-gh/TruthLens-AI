@@ -1,11 +1,11 @@
-import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './context/AuthContext';
-import { useAuth } from './context/auth-context';
 import { ToastProvider, Skeleton } from './components/ui';
 import Layout from './components/Layout'
 import CursorGlow from './components/CursorGlow'
+import { ProtectedRoute, AdminRoute } from './components/RouteGuards'
 
 // Route-level code splitting — chunks load on demand
 const LandingPage = lazy(() => import('./pages/LandingPage'))
@@ -30,6 +30,8 @@ const AdminUserDetailPage = lazy(() => import('./pages/AdminUserDetailPage'))
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'))
 const AdminAnalyticsPage = lazy(() => import('./pages/AdminAnalyticsPage'))
 const AdminAuditLogPage = lazy(() => import('./pages/AdminAuditLogPage'))
+const AdminPromptsPage = lazy(() => import('./pages/AdminPromptsPage'))
+const AdminGoldenPage = lazy(() => import('./pages/AdminGoldenPage'))
 const ChatNewPage = lazy(() => import('./pages/ChatNewPage'))
 const WorkspacesPage = lazy(() => import('./pages/WorkspacesPage'))
 const WorkspaceDetailPage = lazy(() => import('./pages/WorkspaceDetailPage'))
@@ -48,28 +50,6 @@ const queryClient = new QueryClient({
     queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false },
   },
 })
-
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth()
-  if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-bg">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-text-muted text-sm animate-pulse">Loading...</p>
-        </div>
-      </div>
-    )
-  }
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  return <>{children}</>
-}
-
-function AdminRoute() {
-  const { user } = useAuth()
-  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />
-  return <Outlet />
-}
 
 // ─── App Routes ─────────────────────────────────────────────────────────────
 function RouteFallback() {
@@ -136,6 +116,8 @@ function AppRoutes() {
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
           <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
+          <Route path="/admin/prompts" element={<AdminPromptsPage />} />
+          <Route path="/admin/golden" element={<AdminGoldenPage />} />
         </Route>
       </Route>
 
