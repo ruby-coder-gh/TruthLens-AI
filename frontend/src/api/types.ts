@@ -679,9 +679,15 @@ export interface GoldenListResponse {
   meta: {
     page: number;
     page_size: number;
+    /** Rows matching the *requested* filter — so `?source=promoted&status=pending`
+     *  is the pending-approval count. */
     total: number;
     source: 'builtin' | 'promoted' | 'all';
+    /** Echoes the requested `status` filter; `null` when it was omitted. */
+    status?: GoldenApprovalStatus | null;
     builtin_count: number;
+    /** All promoted rows regardless of status — deliberately *not* a
+     *  pending count. Read `meta.total` off a `status=pending` list for that. */
     promoted_count: number;
     golden_set_version: string;
   };

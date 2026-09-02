@@ -47,19 +47,29 @@ const approvedEntry = makeEntry({
   approved_at: '2026-09-02T09:00:00Z',
 });
 
-function listResponse(data: GoldenEntryResponse[]) {
+function listResponse(data: GoldenEntryResponse[], total = data.length) {
   return {
     data,
     meta: {
       page: 1,
       page_size: 20,
-      total: data.length,
+      total,
       source: 'promoted' as const,
+      status: null,
       builtin_count: 0,
       promoted_count: data.length,
       golden_set_version: 'v1',
     },
   };
+}
+
+/**
+ * Calls made by the *table* query. The header's "awaiting approval" badge runs
+ * its own `?source=promoted&status=pending&page_size=1` request against the
+ * same mock, so raw call counts would conflate the two.
+ */
+function tableListCalls() {
+  return list.mock.calls.filter(([params]) => params?.page_size === undefined);
 }
 
 describe('AdminGoldenPage', () => {
@@ -82,6 +92,26 @@ describe('AdminGoldenPage', () => {
     expect(within(row).getByText('ws-1')).toBeInTheDocument();
   });
 
+  // Contract: `meta.promoted_count` counts pending *and* approved rows, so the
+  // backlog badge has to come from `?source=promoted&status=pending`.
+  it('reads the awaiting-approval count from a status=pending list, not promoted_count', async () => {
+    list.mockImplementation((params?: { page_size?: number }) =>
+      Promise.resolve(
+        params?.page_size === 1
+          // 3 pending out of 9 promoted overall.
+          ? listResponse([pendingEntry], 3)
+          : listResponse([pendingEntry, approvedEntry], 9),
+      ));
+
+    renderWithProviders(<AdminGoldenPage />, { route: '/admin/golden' });
+
+    expect(await screen.findByText('3 awaiting approval')).toBeInTheDocument();
+    await waitFor(() => expect(list).toHaveBeenCalledWith({
+      source: 'promoted', status: 'pending', page_size: 1,
+    }));
+    expect(screen.queryByText(/9 awaiting approval/)).not.toBeInTheDocument();
+  });
+
   it('calls approve for the row and refetches on success', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminGoldenPage />, { route: '/admin/golden' });
@@ -90,7 +120,7 @@ describe('AdminGoldenPage', () => {
 
     await waitFor(() => expect(approve).toHaveBeenCalledWith('ge-1'));
     // Refetch after the mutation invalidates the query.
-    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(tableListCalls()).toHaveLength(2));
   });
 
   it('requires confirmation before deleting, then calls remove', async () => {
@@ -114,17 +144,17 @@ describe('AdminGoldenPage', () => {
     renderWithProviders(<AdminGoldenPage />, { route: '/admin/golden' });
 
     await screen.findByText(/what is the pto carryover limit/i);
-    expect(list).toHaveBeenCalledTimes(1);
+    expect(tableListCalls()).toHaveLength(1);
 
     list.mockResolvedValue(listResponse([approvedEntry]));
     await user.selectOptions(screen.getByLabelText(/status/i), 'approved');
 
-    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ source: 'promoted', status: 'approved' }));
+    await waitFor(() => expect(tableListCalls().at(-1)).toEqual([{ source: 'promoted', status: 'approved' }]));
     expect(await screen.findByText(/does the handbook cover remote work/i)).toBeInTheDocument();
 
     list.mockResolvedValue(listResponse([pendingEntry, approvedEntry]));
     await user.selectOptions(screen.getByLabelText(/status/i), 'all');
-    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ source: 'promoted' }));
+    await waitFor(() => expect(tableListCalls().at(-1)).toEqual([{ source: 'promoted' }]));
   });
 
   it('does not show Approve for an already-approved entry', async () => {

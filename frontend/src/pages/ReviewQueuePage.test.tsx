@@ -5,6 +5,7 @@ import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import ReviewQueuePage from './ReviewQueuePage';
 import type { QuarantinedChunk, ReviewQueueItem } from '../api/types';
+import type { ToastContextValue } from '../components/toast-context';
 
 const {
   mockList,
@@ -79,12 +80,15 @@ function makeChunk(overrides: Partial<QuarantinedChunk> = {}): QuarantinedChunk 
   };
 }
 
-function renderPage() {
+function renderPage(addToast?: ToastContextValue['addToast']) {
   return renderWithProviders(
     <Routes>
       <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
     </Routes>,
-    { route: '/workspaces/ws-1/review-queue' },
+    {
+      route: '/workspaces/ws-1/review-queue',
+      ...(addToast ? { toastValue: { addToast } } : {}),
+    },
   );
 }
 
@@ -99,7 +103,7 @@ describe('ReviewQueuePage', () => {
     });
     mockQuarantineRelease.mockResolvedValue({ id: 'cq-1', status: 'released', message: 'Chunk released and re-indexed' });
     mockQuarantineDismiss.mockResolvedValue({ id: 'cq-1', status: 'dismissed', message: 'Chunk dismissed' });
-    mockPromoteGolden.mockResolvedValue({ id: 'ge-1', category: 'answerable' });
+    mockPromoteGolden.mockResolvedValue({ id: 'ge-1', category: 'answerable', status: 'pending' });
   });
 
   // ─── F7a: quarantine tab ──────────────────────────────────────────────────
@@ -218,6 +222,29 @@ describe('ReviewQueuePage', () => {
         notes: 'checked by legal',
       }),
     );
+  });
+
+  // Contract §4: the 201 carries `status`, and an editor's promotion lands
+  // `pending` — gating nothing until an admin clears it. Reporting a flat
+  // "Promoted to the golden set." would tell the reviewer it already counts.
+  it.each([
+    ['pending' as const, /an admin must approve it/i, /golden · pending approval/i],
+    ['approved' as const, /^Promoted to the golden set\.$/, /golden ✓/i],
+  ])('reports the %s status returned by the promote call', async (status, toastPattern, badgePattern) => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    mockPromoteGolden.mockResolvedValue({ id: 'ge-1', category: 'answerable', status });
+    renderPage(addToast);
+
+    await user.click(await screen.findByRole('button', { name: /promote to golden set/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^promote$/i }));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(
+      expect.stringMatching(toastPattern),
+      'success',
+    ));
+    expect(await screen.findByText(badgePattern)).toBeInTheDocument();
   });
 
   it('shows a Golden badge and no promote action for already-promoted items', async () => {

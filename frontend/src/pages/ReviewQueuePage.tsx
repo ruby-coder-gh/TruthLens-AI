@@ -418,7 +418,16 @@ export default function ReviewQueuePage() {
             : item)),
         );
         setPromoteTarget(null);
-        addToast('Promoted to the golden set.', 'success');
+        // Read `status` off the 201 rather than assuming the promotion took
+        // effect: an admin promoting in their own workspace is auto-approved,
+        // but an editor's promotion is only a proposal until an admin clears
+        // it, and until then it gates nothing.
+        addToast(
+          entry.status === 'pending'
+            ? 'Sent to the golden set — an admin must approve it before it counts.'
+            : 'Promoted to the golden set.',
+          'success',
+        );
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : 'Could not promote this answer.';
         // 422 (REFERENCE_ANSWER_REQUIRED) is a field-level rejection: keep the
