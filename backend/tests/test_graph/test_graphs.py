@@ -50,26 +50,10 @@ class TestQueryGraph:
         assert state["workspace_id"] == "ws-1"
         assert state["guardrail_retry_count"] == 0
 
-    @pytest.mark.asyncio
-    async def test_should_continue_with_contexts(self):
-        from app.graph.query_graph import _should_continue, GraphState
-        state = GraphState(
-            query="test", workspace_id="w", query_id="q",
-            top_k=5, contexts=[{"chunk_id": "c1", "content": "test"}],
-            model_used="m", latency_ms=0,
-            rewritten_query=None, user_id=None, filters=None,
-            retrieval_results=None, reranked_results=None,
-            response_text=None, cited_spans=None,
-            guardrail_result=None, guardrail_retry_count=0,
-            trust_score=None, trust_components=None, error=None,
-        )
-        result = _should_continue(state)
-        assert result == "generate"
-
-    @pytest.mark.asyncio
-    async def test_should_continue_without_contexts(self):
-        from app.graph.query_graph import _should_continue, GraphState
-        state = GraphState(
+    @staticmethod
+    def _state(**overrides):
+        from app.graph.query_graph import GraphState
+        base = dict(
             query="test", workspace_id="w", query_id="q",
             top_k=5, contexts=[],
             model_used="m", latency_ms=0,
@@ -78,9 +62,96 @@ class TestQueryGraph:
             response_text=None, cited_spans=None,
             guardrail_result=None, guardrail_retry_count=0,
             trust_score=None, trust_components=None, error=None,
+            retrieval_attempts=0, edge_case=None,
         )
+        base.update(overrides)
+        return GraphState(**base)  # type: ignore[typeddict-item]
+
+    @pytest.mark.asyncio
+    async def test_should_continue_with_contexts(self):
+        """Well-scored contexts go to generation."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.9}])
+        result = _should_continue(state)
+        assert result == "generate"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_without_contexts(self):
+        """Empty retrieval still gets one rewrite retry before abstaining."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[])
         result = _should_continue(state)
         assert result == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_retries_when_evidence_is_weak(self):
+        """F7c: non-empty but low-scoring contexts are no longer 'good enough'."""
+        from app.graph.query_graph import _should_continue
+        state = self._state(contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.02}])
+        result = _should_continue(state)
+        assert result == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_abstains_once_the_retry_budget_is_spent(self):
+        """Bounded loop: retrieve -> rewrite could previously cycle forever."""
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        state = self._state(
+            contexts=[{"chunk_id": "c1", "content": "test", "rerank_score": 0.02}],
+            retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS,
+        )
+        result = _should_continue(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_abstains_on_empty_retrieval_after_retries(self):
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        state = self._state(contexts=[], retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS)
+        result = _should_continue(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_should_continue_keeps_legacy_routing_when_the_gate_is_off(self, monkeypatch):
+        from app.config import settings
+        from app.graph.query_graph import _should_continue, MAX_RETRIEVAL_ATTEMPTS
+        monkeypatch.setattr(settings, "SUFFICIENCY_GATE_ENABLED", False)
+        weak = self._state(
+            contexts=[{"chunk_id": "c1", "content": "test"}],
+            retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS,
+        )
+        empty = self._state(contexts=[], retrieval_attempts=MAX_RETRIEVAL_ATTEMPTS)
+        assert _should_continue(weak) == "generate"
+        assert _should_continue(empty) == "rewrite"
+
+    @pytest.mark.asyncio
+    async def test_abstain_node_answers_without_calling_a_model(self):
+        from app.graph.query_graph import _abstain_node
+        state = self._state(contexts=[{"chunk_id": "c1", "document_id": "d1", "rerank_score": 0.02}])
+
+        result = await _abstain_node(state)
+
+        assert result["response_text"].startswith("I cannot find this information in your documents.")
+        assert result["edge_case"] == "insufficient_evidence"
+        assert result["model_used"] == "abstain"
+        assert result["cited_spans"] == []
+        assert result["guardrail_result"]["passed"] is True
+
+    @pytest.mark.asyncio
+    async def test_retrieve_node_counts_its_attempts(self, monkeypatch):
+        """The retry budget needs a counter that survives the rewrite loop."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_hybrid_search(*args, **kwargs):
+            return []
+
+        async def fake_rerank(*args, **kwargs):
+            return []
+
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+
+        result = await query_graph._retrieve_node(self._state(retrieval_attempts=1))
+
+        assert result["retrieval_attempts"] == 2
 
 
 class TestCRAGGraph:
@@ -181,6 +252,48 @@ class TestCRAGGraph:
         )
         result = _relevance_check(state)
         assert result == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_relevance_check_abstains_when_retrieval_came_back_empty(self):
+        """F7c: with zero contexts the relaxed fallback LLM had nothing to ground
+        on — it was pure hallucination surface. Abstain instead."""
+        from app.graph.crag_graph import _relevance_check, CRAGState
+        state = CRAGState(
+            query="test", workspace_id="w", query_id="q",
+            top_k=5, contexts=[],
+            model_used="m", latency_ms=0,
+            rewritten_query=None, user_id=None, filters=None,
+            retrieval_results=None, reranked_results=None,
+            response_text=None, cited_spans=None,
+            guardrail_result=None, guardrail_retry_count=0,
+            guardrail_max_retries=3, trust_score=None,
+            trust_components=None, retrieval_attempts=3,
+            max_retrieval_attempts=3, edge_case=None, error=None,
+        )
+        result = _relevance_check(state)
+        assert result == "abstain"
+
+    @pytest.mark.asyncio
+    async def test_crag_abstain_node_returns_the_structured_refusal(self):
+        from app.graph.crag_graph import _abstain_node, CRAGState
+        state = CRAGState(
+            query="test", workspace_id="w", query_id="q",
+            top_k=5, contexts=[],
+            model_used="m", latency_ms=0,
+            rewritten_query=None, user_id=None, filters=None,
+            retrieval_results=None, reranked_results=None,
+            response_text=None, cited_spans=None,
+            guardrail_result=None, guardrail_retry_count=0,
+            guardrail_max_retries=3, trust_score=None,
+            trust_components=None, retrieval_attempts=3,
+            max_retrieval_attempts=3, edge_case=None, error=None,
+        )
+
+        result = await _abstain_node(state)
+
+        assert result["response_text"].startswith("I cannot find this information in your documents.")
+        assert result["edge_case"] == "insufficient_evidence"
+        assert result["model_used"] == "abstain"
 
     @pytest.mark.asyncio
     async def test_guardrail_decision_passed(self):

@@ -17,7 +17,17 @@ from app.query_cache import cached_query_sources, get_workspace_document_version
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
 from app.retrieval.reranker import rerank
+from app.retrieval.sufficiency import (
+    ABSTAIN_MODEL_NAME,
+    EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    assess_sufficiency,
+    build_abstention,
+)
 from app.utils.logger import logger
+
+# Retrieval passes allowed before the graph gives up and abstains. Without a
+# budget the retrieve -> rewrite conditional edge could cycle indefinitely.
+MAX_RETRIEVAL_ATTEMPTS = 2
 
 
 class GraphState(TypedDict):
@@ -40,11 +50,14 @@ class GraphState(TypedDict):
     # Retrieval
     retrieval_results: list | None
     reranked_results: list | None
+    retrieval_attempts: int
 
     # Generation
     contexts: list[dict] | None
     response_text: str | None
     cited_spans: list | None
+    # None for a normal answer; "insufficient_evidence" when the gate abstained.
+    edge_case: str | None
 
     # Guardrail
     guardrail_result: dict | None
@@ -142,6 +155,7 @@ async def _retrieve_node(state: GraphState) -> dict:
         "retrieval_results": [vars(r) if hasattr(r, "__dict__") else r for r in results],
         "reranked_results": [vars(r) if hasattr(r, "__dict__") else r for r in reranked],
         "contexts": contexts,
+        "retrieval_attempts": state.get("retrieval_attempts", 0) + 1,
     }
 
 
@@ -218,12 +232,52 @@ async def _trust_score_node(state: GraphState) -> dict:
     }
 
 
-def _should_continue(state: GraphState) -> Literal["generate", "rewrite"]:
-    """Check if retrieval results are sufficient."""
-    contexts = state.get("contexts")
-    if contexts and len(contexts) > 0:
+async def _abstain_node(state: GraphState) -> dict:
+    """Answer "I don't know" without spending a generation call.
+
+    Reached when retrieval never produced evidence above the sufficiency floor.
+    The guardrail result is synthesised as a pass: nothing was asserted, so
+    there is nothing unsupported to catch downstream.
+    """
+    verdict = assess_sufficiency(state.get("contexts") or [])
+    logger.info(
+        "query_abstained",
+        query_id=state.get("query_id"),
+        reason=verdict.reason,
+        top_score=verdict.top_score,
+        searched=verdict.searched_count,
+    )
+    return {
+        "response_text": build_abstention(verdict),
+        "cited_spans": [],
+        "model_used": ABSTAIN_MODEL_NAME,
+        "latency_ms": 0,
+        "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
+        "guardrail_result": {
+            "passed": True,
+            "score": 1.0,
+            "unsupported_claims": [],
+            "details": "Abstained before generation: insufficient evidence.",
+        },
+    }
+
+
+def _should_continue(state: GraphState) -> Literal["generate", "rewrite", "abstain"]:
+    """Route on evidence quality, not just on 'did retrieval return anything'.
+
+    Weak-but-present contexts used to go straight to generation, which is the
+    classic hallucination path. Now they get one more retrieval attempt and then
+    an explicit abstention.
+    """
+    contexts = state.get("contexts") or []
+    if assess_sufficiency(contexts).sufficient:
         return "generate"
-    return "rewrite"
+    if not settings.SUFFICIENCY_GATE_ENABLED:
+        # Legacy behaviour: any context at all is enough to try generating.
+        return "generate" if contexts else "rewrite"
+    if state.get("retrieval_attempts", 0) < MAX_RETRIEVAL_ATTEMPTS:
+        return "rewrite"
+    return "abstain"
 
 
 def build_query_graph() -> CompiledStateGraph:
@@ -240,6 +294,7 @@ def build_query_graph() -> CompiledStateGraph:
     workflow.add_node("rewrite", _rewrite_node)
     workflow.add_node("retrieve", _retrieve_node)
     workflow.add_node("generate", _generate_node)
+    workflow.add_node("abstain", _abstain_node)
     workflow.add_node("guardrail", _guardrail_node)
     workflow.add_node("trust_score", _trust_score_node)
 
@@ -260,9 +315,13 @@ def build_query_graph() -> CompiledStateGraph:
         {
             "generate": "generate",
             "rewrite": "rewrite",
+            "abstain": "abstain",
         },
     )
     workflow.add_edge("generate", "guardrail")
+    # Abstention skips the guardrail (it synthesises its own pass) but still
+    # gets a trust score so callers see a uniform result shape.
+    workflow.add_edge("abstain", "trust_score")
     workflow.add_edge("guardrail", "trust_score")
     workflow.add_edge("trust_score", END)
 

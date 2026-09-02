@@ -15,6 +15,12 @@ from app.generation.guardrail import GuardrailResult, check as guardrail_check
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query, expand
 from app.retrieval.reranker import rerank
+from app.retrieval.sufficiency import (
+    ABSTAIN_MODEL_NAME,
+    EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    assess_sufficiency,
+    build_abstention,
+)
 
 
 class CRAGState(TypedDict):
@@ -105,7 +111,7 @@ async def _expand_node(state: CRAGState) -> dict:
     return {"rewritten_query": new_query, "retrieval_attempts": state.get("retrieval_attempts", 0) + 1}
 
 
-def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "fallback"]:
+def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "fallback", "abstain"]:
     """Check if retrieved contexts are relevant enough."""
     contexts = state.get("contexts")
 
@@ -114,7 +120,11 @@ def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "f
         max_attempts = state.get("max_retrieval_attempts", 3)
 
         if retrieval_attempts >= max_attempts:
-            return "fallback"
+            # No contexts at all: the relaxed fallback prompt would be asked to
+            # answer from an empty context block, i.e. from the model's own
+            # parametric memory. Abstain instead. The fallback is kept below for
+            # the case where contexts exist but score poorly.
+            return "abstain" if settings.SUFFICIENCY_GATE_ENABLED else "fallback"
         return "expand_query"
 
     # Check if any context has a good score
@@ -146,6 +156,23 @@ async def _generate_primary_node(state: CRAGState) -> dict:
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
         "edge_case": "normal",
+    }
+
+
+async def _abstain_node(state: CRAGState) -> dict:
+    """Structured refusal for the zero-context case — no LLM call at all."""
+    verdict = assess_sufficiency(state.get("contexts") or [])
+    return {
+        "response_text": build_abstention(verdict),
+        "model_used": ABSTAIN_MODEL_NAME,
+        "latency_ms": 0,
+        "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
+        "guardrail_result": {
+            "passed": True,
+            "score": 1.0,
+            "unsupported_claims": [],
+            "details": "Abstained before generation: insufficient evidence.",
+        },
     }
 
 
@@ -269,6 +296,7 @@ def build_crag_graph() -> CompiledStateGraph:
     workflow.add_node("expand_query", _expand_node)
     workflow.add_node("generate_primary", _generate_primary_node)
     workflow.add_node("generate_fallback", _generate_fallback_node)
+    workflow.add_node("abstain", _abstain_node)
     workflow.add_node("guardrail", _guardrail_node)
     workflow.add_node("trust_score", _trust_score_node)
 
@@ -283,8 +311,11 @@ def build_crag_graph() -> CompiledStateGraph:
             "generate": "generate_primary",
             "expand_query": "expand_query",
             "fallback": "generate_fallback",
+            "abstain": "abstain",
         },
     )
+
+    workflow.add_edge("abstain", "trust_score")
 
     workflow.add_conditional_edges(
         "expand_query",

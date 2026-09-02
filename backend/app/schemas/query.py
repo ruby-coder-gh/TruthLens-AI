@@ -37,6 +37,7 @@ class QueryResponse(BaseModel):
     review_note: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
+    edge_case: str | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
@@ -53,6 +54,8 @@ class QuerySummary(BaseModel):
     is_pinned: bool = False
     compared_to_query_id: str | None = None
     review_status: str = "needs_review"
+    # None for a normal answer; "insufficient_evidence" when the gate abstained.
+    edge_case: str | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
@@ -93,6 +96,7 @@ class QueryDetailResponse(BaseModel):
     review_note: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
+    edge_case: str | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)

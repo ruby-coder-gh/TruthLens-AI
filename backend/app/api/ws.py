@@ -163,6 +163,9 @@ async def _send_cached_query(query: Query, send_json: Any, elapsed_ms: int) -> N
             "model_used": query.model_used or "cached",
             "token_count": query.token_count or 0,
             "from_cache": True,
+            # A gated abstention is cacheable (response_text is not NULL), so the
+            # replay has to keep saying it was an abstention.
+            "edge_case": query.edge_case,
         },
     })
 
@@ -186,6 +189,7 @@ async def _run_query_pipeline(
     from app.retrieval.hybrid_search import hybrid_search
     from app.retrieval.reranker import rerank
     from app.retrieval.query_rewrite import rewrite as rewrite_query
+    from app.retrieval.sufficiency import maybe_abstain
 
     sanitized_query = sanitize_input(query_text).strip()
 
@@ -251,6 +255,19 @@ async def _run_query_pipeline(
 
         # 4. Rerank
         reranked = await rerank(rewritten or sanitized_query, results, top_k=top_k)
+
+        # 4.5 Evidence-sufficiency gate: abstain rather than generate on thin evidence.
+        abstention = maybe_abstain(query_id, reranked, elapsed_ms=int((time.time() - start_time) * 1000))
+        if abstention is not None:
+            for frame in abstention.frames:
+                await send_json(frame)
+            await _save_query(
+                query_id=query_id, workspace_id=workspace_id, user_id=user_id,
+                query_text=sanitized_query, rewritten_query=rewritten,
+                normalized_query=normalize_query(sanitized_query),
+                document_version=document_version, **abstention.save_fields,
+            )
+            return
 
         contexts = [
             {
@@ -415,6 +432,7 @@ async def _save_query(
     token_count: int,
     normalized_query: str,
     document_version: int,
+    edge_case: str | None = None,
 ) -> None:
     """Save query result to database."""
     import json as json_mod
@@ -437,6 +455,7 @@ async def _save_query(
             model_used=model_used,
             latency_ms=latency_ms,
             token_count=token_count,
+            edge_case=edge_case,
         )
         db.add(query)
         await db.commit()

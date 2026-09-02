@@ -72,6 +72,17 @@ class Settings(BaseSettings):
     RETRIEVAL_RERANK_WEIGHT: float = 0.6
     RETRIEVAL_MIN_SCORE: float = 0.3
 
+    # ─── Evidence Sufficiency Gate ─────────────
+    # Abstain instead of generating when retrieval is too thin. The floor is on
+    # the cross-encoder rerank_score: BAAI/bge-reranker-v2-m3 has num_labels==1,
+    # so sentence-transformers applies a Sigmoid and the score is a calibrated
+    # relevance probability in (0, 1). 0.35 sits below the model's own 0.5
+    # decision boundary (marginal matches still get answered) and far above the
+    # near-zero cluster of irrelevant chunks.
+    SUFFICIENCY_GATE_ENABLED: bool = True
+    SUFFICIENCY_MIN_RERANK_SCORE: float = 0.35
+    SUFFICIENCY_MIN_SUPPORTING: int = 1
+
     # ─── Guardrail ────────────────────────────
     GUARDRAIL_THRESHOLD: float = 0.7
     GUARDRAIL_MAX_RETRIES: int = 3
