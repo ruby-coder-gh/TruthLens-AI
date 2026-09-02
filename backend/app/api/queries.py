@@ -82,6 +82,7 @@ def _to_summary(query: Query, *, is_pinned: bool = False) -> QuerySummary:
         is_pinned=is_pinned,
         compared_to_query_id=query.compared_to_query_id,
         review_status=query.review_status,
+        edge_case=query.edge_case,
         created_at=query.created_at,
     )
 
@@ -107,6 +108,7 @@ def _to_detail(query: Query, *, is_pinned: bool = False) -> QueryDetailResponse:
         review_note=query.review_note,
         reviewed_by=query.reviewed_by,
         reviewed_at=query.reviewed_at,
+        edge_case=query.edge_case,
         created_at=query.created_at,
     )
 
@@ -134,9 +136,11 @@ async def _run_fresh_query(*, query: Query, user_id: str) -> dict[str, Any]:
         "workspace_document_version": 0,
         "retrieval_results": None,
         "reranked_results": None,
+        "retrieval_attempts": 0,
         "contexts": None,
         "response_text": None,
         "cited_spans": None,
+        "edge_case": None,
         "guardrail_result": None,
         "guardrail_retry_count": 0,
         "trust_score": None,
@@ -472,6 +476,7 @@ async def compare_query_answer(
         token_count=None,
         compared_to_query_id=original.id,
         review_status="needs_review",
+        edge_case=result.get("edge_case"),
     )
     db.add(rerun)
     await db.flush()

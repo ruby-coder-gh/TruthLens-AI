@@ -8,6 +8,7 @@ from app.models.feedback import Feedback
 from app.models.audit_log import AuditLog
 from app.models.collection import Collection, CollectionAccess
 from app.models.eval_run import EvalRun
+from app.models.golden_entry import GoldenEntry
 from app.models.comparison import Comparison, ComparisonResult
 from app.models.investigation import Investigation
 from app.models.query_pin import QueryPin
@@ -29,6 +30,7 @@ __all__ = [
     "Collection",
     "CollectionAccess",
     "EvalRun",
+    "GoldenEntry",
     "Comparison",
     "ComparisonResult",
     "Investigation",

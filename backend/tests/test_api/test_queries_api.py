@@ -334,3 +334,47 @@ async def test_export_query_no_auth(
     ws_id, q_id = seeded_query
     resp = await client.get(f"/api/queries/{q_id}/export")
     assert resp.status_code == 401
+
+
+# ── Abstention edge case (F7c) ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_query_list_and_detail_expose_the_abstention_edge_case(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_db: AsyncSession,
+):
+    """History has to distinguish an abstention from a normal answer so the UI
+    can render the 'no sufficient evidence' card for past rows too."""
+    ws_resp = await client.post("/api/workspaces", json={"name": "Abstain history"}, headers=auth_headers)
+    ws_id = ws_resp.json()["id"]
+    abstained = Query(
+        workspace_id=ws_id,
+        query_text="Who signed the 1994 lease?",
+        response_text="I cannot find this information in your documents.",
+        response_sources="[]",
+        trust_score=0.0,
+        model_used="abstain",
+        edge_case="insufficient_evidence",
+    )
+    normal = Query(
+        workspace_id=ws_id,
+        query_text="What is RAG?",
+        response_text="Retrieval Augmented Generation.",
+        response_sources="[]",
+        trust_score=0.9,
+        model_used="qwen3:4b",
+    )
+    test_db.add_all([abstained, normal])
+    await test_db.commit()
+    await test_db.refresh(abstained)
+    await test_db.refresh(normal)
+
+    listing = await client.get(f"/api/workspaces/{ws_id}/queries", headers=auth_headers)
+    by_id = {item["id"]: item for item in listing.json()["data"]}
+    assert by_id[abstained.id]["edge_case"] == "insufficient_evidence"
+    assert by_id[normal.id]["edge_case"] is None
+
+    detail = await client.get(f"/api/queries/{abstained.id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.json()["edge_case"] == "insufficient_evidence"

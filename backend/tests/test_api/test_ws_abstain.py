@@ -1,0 +1,322 @@
+"""WebSocket pipeline abstains on thin evidence instead of calling the model.
+
+Drives `_run_query_pipeline` with monkeypatched steps, following the pattern in
+tests/test_api/test_ws.py.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+from types import SimpleNamespace
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.config import settings
+from app.models.query import Query
+from app.models.user import User
+from app.models.workspace import Workspace
+
+
+def _hit(score: float, chunk_id: str = "chunk-1", document_id: str = "doc-1"):
+    return SimpleNamespace(
+        chunk_id=chunk_id,
+        document_id=document_id,
+        content="source content",
+        score=score,
+        final_score=score,
+        rerank_score=score,
+        metadata={"document_name": "Doc 1"},
+    )
+
+
+@pytest_asyncio.fixture
+async def pipeline(monkeypatch):
+    """Wire every pipeline dependency to a fake and record what happened."""
+    from app.api import ws as ws_api
+
+    state: dict[str, object] = {"stream_called": False, "saved": None, "rerank_scores": [0.02, 0.01]}
+    sent: list[dict] = []
+
+    async def fake_rewrite(query: str) -> str:
+        return query
+
+    async def fake_hybrid_search(query: str, workspace_id: str, top_k: int, filters=None):
+        return [_hit(0.5)]
+
+    async def fake_rerank(query: str, results, top_k: int):
+        scores = state["rerank_scores"]
+        assert isinstance(scores, list)
+        return [_hit(score, chunk_id=f"chunk-{i}") for i, score in enumerate(scores)]
+
+    async def fake_stream_tokens(gen_input, query_id: str, token_sender):
+        state["stream_called"] = True
+        await token_sender({"type": "token", "payload": {"query_id": query_id, "token": "ok", "index": 0}})
+        return "final answer", 1, "mock-model"
+
+    async def fake_guardrail_check(answer: str, contexts):
+        return SimpleNamespace(passed=True, score=0.95, details="ok")
+
+    async def fake_compute_trust(*args, **kwargs):
+        return SimpleNamespace(
+            overall=0.9, retrieval_quality=0.9, faithfulness=0.95, relevance=0.9, source_authority=0.8
+        )
+
+    async def fake_save_query(**kwargs):
+        state["saved"] = kwargs
+
+    async def fake_document_version(*args, **kwargs):
+        return 0
+
+    async def fake_cache_lookup(*args, **kwargs):
+        return None
+
+    async def send_json(message: dict) -> None:
+        sent.append(message)
+
+    for module_name, attribute, value in (
+        ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
+        ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
+        ("app.retrieval.reranker", "rerank", fake_rerank),
+        ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
+        ("app.generation.guardrail", "check", fake_guardrail_check),
+        ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
+    ):
+        stub = types.ModuleType(module_name)
+        setattr(stub, attribute, value)
+        monkeypatch.setitem(sys.modules, module_name, stub)
+
+    monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
+    monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
+    monkeypatch.setattr(ws_api, "lookup_cached_query", fake_cache_lookup)
+
+    async def run(**overrides):
+        await ws_api._run_query_pipeline(
+            query_text=overrides.pop("query_text", "What is the parental leave policy?"),
+            workspace_id="ws-1",
+            user_id="user-1",
+            query_id="query-1",
+            top_k=5,
+            filters=None,
+            send_json=send_json,
+            **overrides,
+        )
+
+    return SimpleNamespace(run=run, sent=sent, state=state)
+
+
+@pytest.mark.asyncio
+async def test_thin_evidence_abstains_without_calling_the_model(pipeline):
+    """Below the rerank floor: no generation, no sources, an abstain frame set."""
+    await pipeline.run()
+
+    assert pipeline.state["stream_called"] is False
+    types_sent = [message["type"] for message in pipeline.sent]
+    assert types_sent == ["ack", "progress", "progress", "progress", "token", "guardrail", "trust_score", "complete"]
+    assert "sources" not in types_sent
+    assert pipeline.sent[3]["payload"]["phase"] == "abstain"
+
+
+@pytest.mark.asyncio
+async def test_abstention_answer_is_the_recognised_refusal_string(pipeline):
+    await pipeline.run()
+
+    token = pipeline.sent[4]["payload"]
+    assert token["content"].startswith("I cannot find this information in your documents.")
+    assert "best evidence score 0.02" in token["content"]
+    assert token["index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_complete_frame_reports_the_edge_case_and_what_was_searched(pipeline):
+    await pipeline.run()
+
+    complete = pipeline.sent[-1]["payload"]
+    assert complete["edge_case"] == "insufficient_evidence"
+    assert complete["model_used"] == "abstain"
+    assert complete["token_count"] == 0
+    assert complete["from_cache"] is False
+    assert complete["sufficiency"]["reason"] == "low_relevance"
+    assert complete["sufficiency"]["searched_count"] == 2
+    assert complete["sufficiency"]["document_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_abstention_is_persisted_with_no_sources_and_an_edge_case(pipeline):
+    await pipeline.run()
+
+    saved = pipeline.state["saved"]
+    assert isinstance(saved, dict)
+    assert saved["edge_case"] == "insufficient_evidence"
+    assert saved["model_used"] == "abstain"
+    assert saved["response_sources"] == []
+    assert saved["trust_score"] == 0.0
+    assert saved["query_text"] == "What is the parental leave policy?"
+    assert saved["normalized_query"]
+    assert saved["response_text"].startswith("I cannot find this information in your documents.")
+
+
+@pytest.mark.asyncio
+async def test_strong_evidence_still_generates_normally(pipeline):
+    pipeline.state["rerank_scores"] = [0.93, 0.71]
+
+    await pipeline.run()
+
+    assert pipeline.state["stream_called"] is True
+    types_sent = [message["type"] for message in pipeline.sent]
+    assert "sources" in types_sent
+    assert pipeline.sent[-1]["payload"].get("edge_case") is None
+    saved = pipeline.state["saved"]
+    assert isinstance(saved, dict)
+    assert saved.get("edge_case") is None
+
+
+@pytest.mark.asyncio
+async def test_disabling_the_gate_restores_the_ungated_pipeline(pipeline, monkeypatch):
+    monkeypatch.setattr(settings, "SUFFICIENCY_GATE_ENABLED", False)
+
+    await pipeline.run()
+
+    assert pipeline.state["stream_called"] is True
+    assert "sources" in [message["type"] for message in pipeline.sent]
+
+
+@pytest.mark.asyncio
+async def test_save_query_writes_edge_case_to_the_queries_table(monkeypatch, test_engine, test_db: AsyncSession):
+    """The persisted abstention is queryable — F7b can promote it as unanswerable."""
+    from app.api import ws as ws_api
+
+    monkeypatch.setattr(
+        ws_api,
+        "async_session_factory",
+        async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    user = User(email="abstain@example.com", username="abstain", password_hash="h", role="user", is_active=True)
+    test_db.add(user)
+    await test_db.commit()
+    workspace = Workspace(name="Abstain workspace", owner_id=user.id)
+    test_db.add(workspace)
+    await test_db.commit()
+
+    await ws_api._save_query(
+        query_id="query-abstain-1",
+        workspace_id=workspace.id,
+        user_id=user.id,
+        query_text="What is the parental leave policy?",
+        rewritten_query=None,
+        response_text="I cannot find this information in your documents.",
+        response_sources=[],
+        trust_score=0.0,
+        trust_components={"retrieval_quality": 0.02},
+        guardrail_score=1.0,
+        guardrail_passed=True,
+        model_used="abstain",
+        latency_ms=12,
+        token_count=0,
+        normalized_query="what is the parental leave policy",
+        document_version=0,
+        edge_case="insufficient_evidence",
+    )
+
+    row = (await test_db.execute(select(Query).where(Query.id == "query-abstain-1"))).scalar_one()
+    assert row.edge_case == "insufficient_evidence"
+    assert row.model_used == "abstain"
+
+
+@pytest.mark.asyncio
+async def test_cached_replay_of_an_abstention_still_reports_the_edge_case():
+    """A persisted abstention is cacheable (response_text is not NULL), so the
+    replay path must not present it as a normal answer."""
+    from app.api import ws as ws_api
+
+    sent: list[dict] = []
+
+    async def send_json(message: dict) -> None:
+        sent.append(message)
+
+    cached = Query(
+        id="cached-abstain",
+        workspace_id="ws-1",
+        query_text="Who signed the 1994 lease?",
+        response_text="I cannot find this information in your documents. Searched 5 chunks across 2 documents; best evidence score 0.04.",
+        response_sources="[]",
+        trust_score=0.0,
+        guardrail_score=1.0,
+        guardrail_passed=True,
+        model_used="abstain",
+        token_count=0,
+        edge_case="insufficient_evidence",
+    )
+
+    await ws_api._send_cached_query(cached, send_json, 3)
+
+    complete = sent[-1]["payload"]
+    assert complete["from_cache"] is True
+    assert complete["edge_case"] == "insufficient_evidence"
+
+
+@pytest.mark.asyncio
+async def test_cached_replay_of_a_normal_answer_has_no_edge_case():
+    from app.api import ws as ws_api
+
+    sent: list[dict] = []
+
+    async def send_json(message: dict) -> None:
+        sent.append(message)
+
+    cached = Query(
+        id="cached-normal",
+        workspace_id="ws-1",
+        query_text="What is RAG?",
+        response_text="Retrieval Augmented Generation.",
+        response_sources="[]",
+        trust_score=0.9,
+        model_used="qwen3:4b",
+        token_count=4,
+    )
+
+    await ws_api._send_cached_query(cached, send_json, 3)
+
+    assert sent[-1]["payload"]["edge_case"] is None
+
+
+@pytest.mark.asyncio
+async def test_save_query_leaves_edge_case_null_for_normal_answers(monkeypatch, test_engine, test_db: AsyncSession):
+    from app.api import ws as ws_api
+
+    monkeypatch.setattr(
+        ws_api,
+        "async_session_factory",
+        async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    user = User(email="normal@example.com", username="normal", password_hash="h", role="user", is_active=True)
+    test_db.add(user)
+    await test_db.commit()
+    workspace = Workspace(name="Normal workspace", owner_id=user.id)
+    test_db.add(workspace)
+    await test_db.commit()
+
+    await ws_api._save_query(
+        query_id="query-normal-1",
+        workspace_id=workspace.id,
+        user_id=user.id,
+        query_text="What is the parental leave policy?",
+        rewritten_query=None,
+        response_text="Twelve weeks.",
+        response_sources=[],
+        trust_score=0.8,
+        trust_components={},
+        guardrail_score=0.9,
+        guardrail_passed=True,
+        model_used="qwen3:4b",
+        latency_ms=12,
+        token_count=3,
+        normalized_query="what is the parental leave policy",
+        document_version=0,
+    )
+
+    row = (await test_db.execute(select(Query).where(Query.id == "query-normal-1"))).scalar_one()
+    assert row.edge_case is None

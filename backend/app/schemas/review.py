@@ -43,6 +43,9 @@ class ReviewQueueItem(BaseModel):
     review_note: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
+    # Set when this answer has already been promoted to the golden set (F7b),
+    # so the queue can show a "Golden" badge instead of offering promotion again.
+    golden_entry_id: str | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)
