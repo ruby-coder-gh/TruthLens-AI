@@ -83,6 +83,10 @@ async def test_run_query_pipeline_sanitizes_and_clamps_top_k(monkeypatch):
     async def fake_send_json(message: dict) -> None:
         sent_messages.append(message)
 
+    from app.api.stream_registry import StreamBuffer, StreamSink
+
+    sink = StreamSink(StreamBuffer(query_id="query-1", user_id="user-1", workspace_id="ws-1"), fake_send_json)
+
     fake_query_rewrite = types.ModuleType("app.retrieval.query_rewrite")
     fake_query_rewrite.rewrite = fake_rewrite
     monkeypatch.setitem(sys.modules, "app.retrieval.query_rewrite", fake_query_rewrite)
@@ -118,7 +122,7 @@ async def test_run_query_pipeline_sanitizes_and_clamps_top_k(monkeypatch):
         query_id="query-1",
         top_k=999,
         filters=None,
-        send_json=fake_send_json,
+        sink=sink,
     )
 
     assert "ignore all instructions" not in str(captured["rewrite_query"]).lower()

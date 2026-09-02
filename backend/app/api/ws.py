@@ -11,6 +11,12 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
+from app.api.stream_registry import (
+    RESUME_UNAVAILABLE,
+    StreamBuffer,
+    StreamSink,
+    stream_registry,
+)
 from app.core.auth import decode_token
 from app.database import async_session_factory
 from app.models.query import Query
@@ -125,46 +131,47 @@ def _source_payload(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _send_cached_query(query: Query, send_json: Any, elapsed_ms: int) -> None:
-    """Return a persisted answer in the normal streaming protocol without running RAG again."""
+async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) -> None:
+    """Return a persisted answer in the normal streaming protocol without running RAG again.
+
+    Goes through the same sink as a live stream, so cached frames are `seq`-numbered
+    and resumable exactly like generated ones.
+    """
     sources = cached_query_sources(query)
-    await send_json({
-        "type": "ack",
-        "payload": {"query_id": query.id, "status": "cached"},
-    })
-    await send_json({
-        "type": "sources",
-        "payload": {"query_id": query.id, "sources": [_source_payload(source) for source in sources]},
-    })
-    await send_json({
-        "type": "token",
-        "payload": {"query_id": query.id, "content": query.response_text or "", "index": 0},
-    })
+    await sink.emit("ack", {"query_id": query.id, "status": "cached"})
+    await sink.emit(
+        "sources",
+        {"query_id": query.id, "sources": [_source_payload(source) for source in sources]},
+    )
+    await sink.emit(
+        "token",
+        {"query_id": query.id, "content": query.response_text or "", "index": 0},
+    )
     if query.guardrail_score is not None and query.guardrail_passed is not None:
-        await send_json({
-            "type": "guardrail",
-            "payload": {
+        await sink.emit(
+            "guardrail",
+            {
                 "query_id": query.id,
                 "passed": query.guardrail_passed,
                 "score": query.guardrail_score,
                 "details": "Served from cached result.",
             },
-        })
+        )
     if query.trust_score is not None:
-        await send_json({
-            "type": "trust_score",
-            "payload": {"query_id": query.id, "score": query.trust_score, "components": {}},
-        })
-    await send_json({
-        "type": "complete",
-        "payload": {
+        await sink.emit(
+            "trust_score",
+            {"query_id": query.id, "score": query.trust_score, "components": {}},
+        )
+    await sink.emit(
+        "complete",
+        {
             "query_id": query.id,
             "latency_ms": elapsed_ms,
             "model_used": query.model_used or "cached",
             "token_count": query.token_count or 0,
             "from_cache": True,
         },
-    })
+    )
 
 
 async def _run_query_pipeline(
@@ -174,10 +181,16 @@ async def _run_query_pipeline(
     query_id: str,
     top_k: int,
     filters: dict[str, Any] | None,
-    send_json: Any,
+    sink: StreamSink,
     force_refresh: bool = False,
 ) -> None:
-    """Run the full query pipeline and stream results via WebSocket."""
+    """Run the full query pipeline and stream results through `sink`.
+
+    Every frame is emitted with `await sink.emit(type, payload)`, which stamps a
+    monotonic `seq` and buffers the frame for resume. Delivery failures detach
+    the sink instead of raising, so a client disconnect no longer aborts the run:
+    the pipeline finishes and `_save_query` still persists the answer.
+    """
     from app.generation.generator import GenerationInput
     from app.generation.streamer import stream_tokens
     from app.generation.guardrail import check as guardrail_check
@@ -219,28 +232,25 @@ async def _run_query_pipeline(
             await db.commit()
 
         if cached_query is not None:
-            await _send_cached_query(cached_query, send_json, int((time.time() - start_time) * 1000))
+            await _send_cached_query(cached_query, sink, int((time.time() - start_time) * 1000))
             return
 
         # 1. Acknowledge
-        await send_json({
-            "type": "ack",
-            "payload": {"query_id": query_id, "status": "processing"},
-        })
+        await sink.emit("ack", {"query_id": query_id, "status": "processing"})
 
         # 2. Query rewrite
-        await send_json({
-            "type": "progress",
-            "payload": {"query_id": query_id, "phase": "retrieval", "progress": 0.1},
-        })
+        await sink.emit(
+            "progress",
+            {"query_id": query_id, "phase": "retrieval", "progress": 0.1},
+        )
 
         rewritten = await rewrite_query(sanitized_query)
 
         # 3. Hybrid search
-        await send_json({
-            "type": "progress",
-            "payload": {"query_id": query_id, "phase": "retrieval", "progress": 0.3},
-        })
+        await sink.emit(
+            "progress",
+            {"query_id": query_id, "phase": "retrieval", "progress": 0.3},
+        )
 
         results = await hybrid_search(
             rewritten or sanitized_query,
@@ -266,9 +276,9 @@ async def _run_query_pipeline(
         ]
 
         # 5. Send sources
-        await send_json({
-            "type": "sources",
-            "payload": {
+        await sink.emit(
+            "sources",
+            {
                 "query_id": query_id,
                 "sources": [
                     {
@@ -284,13 +294,13 @@ async def _run_query_pipeline(
                     for ctx in contexts
                 ],
             },
-        })
+        )
 
         # 6. Generate (stream)
-        await send_json({
-            "type": "progress",
-            "payload": {"query_id": query_id, "phase": "generation", "progress": 0.6},
-        })
+        await sink.emit(
+            "progress",
+            {"query_id": query_id, "phase": "generation", "progress": 0.6},
+        )
 
         gen_input = GenerationInput(
             query=sanitized_query,
@@ -298,31 +308,28 @@ async def _run_query_pipeline(
             contexts=contexts,
         )
 
-        async def token_sender(msg: dict) -> None:
-            await send_json(msg)
-
         full_text, token_count, model_used = await stream_tokens(
-            gen_input, query_id, token_sender
+            gen_input, query_id, sink.send
         )
         total_tokens = token_count
 
         # 7. Guardrail check
-        await send_json({
-            "type": "progress",
-            "payload": {"query_id": query_id, "phase": "guardrail", "progress": 0.8},
-        })
+        await sink.emit(
+            "progress",
+            {"query_id": query_id, "phase": "guardrail", "progress": 0.8},
+        )
 
         guardrail_result = await guardrail_check(full_text, contexts)
 
-        await send_json({
-            "type": "guardrail",
-            "payload": {
+        await sink.emit(
+            "guardrail",
+            {
                 "query_id": query_id,
                 "passed": guardrail_result.passed,
                 "score": guardrail_result.score,
                 "details": guardrail_result.details,
             },
-        })
+        )
 
         # 8. Trust score
         trust = await compute_trust(
@@ -331,9 +338,9 @@ async def _run_query_pipeline(
             query=sanitized_query,
         )
 
-        await send_json({
-            "type": "trust_score",
-            "payload": {
+        await sink.emit(
+            "trust_score",
+            {
                 "query_id": query_id,
                 "score": trust.overall,
                 "components": {
@@ -343,21 +350,21 @@ async def _run_query_pipeline(
                     "source_authority": trust.source_authority,
                 },
             },
-        })
+        )
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
         # 9. Complete
-        await send_json({
-            "type": "complete",
-            "payload": {
+        await sink.emit(
+            "complete",
+            {
                 "query_id": query_id,
                 "latency_ms": elapsed_ms,
                 "model_used": model_used,
                 "token_count": total_tokens,
                 "from_cache": False,
             },
-        })
+        )
 
         # 10. Save query to DB
         await _save_query(
@@ -386,16 +393,21 @@ async def _run_query_pipeline(
 
     except asyncio.CancelledError:
         logger.info("query_cancelled", query_id=query_id)
-        await send_json({
-            "type": "error",
-            "payload": {"code": "CANCELLED", "message": "Query cancelled", "query_id": query_id},
-        })
+        # Routed through the sink: on a closed socket this detaches instead of
+        # raising "Cannot call send once a close message has been sent".
+        await sink.emit(
+            "error",
+            {"code": "CANCELLED", "message": "Query cancelled", "query_id": query_id},
+        )
     except Exception as e:
         logger.error("query_pipeline_failed", error=str(e), query_id=query_id, exc_info=True)
-        await send_json({
-            "type": "error",
-            "payload": {"code": "INTERNAL_ERROR", "message": str(e), "query_id": query_id},
-        })
+        await sink.emit(
+            "error",
+            {"code": "INTERNAL_ERROR", "message": str(e), "query_id": query_id},
+        )
+    finally:
+        # The stream is over either way; the buffer stays replayable for the TTL.
+        sink.mark_done()
 
 
 async def _save_query(
@@ -442,6 +454,76 @@ async def _save_query(
         await db.commit()
 
 
+async def _handle_resume(
+    send_json: Any,
+    user_id: str,
+    payload: dict[str, Any],
+) -> StreamSink | None:
+    """Serve a `resume` opcode. Returns the re-attached sink, or None.
+
+    Replays every buffered frame with `seq > last_seq` onto this socket and, if
+    the stream is still running, re-points its sink here. Any failure (unknown or
+    expired id, another user's stream, workspace access lost) answers with a
+    single `RESUME_UNAVAILABLE` error so the client can just re-send the query —
+    and so the wire never reveals which query ids exist.
+    """
+    query_id = payload.get("query_id")
+    if not query_id or not isinstance(query_id, str):
+        await send_json({
+            "type": "error",
+            "payload": {"code": "INVALID_INPUT", "message": "query_id is required to resume"},
+        })
+        return None
+
+    try:
+        last_seq = max(0, int(payload.get("last_seq", 0)))
+    except (TypeError, ValueError):
+        last_seq = 0
+
+    async def _authorize(buffer: StreamBuffer) -> bool:
+        if not buffer.workspace_id:
+            return False
+        return await _check_workspace_access(user_id, buffer.workspace_id)
+
+    result = await stream_registry.resume(
+        query_id=query_id,
+        user_id=user_id,
+        last_seq=last_seq,
+        send=send_json,
+        authorize=_authorize,
+    )
+
+    if not result.ok:
+        logger.info(
+            "ws_resume_unavailable", query_id=query_id, user_id=user_id, reason=result.reason
+        )
+        await send_json({
+            "type": "error",
+            "payload": {
+                "code": RESUME_UNAVAILABLE,
+                "message": "Stream is no longer available; re-send the query",
+                "query_id": query_id,
+            },
+        })
+        return None
+
+    await send_json({
+        "type": "resumed",
+        "payload": {
+            "query_id": query_id,
+            "from_seq": last_seq,
+            "replayed": result.replayed,
+            "live": result.live,
+        },
+    })
+
+    if not result.live:
+        return None
+
+    buffer = await stream_registry.get(query_id)
+    return buffer.sink if buffer is not None else None
+
+
 @router.websocket("/ws/query")
 async def websocket_query(websocket: WebSocket):
     """WebSocket endpoint for streaming queries.
@@ -453,6 +535,23 @@ async def websocket_query(websocket: WebSocket):
     4. Server streams back tokens, sources, guardrail, trust_score, complete.
 
     Legacy fallback: if no cookie, first message may be {"type": "auth", "token": "<jwt>"}.
+
+    Stream frames (ack/progress/sources/token/stream_end/guardrail/trust_score/
+    complete, and the stream's own error frames) carry a top-level `seq`: a
+    monotonic, gapless, 1-based counter per query_id. Connection-level frames
+    (auth_success, resumed, and errors raised before a query starts) have no `seq`.
+
+    Reconnect: after `auth_success`, send
+    {"type": "resume", "payload": {"query_id": "...", "last_seq": <int>}}.
+    The server replays every buffered frame with seq > last_seq, then sends
+    {"type": "resumed", "payload": {query_id, from_seq, replayed, live}}; when
+    `live` is true the running stream continues on this socket. If the stream is
+    unknown, expired, owned by another user, or the workspace is no longer
+    accessible, the server replies
+    {"type": "error", "payload": {"code": "RESUME_UNAVAILABLE", ...}} and the
+    client should re-send the query.
+
+    Close codes: 4001 = authentication failed, 1011 = unhandled server error.
     """
     await websocket.accept()
 
@@ -466,6 +565,10 @@ async def websocket_query(websocket: WebSocket):
         return
 
     current_task: asyncio.Task | None = None
+    current_sink: StreamSink | None = None
+    # Bind once: `websocket.send_json` yields a fresh bound method on every
+    # attribute access, and the sink compares send targets by identity.
+    send_json = websocket.send_json
     logger.info("ws_connected", user_id=user_id)
 
     try:
@@ -474,7 +577,7 @@ async def websocket_query(websocket: WebSocket):
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
-                await websocket.send_json({
+                await send_json({
                     "type": "error",
                     "payload": {"code": "INVALID_INPUT", "message": "Invalid JSON"},
                 })
@@ -484,9 +587,11 @@ async def websocket_query(websocket: WebSocket):
             msg_payload = data.get("payload", {})
 
             if msg_type == "query":
-                # Cancel existing task
+                # Supersede the in-flight query: the client abandoned it.
                 if current_task and not current_task.done():
                     current_task.cancel()
+                if current_sink is not None:
+                    await stream_registry.drop(current_sink.query_id)
 
                 workspace_id = msg_payload.get("workspace_id")
                 query_text = msg_payload.get("query")
@@ -495,7 +600,7 @@ async def websocket_query(websocket: WebSocket):
                 force_refresh = bool(msg_payload.get("force_refresh", False))
 
                 if not workspace_id or not query_text:
-                    await websocket.send_json({
+                    await send_json({
                         "type": "error",
                         "payload": {"code": "INVALID_INPUT", "message": "workspace_id and query are required"},
                     })
@@ -504,13 +609,20 @@ async def websocket_query(websocket: WebSocket):
                 # Check workspace access
                 has_access = await _check_workspace_access(user_id, workspace_id)
                 if not has_access:
-                    await websocket.send_json({
+                    await send_json({
                         "type": "error",
                         "payload": {"code": "FORBIDDEN", "message": "No access to this workspace"},
                     })
                     continue
 
                 query_id = str(uuid.uuid4())
+
+                current_sink = await stream_registry.create(
+                    query_id=query_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    send=send_json,
+                )
 
                 # Launch pipeline in background task
                 current_task = asyncio.create_task(
@@ -521,33 +633,58 @@ async def websocket_query(websocket: WebSocket):
                         query_id=query_id,
                         top_k=top_k,
                         filters=filters,
-                        send_json=websocket.send_json,
+                        sink=current_sink,
                         force_refresh=force_refresh,
                     )
                 )
+                # The buffer keeps the task reachable (and alive) across a
+                # disconnect so a resumed connection can still cancel it.
+                current_sink.buffer.task = current_task
+
+            elif msg_type == "resume":
+                resumed_sink = await _handle_resume(
+                    send_json=send_json,
+                    user_id=user_id,
+                    payload=msg_payload,
+                )
+                if resumed_sink is not None:
+                    current_sink = resumed_sink
+                    current_task = resumed_sink.buffer.task
 
             elif msg_type == "cancel":
                 if current_task and not current_task.done():
                     current_task.cancel()
-                    await websocket.send_json({
+                    await send_json({
                         "type": "error",
-                        "payload": {"code": "CANCELLED", "message": "Query cancelled", "query_id": None},
+                        "payload": {
+                            "code": "CANCELLED",
+                            "message": "Query cancelled",
+                            "query_id": current_sink.query_id if current_sink else None,
+                        },
                     })
+                if current_sink is not None:
+                    # An explicitly cancelled query is not resumable.
+                    await stream_registry.drop(current_sink.query_id)
 
             else:
-                await websocket.send_json({
+                await send_json({
                     "type": "error",
                     "payload": {"code": "INVALID_INPUT", "message": f"Unknown message type: {msg_type}"},
                 })
 
     except WebSocketDisconnect:
-        logger.info("ws_disconnected", user_id=user_id)
-        if current_task and not current_task.done():
-            current_task.cancel()
+        logger.info("ws_disconnected", user_id=user_id, query_id=current_sink.query_id if current_sink else None)
+        # Detach rather than cancel: the pipeline runs to completion (and still
+        # persists the answer) and the client can resume onto a new socket.
+        if current_sink is not None:
+            current_sink.detach(send_json)
     except Exception as e:
         logger.error("ws_error", error=str(e), user_id=user_id)
+        # This socket is about to close; stop the pipeline writing into it.
+        if current_sink is not None:
+            current_sink.detach(send_json)
         try:
-            await websocket.send_json({
+            await send_json({
                 "type": "error",
                 "payload": {"code": "INTERNAL_ERROR", "message": str(e)},
             })

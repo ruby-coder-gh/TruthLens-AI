@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ISSUER: str = "veritasrag"
 
+    # ─── WebSocket Stream Resume ──────────────
+    # How long a finished stream stays replayable after its last frame, and how
+    # many per-query buffers the in-memory registry may hold at once.
+    WS_RESUME_TTL_SECONDS: int = 120
+    WS_RESUME_MAX_BUFFERS: int = 500
+
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_REQUESTS: int = 30
