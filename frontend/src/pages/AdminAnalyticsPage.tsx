@@ -34,6 +34,7 @@ import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
+import { startOfDayIso, endOfDayIso } from '../utils/dates';
 import type {
   EvalRunNotes,
   EvalRunResponse,
@@ -130,6 +131,10 @@ function usageSortValue(row: UsageRow | UsageTotals, key: UsageSortKey): number 
 }
 
 function formatUsd(value: number): string {
+  // A non-zero cost that rounds to $0.0000 at 4 decimal places (e.g. a
+  // handful of tokens against a fractional-cent rate) reads as free, which
+  // is misleading — show a "less than" floor instead. Exactly $0 stays $0.
+  if (value > 0 && value < 0.0001) return '<$0.0001';
   return `$${value.toFixed(4)}`;
 }
 
@@ -382,15 +387,30 @@ export default function AdminAnalyticsPage() {
   }, [loadAnalytics]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Guards against rapid group-by/date switching: only the response for the
+  // most recently issued request is allowed to update state. Without this, a
+  // slower-resolving earlier request (e.g. "user") can resolve after a
+  // faster later one (e.g. "model") and clobber the table with stale rows.
+  const usageRequestIdRef = useRef(0);
+
   const loadUsage = useCallback(async () => {
+    const requestId = usageRequestIdRef.current + 1;
+    usageRequestIdRef.current = requestId;
+    const isStale = () => usageRequestIdRef.current !== requestId;
+
     setUsageLoading(true);
     setUsageError(null);
 
     try {
       const [usageData, pricingData] = await Promise.all([
-        adminApi.getUsage({ group_by: usageGroupBy, date_from: usageDateFrom, date_to: usageDateTo }),
+        adminApi.getUsage({
+          group_by: usageGroupBy,
+          date_from: startOfDayIso(usageDateFrom),
+          date_to: endOfDayIso(usageDateTo),
+        }),
         adminApi.getUsagePricing(),
       ]);
+      if (isStale()) return;
 
       const rowsRaw = extractData<Record<string, unknown>>(usageData?.rows);
       const normalizedRows: UsageRow[] = rowsRaw.map((item, idx) => ({
@@ -418,11 +438,14 @@ export default function AdminAnalyticsPage() {
       setUsagePricingSource(usageData?.pricing_source ?? 'none');
       setUsagePricing(pricingData?.pricing ?? {});
     } catch {
+      if (isStale()) return;
       setUsageError('Unable to load the usage report right now.');
       setUsageRows([]);
       setUsageTotals(ZERO_USAGE_TOTALS);
     } finally {
-      setUsageLoading(false);
+      if (!isStale()) {
+        setUsageLoading(false);
+      }
     }
   }, [usageGroupBy, usageDateFrom, usageDateTo]);
 
@@ -437,8 +460,8 @@ export default function AdminAnalyticsPage() {
     try {
       const { blob, filename } = await adminApi.exportUsage({
         group_by: usageGroupBy,
-        date_from: usageDateFrom,
-        date_to: usageDateTo,
+        date_from: startOfDayIso(usageDateFrom),
+        date_to: endOfDayIso(usageDateTo),
       });
       downloadBlob(blob, filename);
       addToast('Usage report exported.', 'success');
@@ -1006,15 +1029,19 @@ export default function AdminAnalyticsPage() {
                           <tr className="border-b border-border bg-card-2/60 text-text-dim">
                             <th className="px-3 py-2 font-medium uppercase tracking-[0.06em]">{usageGroupByLabel}</th>
                             {USAGE_SORT_COLUMNS.map((col) => (
-                              <th key={col.key} className="px-3 py-2 font-medium uppercase tracking-[0.06em]">
+                              <th
+                                key={col.key}
+                                scope="col"
+                                aria-sort={
+                                  usageSortKey === col.key
+                                    ? (usageSortDir === 'asc' ? 'ascending' : 'descending')
+                                    : 'none'
+                                }
+                                className="px-3 py-2 font-medium uppercase tracking-[0.06em]"
+                              >
                                 <button
                                   type="button"
                                   onClick={() => handleUsageSort(col.key)}
-                                  aria-sort={
-                                    usageSortKey === col.key
-                                      ? (usageSortDir === 'asc' ? 'ascending' : 'descending')
-                                      : 'none'
-                                  }
                                   className="inline-flex items-center gap-1 hover:text-text"
                                 >
                                   {col.label}

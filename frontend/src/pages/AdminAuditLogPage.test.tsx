@@ -5,6 +5,7 @@ import { renderWithProviders } from '../test/utils';
 import AdminAuditLogPage from './AdminAuditLogPage';
 import { adminApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
+import { ToastProvider } from '../components/ui';
 import type { PaginatedResponse, AuditLogEntry } from '../api/types';
 
 vi.mock('../api/client', () => ({
@@ -42,7 +43,7 @@ describe('AdminAuditLogPage — filters and export', () => {
     mockedAdminApi.logs.mockResolvedValue(SAMPLE_LOGS);
   });
 
-  it('passes date-from/date-to filters through to adminApi.logs', async () => {
+  it('passes date-from/date-to filters through to adminApi.logs, with date_to as end-of-day', async () => {
     renderWithProviders(<AdminAuditLogPage />);
     await screen.findByText('user.login');
 
@@ -51,7 +52,10 @@ describe('AdminAuditLogPage — filters and export', () => {
 
     await waitFor(() => {
       expect(mockedAdminApi.logs).toHaveBeenCalledWith(
-        expect.objectContaining({ date_from: '2026-08-01', date_to: '2026-08-31' }),
+        expect.objectContaining({
+          date_from: '2026-08-01T00:00:00.000',
+          date_to: '2026-08-31T23:59:59.999',
+        }),
       );
     });
   });
@@ -116,12 +120,37 @@ describe('AdminAuditLogPage — filters and export', () => {
   it('shows an error toast when export fails', async () => {
     mockedAdminApi.exportLogs.mockRejectedValue(new Error('Export blew up'));
 
-    renderWithProviders(<AdminAuditLogPage />);
+    renderWithProviders(
+      <ToastProvider>
+        <AdminAuditLogPage />
+      </ToastProvider>,
+    );
     await screen.findByText('user.login');
 
     await userEvent.click(screen.getByRole('button', { name: /export csv/i }));
 
     await waitFor(() => expect(mockedAdminApi.exportLogs).toHaveBeenCalled());
+    expect(await screen.findByText('Export blew up')).toBeInTheDocument();
     expect(mockedDownloadBlob).not.toHaveBeenCalled();
+  });
+
+  it('sends an end-of-day date_to on export as well as on the list query', async () => {
+    mockedAdminApi.exportLogs.mockResolvedValue({
+      blob: new Blob(['id,action'], { type: 'text/csv' }),
+      filename: 'audit-log-20260101T000000Z.csv',
+    });
+
+    renderWithProviders(<AdminAuditLogPage />);
+    await screen.findByText('user.login');
+
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-08-31' } });
+    await userEvent.click(screen.getByRole('button', { name: /export csv/i }));
+
+    await waitFor(() => {
+      expect(mockedAdminApi.exportLogs).toHaveBeenCalledWith(
+        'csv',
+        expect.objectContaining({ date_to: '2026-08-31T23:59:59.999' }),
+      );
+    });
   });
 });

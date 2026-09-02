@@ -10,6 +10,7 @@ import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
+import { startOfDayIso, endOfDayIso } from '../utils/dates';
 import type { AuditLogExportFormat, AuditLogFilters } from '../api/types';
 
 // Backend audit-log actions are exact-match dotted strings like `user.login`,
@@ -89,8 +90,10 @@ export default function AdminAuditLogPage() {
     ...(search ? { q: search } : {}),
     ...(userIdFilter ? { user_id: userIdFilter } : {}),
     ...(resourceTypeFilter ? { resource_type: resourceTypeFilter } : {}),
-    ...(dateFrom ? { date_from: dateFrom } : {}),
-    ...(dateTo ? { date_to: dateTo } : {}),
+    // Bare YYYY-MM-DD inputs parse as midnight — normalize date_to to the
+    // last instant of the day so the selected end day is inclusive.
+    ...(dateFrom ? { date_from: startOfDayIso(dateFrom) } : {}),
+    ...(dateTo ? { date_to: endOfDayIso(dateTo) } : {}),
   }), [actionFilter, search, userIdFilter, resourceTypeFilter, dateFrom, dateTo]);
 
   const logsQuery = useQuery({

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/utils';
 import AdminAnalyticsPage from './AdminAnalyticsPage';
@@ -190,5 +190,60 @@ describe('AdminAnalyticsPage — Usage tab', () => {
       expect.any(Blob),
       'usage-model-20260101T000000Z.csv',
     );
+  });
+
+  it('sends an end-of-day date_to on both the fetch and the export', async () => {
+    mockedAdminApi.exportUsage.mockResolvedValue({
+      blob: new Blob(['csv']),
+      filename: 'usage-model-20260101T000000Z.csv',
+    });
+
+    renderWithProviders(<AdminAnalyticsPage />);
+    await openUsageTab();
+
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-08-31' } });
+
+    await waitFor(() => {
+      expect(mockedAdminApi.getUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ date_to: '2026-08-31T23:59:59.999' }),
+      );
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /export csv/i }));
+
+    await waitFor(() => {
+      expect(mockedAdminApi.exportUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ date_to: '2026-08-31T23:59:59.999' }),
+      );
+    });
+  });
+
+  it('ignores a stale response when a newer group-by fetch resolves out of order', async () => {
+    const pending: Record<string, (value: UsageReportResponse) => void> = {};
+    mockedAdminApi.getUsage.mockImplementation(
+      (params) => new Promise((resolve) => {
+        pending[params?.group_by ?? 'model'] = resolve;
+      }),
+    );
+
+    renderWithProviders(<AdminAnalyticsPage />);
+    await openUsageTab();
+
+    await waitFor(() => expect(pending.model).toBeDefined());
+
+    await userEvent.click(screen.getByRole('button', { name: 'User' }));
+    await waitFor(() => expect(pending.user).toBeDefined());
+
+    // Resolve the newer ("user") request first, then the stale ("model") one
+    // — the stale response must not clobber the table afterwards.
+    pending.user(USAGE_BY_USER);
+    expect(await screen.findByText('Unattributed')).toBeInTheDocument();
+
+    pending.model(USAGE_BY_MODEL);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.getByText('Unattributed')).toBeInTheDocument();
+    expect(screen.queryByText('llama3')).not.toBeInTheDocument();
   });
 });
