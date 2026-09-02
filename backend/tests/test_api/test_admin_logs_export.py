@@ -273,3 +273,34 @@ async def test_logs_export_cap_respected(
 async def test_logs_export_requires_admin(client: AsyncClient, auth_headers: dict[str, str]):
     resp = await client.get("/api/admin/logs/export?format=csv", headers=auth_headers)
     assert resp.status_code == 403
+
+
+# ─── SEC-1 (MEDIUM): CSV formula injection ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_logs_export_neutralises_a_formula_leading_details_cell(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """`details` is normally `json.dumps` output, but the neutralisation lives
+    in `rows_to_csv` so every column inherits it regardless of writer."""
+    log = AuditLog(
+        user_id="user-csv",
+        action="query.compare",
+        resource_type="query",
+        resource_id="q-csv",
+        details='@SUM(1+1)*cmd|\'/C calc\'!A0',
+        ip_address="10.0.0.9",
+        created_at=datetime.now(timezone.utc),
+    )
+    test_db.add(log)
+    await test_db.commit()
+    await test_db.refresh(log)
+
+    resp = await client.get("/api/admin/logs/export?format=csv", headers=admin_headers)
+    assert resp.status_code == 200
+
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    row = next(r for r in rows if r[0] == log.id)
+    assert row[-1] == "'@SUM(1+1)*cmd|'/C calc'!A0"
+    assert row[3] == "query.compare"  # untouched: no formula-leading character

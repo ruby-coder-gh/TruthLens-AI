@@ -300,3 +300,54 @@ async def test_usage_requires_admin(client: AsyncClient, auth_headers: dict[str,
 async def test_usage_invalid_group_by_422(client: AsyncClient, admin_headers: dict[str, str]):
     resp = await client.get("/api/admin/usage?group_by=bogus", headers=admin_headers)
     assert resp.status_code == 422
+
+
+# ─── SEC-1 (MEDIUM): CSV formula injection ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_usage_export_neutralises_formula_leading_labels(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """A workspace name is attacker-controlled and lands verbatim in `label`.
+
+    Any authenticated user can create a workspace, so `=HYPERLINK(...)` in a
+    name would execute when an admin opens the export. Every formula-leading
+    cell must be single-quote prefixed; numeric cells must not be.
+    """
+    owner = User(
+        email="csv-injection@example.com",
+        username="csv-injection",
+        password_hash=hash_password("Pass1234"),
+        role="user",
+        is_active=True,
+    )
+    test_db.add(owner)
+    await test_db.flush()
+    ws = Workspace(name='=HYPERLINK("x")', owner_id=owner.id)
+    test_db.add(ws)
+    await test_db.flush()
+    test_db.add(Query(
+        workspace_id=ws.id,
+        user_id=owner.id,
+        query_text="q",
+        model_used="qwen3:4b",
+        token_count=10,
+        prompt_tokens=5,
+        # Negative on purpose: the rendered number must stay unprefixed, since
+        # a leading "-" is only dangerous on a *string* cell.
+        latency_ms=-5,
+        cache_hit_count=0,
+        created_at=datetime.now(timezone.utc),
+    ))
+    await test_db.commit()
+
+    resp = await client.get("/api/admin/usage/export?format=csv&group_by=workspace", headers=admin_headers)
+    assert resp.status_code == 200
+
+    rows = list(csv.reader(io.StringIO(resp.text)))
+    header, row = rows[0], next(r for r in rows[1:] if r[0] == ws.id)
+    assert row[header.index("label")] == '\'=HYPERLINK("x")'
+    assert row[header.index("avg_latency_ms")] == "-5.0"
+    # The workspace id is a plain uuid; nothing else may gain a stray quote.
+    assert row[header.index("key")] == ws.id

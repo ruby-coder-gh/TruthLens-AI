@@ -7,17 +7,41 @@ from io import StringIO
 from typing import Any, Iterable, Sequence
 
 
+# Characters that make a spreadsheet treat a cell as a formula. Excel,
+# LibreOffice and Google Sheets all evaluate these on load, and quoting does not
+# help — the consumer strips the CSV quotes before parsing the cell.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_cell(value: Any) -> Any:
+    """Defuse a formula-leading *string* cell by prefixing a single quote.
+
+    OWASP CSV-injection guidance. Only `str` values are touched: a number
+    rendered from an `int`/`float` (a negative cost or latency, say) is produced
+    by this application, not by a user, and prefixing it would corrupt the
+    column for every legitimate consumer.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
+
 def rows_to_csv(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> str:
     """Render tabular rows to a CSV string via the stdlib `csv` module.
 
     Uses `csv.writer`'s standard quoting rules, so values containing commas,
     double-quotes, or newlines are escaped correctly (quoted, with embedded
     quotes doubled) and round-trip cleanly through `csv.reader`.
+
+    Formula-leading string cells are neutralised here rather than at each call
+    site, so every export inherits it: several columns (workspace names,
+    usernames, audit `details`) carry text a low-privileged user chose, and the
+    reader is an admin.
     """
     buffer = StringIO()
     writer = csv.writer(buffer)
     writer.writerow(headers)
-    writer.writerows(rows)
+    writer.writerows([_neutralize_cell(cell) for cell in row] for row in rows)
     return buffer.getvalue()
 
 
