@@ -308,3 +308,140 @@ async def test_admin_golden_endpoints_reject_non_admins(
 
     assert listing.status_code == 403
     assert removal.status_code == 403
+
+
+# ─── Fix round 1 ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_abstentions_are_excluded_from_the_review_queue(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    """A gated abstention scores trust 0.0 but is a *correct* refusal, not a
+    low-confidence answer — it must not flood the human review queue."""
+    workspace_id = await _workspace(client, auth_headers, "Abstain queue workspace")
+    abstained = Query(
+        workspace_id=workspace_id,
+        query_text="Who signed the 1994 lease?",
+        response_text="I cannot find this information in your documents.",
+        response_sources="[]",
+        trust_score=0.0,
+        model_used="abstain",
+        edge_case="insufficient_evidence",
+    )
+    low_trust = Query(
+        workspace_id=workspace_id,
+        query_text="What is the PTO carryover limit?",
+        response_text="Maybe five days?",
+        response_sources="[]",
+        trust_score=0.2,
+    )
+    test_db.add_all([abstained, low_trust])
+    await test_db.commit()
+    await test_db.refresh(abstained)
+    await test_db.refresh(low_trust)
+
+    queue = await client.get(f"/api/workspaces/{workspace_id}/review-queue", headers=auth_headers)
+    count = await client.get(f"/api/workspaces/{workspace_id}/review-queue/count", headers=auth_headers)
+
+    assert [item["id"] for item in queue.json()["data"]] == [low_trust.id]
+    assert queue.json()["meta"]["total"] == 1
+    assert count.json()["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_promoting_an_abstention_requires_an_explicit_reference_answer(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    """The abstention body embeds volatile counts ("Searched 5 chunks... score
+    0.02") — baking that into a golden reference would fail on every re-index."""
+    workspace_id = await _workspace(client, auth_headers, "Abstain promote workspace")
+    query = await _query(
+        test_db,
+        workspace_id,
+        response_text="I cannot find this information in your documents. Searched 5 chunks across 2 documents; best evidence score 0.02.",
+        edge_case="insufficient_evidence",
+    )
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "unanswerable"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+    assert (await test_db.execute(select(GoldenEntryRow))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_an_abstention_can_be_promoted_with_a_reviewer_written_answer(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    """Abstentions are exactly the questions worth capturing as unanswerable
+    golden entries — with the reviewer's own wording."""
+    workspace_id = await _workspace(client, auth_headers, "Abstain promote ok workspace")
+    query = await _query(
+        test_db,
+        workspace_id,
+        response_text="I cannot find this information in your documents. Searched 5 chunks across 2 documents; best evidence score 0.02.",
+        edge_case="insufficient_evidence",
+    )
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={
+            "category": "unanswerable",
+            "reference_answer": "This question cannot be answered from the available documents.",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["reference_answer"] == "This question cannot be answered from the available documents."
+    assert response.json()["expected_grounding"] is False
+
+
+@pytest.mark.asyncio
+async def test_promoting_an_abstention_rejects_a_blank_reference_answer(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    workspace_id = await _workspace(client, auth_headers, "Abstain blank workspace")
+    query = await _query(test_db, workspace_id, edge_case="insufficient_evidence")
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "unanswerable", "reference_answer": "   "},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_promotion_losing_the_unique_race_gets_409(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch
+):
+    """The pre-check SELECT cannot see an uncommitted sibling insert; the unique
+    index is the real arbiter, and it must surface as 409 rather than a 500."""
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import AsyncSession as SAAsyncSession
+
+    workspace_id = await _workspace(client, auth_headers, "Race workspace")
+    query = await _query(test_db, workspace_id)
+
+    async def exploding_flush(self, *args, **kwargs):
+        raise IntegrityError(
+            "INSERT INTO golden_entries ...",
+            {},
+            Exception("UNIQUE constraint failed: golden_entries.source_query_id"),
+        )
+
+    monkeypatch.setattr(SAAsyncSession, "flush", exploding_flush)
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 409

@@ -124,3 +124,52 @@ async def test_golden_counts_reports_builtin_and_promoted_totals(test_db: AsyncS
     counts = await golden_counts(test_db)
 
     assert counts == {"builtin": _builtin_count(), "promoted": 1, "total": _builtin_count() + 1}
+
+
+# ─── Fix round 1: builtin-hash memoization ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_builtin_dataset_file_is_hashed_once_per_mtime(test_db: AsyncSession, monkeypatch):
+    """golden_set_version() runs inside async request handlers; re-reading and
+    SHA-1'ing the ~60 KB dataset file on every call is pure waste."""
+    from pathlib import Path
+
+    from app.evaluation import golden_store
+
+    golden_store._builtin_digest_cache.clear()
+    reads: list[str] = []
+    original_read_bytes = Path.read_bytes
+
+    def counting_read_bytes(self):
+        reads.append(str(self))
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+    first = await golden_store.golden_set_version(test_db)
+    second = await golden_store.golden_set_version(test_db)
+    await golden_store.golden_set_version(test_db)
+
+    assert first == second
+    assert len([r for r in reads if r.endswith("golden_dataset.py")]) == 1
+
+
+@pytest.mark.asyncio
+async def test_editing_the_dataset_file_invalidates_the_memoized_hash(test_db: AsyncSession, monkeypatch):
+    """The cache key includes mtime_ns, so an edited dataset re-hashes."""
+    from app.evaluation import golden_store
+
+    golden_store._builtin_digest_cache.clear()
+    real_path = golden_store._builtin_dataset_path()
+    baseline = await golden_store.golden_set_version(test_db)
+
+    class _FakeStat:
+        st_mtime_ns = 1
+
+    original_stat = type(real_path).stat
+    monkeypatch.setattr(type(real_path), "stat", lambda self, **kw: _FakeStat() if self == real_path else original_stat(self, **kw))
+    monkeypatch.setattr(type(real_path), "read_bytes", lambda self: b"edited dataset")
+
+    assert await golden_store.golden_set_version(test_db) != baseline
+    golden_store._builtin_digest_cache.clear()

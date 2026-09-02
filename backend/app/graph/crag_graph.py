@@ -17,7 +17,9 @@ from app.retrieval.query_rewrite import rewrite as rewrite_query, expand
 from app.retrieval.reranker import rerank
 from app.retrieval.sufficiency import (
     ABSTAIN_MODEL_NAME,
+    ABSTAIN_TRUST_SCORE,
     EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    abstention_trust_components,
     assess_sufficiency,
     build_abstention,
 )
@@ -160,10 +162,16 @@ async def _generate_primary_node(state: CRAGState) -> dict:
 
 
 async def _abstain_node(state: CRAGState) -> dict:
-    """Structured refusal for the zero-context case — no LLM call at all."""
+    """Structured refusal for the zero-context case — no LLM call at all.
+
+    Terminal, with trust pinned to 0.0: routing through _trust_score_node would
+    let compute_trust read the synthesised guardrail pass as faithfulness 1.0
+    and return ~0.55 for an answer backed by nothing.
+    """
     verdict = assess_sufficiency(state.get("contexts") or [])
     return {
         "response_text": build_abstention(verdict),
+        "cited_spans": [],
         "model_used": ABSTAIN_MODEL_NAME,
         "latency_ms": 0,
         "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
@@ -173,6 +181,8 @@ async def _abstain_node(state: CRAGState) -> dict:
             "unsupported_claims": [],
             "details": "Abstained before generation: insufficient evidence.",
         },
+        "trust_score": ABSTAIN_TRUST_SCORE,
+        "trust_components": abstention_trust_components(verdict),
     }
 
 
@@ -315,7 +325,7 @@ def build_crag_graph() -> CompiledStateGraph:
         },
     )
 
-    workflow.add_edge("abstain", "trust_score")
+    workflow.add_edge("abstain", END)
 
     workflow.add_conditional_edges(
         "expand_query",

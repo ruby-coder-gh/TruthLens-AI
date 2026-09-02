@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,10 +24,32 @@ from evaluation.golden_dataset import GoldenEntry, get_golden_dataset
 
 _VERSION_HASH_LENGTH = 12
 
+# Memoized SHA-1 state for the builtin dataset file, keyed by (path, mtime_ns).
+# golden_set_version() is called from async request handlers; re-reading and
+# hashing the ~60 KB module on every call is pure waste, and the file only
+# changes when someone edits the source. Hash objects are copied out so callers
+# can keep updating them with the promoted ids.
+_builtin_digest_cache: dict[tuple[str, int], Any] = {}
+_MAX_CACHED_DIGESTS = 4
+
 
 def _builtin_dataset_path() -> Path:
     """Path to the hard-coded dataset module (``backend/evaluation/golden_dataset.py``)."""
     return Path(__file__).resolve().parents[2] / "evaluation" / "golden_dataset.py"
+
+
+def _builtin_digest() -> Any:
+    """A fresh SHA-1 hash object preloaded with the builtin dataset file bytes."""
+    path = _builtin_dataset_path()
+    key = (str(path), path.stat().st_mtime_ns)
+    digest = _builtin_digest_cache.get(key)
+    if digest is None:
+        if len(_builtin_digest_cache) >= _MAX_CACHED_DIGESTS:
+            # Only grows when the file is edited (dev/tests); never unbounded.
+            _builtin_digest_cache.clear()
+        digest = hashlib.sha1(path.read_bytes())
+        _builtin_digest_cache[key] = digest
+    return digest.copy()
 
 
 def _to_golden_entry(row: GoldenEntryRow) -> GoldenEntry:
@@ -74,7 +97,7 @@ async def golden_set_version(db: AsyncSession) -> str:
     ``evaluation.evaluate._golden_set_version()``, so historical EvalRun rows
     stay comparable. Every promotion or deletion changes it.
     """
-    digest = hashlib.sha1(_builtin_dataset_path().read_bytes())
+    digest = _builtin_digest()
     result = await db.execute(select(GoldenEntryRow.id))
     promoted_ids = sorted(result.scalars().all())
     if promoted_ids:

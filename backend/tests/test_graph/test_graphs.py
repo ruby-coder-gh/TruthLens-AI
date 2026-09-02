@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
@@ -134,6 +135,13 @@ class TestQueryGraph:
         assert result["model_used"] == "abstain"
         assert result["cited_spans"] == []
         assert result["guardrail_result"]["passed"] is True
+        assert result["trust_score"] == 0.0
+        assert result["trust_components"] == {
+            "retrieval_quality": 0.02,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
 
     @pytest.mark.asyncio
     async def test_retrieve_node_counts_its_attempts(self, monkeypatch):
@@ -152,6 +160,91 @@ class TestQueryGraph:
         result = await query_graph._retrieve_node(self._state(retrieval_attempts=1))
 
         assert result["retrieval_attempts"] == 2
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_abstains_with_zero_trust_on_weak_evidence(self, monkeypatch):
+        """End-to-end: a weak-evidence run must end at trust 0.0, not at the
+        ~0.55 compute_trust would hand back for a synthesised guardrail pass."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_cache_lookup_node(state):
+            return {"cache_hit": False, "cached_query_id": None, "workspace_document_version": 0}
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return [SimpleNamespace(
+                chunk_id="c1", document_id="d1", content="unrelated text",
+                score=0.02, final_score=0.02, rerank_score=0.02, metadata={"document_name": "Doc"},
+            )]
+
+        async def fake_rerank(query, results, top_k=None):
+            return results
+
+        async def never_generate(*args, **kwargs):
+            raise AssertionError("generation must not run when the gate abstains")
+
+        monkeypatch.setattr(query_graph, "_cache_lookup_node", fake_cache_lookup_node)
+        monkeypatch.setattr(query_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(query_graph, "generate_answer", never_generate)
+
+        graph = query_graph.build_query_graph()
+        final = await graph.ainvoke(self._state(query="who signed the 1994 lease"))
+
+        assert final["edge_case"] == "insufficient_evidence"
+        assert final["model_used"] == "abstain"
+        assert final["trust_score"] == 0.0
+        assert final["trust_components"] == {
+            "retrieval_quality": 0.02,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
+        assert final["response_text"].startswith("I cannot find this information in your documents.")
+
+    @pytest.mark.asyncio
+    async def test_compiled_graph_still_reaches_generation_on_strong_evidence(self, monkeypatch):
+        """The abstain edge must not short-circuit the normal path."""
+        import app.graph.query_graph as query_graph
+
+        async def fake_cache_lookup_node(state):
+            return {"cache_hit": False, "cached_query_id": None, "workspace_document_version": 0}
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return [SimpleNamespace(
+                chunk_id="c1", document_id="d1", content="the answer",
+                score=0.93, final_score=0.93, rerank_score=0.93, metadata={"document_name": "Doc"},
+            )]
+
+        async def fake_rerank(query, results, top_k=None):
+            return results
+
+        async def fake_generate(gen_input):
+            return SimpleNamespace(text="Alice signed it.", cited_spans=[], model_used="qwen3:4b", latency_ms=7)
+
+        async def fake_guardrail(answer, contexts):
+            from app.generation.guardrail import GuardrailResult
+            return GuardrailResult(passed=True, score=0.9, unsupported_claims=[], details="ok")
+
+        monkeypatch.setattr(query_graph, "_cache_lookup_node", fake_cache_lookup_node)
+        monkeypatch.setattr(query_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(query_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(query_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(query_graph, "generate_answer", fake_generate)
+        monkeypatch.setattr(query_graph, "guardrail_check", fake_guardrail)
+
+        graph = query_graph.build_query_graph()
+        final = await graph.ainvoke(self._state(query="who signed it"))
+
+        assert final.get("edge_case") is None
+        assert final["response_text"] == "Alice signed it."
+        assert final["trust_score"] > 0.0
 
 
 class TestCRAGGraph:
@@ -294,6 +387,74 @@ class TestCRAGGraph:
         assert result["response_text"].startswith("I cannot find this information in your documents.")
         assert result["edge_case"] == "insufficient_evidence"
         assert result["model_used"] == "abstain"
+        assert result["cited_spans"] == []
+        assert result["trust_score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_compiled_crag_graph_abstains_with_zero_trust(self, monkeypatch):
+        """End-to-end: empty retrieval ends at trust 0.0 without the relaxed
+        fallback LLM ever being constructed."""
+        import app.graph.crag_graph as crag_graph
+        import app.generation.provider as provider
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k=None, filters=None):
+            return []
+
+        async def fake_rerank(query, results, top_k=None):
+            return []
+
+        async def never_generate(*args, **kwargs):
+            raise AssertionError("primary generation must not run when the gate abstains")
+
+        def never_fallback_llm(*args, **kwargs):
+            raise AssertionError("fallback LLM must not run with zero contexts")
+
+        monkeypatch.setattr(crag_graph, "rewrite_query", fake_rewrite)
+        monkeypatch.setattr(crag_graph, "hybrid_search", fake_hybrid_search)
+        monkeypatch.setattr(crag_graph, "rerank", fake_rerank)
+        monkeypatch.setattr(crag_graph, "generate_answer", never_generate)
+        monkeypatch.setattr(provider, "get_chat_llm", never_fallback_llm)
+
+        graph = crag_graph.build_crag_graph()
+        final = await graph.ainvoke({
+            "query": "who signed the 1994 lease",
+            "rewritten_query": None,
+            "workspace_id": "w",
+            "user_id": None,
+            "query_id": "q",
+            "top_k": 5,
+            "filters": None,
+            "retrieval_results": None,
+            "reranked_results": None,
+            "contexts": None,
+            "response_text": None,
+            "cited_spans": None,
+            "guardrail_result": None,
+            "guardrail_retry_count": 0,
+            "guardrail_max_retries": 3,
+            "trust_score": None,
+            "trust_components": None,
+            "retrieval_attempts": 0,
+            "max_retrieval_attempts": 1,
+            "edge_case": None,
+            "model_used": "m",
+            "latency_ms": 0,
+            "error": None,
+        })
+
+        assert final["edge_case"] == "insufficient_evidence"
+        assert final["model_used"] == "abstain"
+        assert final["trust_score"] == 0.0
+        assert final["trust_components"] == {
+            "retrieval_quality": 0.0,
+            "faithfulness": 0.0,
+            "relevance": 0.0,
+            "source_authority": 0.0,
+        }
+        assert final["response_text"].startswith("I cannot find this information in your documents.")
 
     @pytest.mark.asyncio
     async def test_guardrail_decision_passed(self):

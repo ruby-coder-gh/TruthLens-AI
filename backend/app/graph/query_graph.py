@@ -19,7 +19,9 @@ from app.retrieval.query_rewrite import rewrite as rewrite_query
 from app.retrieval.reranker import rerank
 from app.retrieval.sufficiency import (
     ABSTAIN_MODEL_NAME,
+    ABSTAIN_TRUST_SCORE,
     EDGE_CASE_INSUFFICIENT_EVIDENCE,
+    abstention_trust_components,
     assess_sufficiency,
     build_abstention,
 )
@@ -236,8 +238,9 @@ async def _abstain_node(state: GraphState) -> dict:
     """Answer "I don't know" without spending a generation call.
 
     Reached when retrieval never produced evidence above the sufficiency floor.
-    The guardrail result is synthesised as a pass: nothing was asserted, so
-    there is nothing unsupported to catch downstream.
+    The guardrail result is synthesised as a pass (nothing was asserted, so
+    there is nothing unsupported to catch) and the trust score is pinned to 0.0
+    rather than computed, matching the WebSocket abstain path exactly.
     """
     verdict = assess_sufficiency(state.get("contexts") or [])
     logger.info(
@@ -259,6 +262,11 @@ async def _abstain_node(state: GraphState) -> dict:
             "unsupported_claims": [],
             "details": "Abstained before generation: insufficient evidence.",
         },
+        # Terminal: routing through _trust_score_node would let compute_trust
+        # read the synthesised guardrail pass as faithfulness 1.0 and return
+        # ~0.55 for an answer with zero evidence.
+        "trust_score": ABSTAIN_TRUST_SCORE,
+        "trust_components": abstention_trust_components(verdict),
     }
 
 
@@ -319,9 +327,9 @@ def build_query_graph() -> CompiledStateGraph:
         },
     )
     workflow.add_edge("generate", "guardrail")
-    # Abstention skips the guardrail (it synthesises its own pass) but still
-    # gets a trust score so callers see a uniform result shape.
-    workflow.add_edge("abstain", "trust_score")
+    # Abstention is terminal: it carries its own guardrail result and trust
+    # score, so neither downstream node has anything left to decide.
+    workflow.add_edge("abstain", END)
     workflow.add_edge("guardrail", "trust_score")
     workflow.add_edge("trust_score", END)
 

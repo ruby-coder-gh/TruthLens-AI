@@ -31,6 +31,11 @@ REFUSAL_PREFIX = "I cannot find this information in your documents."
 
 ABSTAIN_MODEL_NAME = "abstain"
 
+# An abstention asserts nothing, so it carries no trust in an answer. Pinned
+# here (rather than derived via compute_trust, which would score a
+# synthesised guardrail pass at ~0.55) so every code path agrees.
+ABSTAIN_TRUST_SCORE = 0.0
+
 # Score keys in preference order. rerank() writes rerank_score for every result
 # (falling back to the hybrid score when the cross-encoder errors); cached and
 # graph contexts may carry only final_score/score.
@@ -174,8 +179,8 @@ def _abstention_frames(query_id: str, verdict: SufficiencyVerdict, answer: str, 
             "type": "trust_score",
             "payload": {
                 "query_id": query_id,
-                "score": 0.0,
-                "components": _trust_components(verdict),
+                "score": ABSTAIN_TRUST_SCORE,
+                "components": abstention_trust_components(verdict),
             },
         },
         {
@@ -193,8 +198,13 @@ def _abstention_frames(query_id: str, verdict: SufficiencyVerdict, answer: str, 
     ]
 
 
-def _trust_components(verdict: SufficiencyVerdict) -> dict[str, float]:
-    """Trust breakdown for an abstention: retrieval quality only, nothing generated."""
+def abstention_trust_components(verdict: SufficiencyVerdict) -> dict[str, float]:
+    """Trust breakdown for an abstention: retrieval quality only, nothing generated.
+
+    Public because both LangGraph abstain nodes need it: they bypass
+    ``_trust_score_node`` entirely rather than let ``compute_trust`` infer a
+    mid-range score from a guardrail pass that was synthesised, not earned.
+    """
     return {
         "retrieval_quality": round(verdict.top_score, 4),
         "faithfulness": 0.0,
@@ -234,8 +244,8 @@ def maybe_abstain(
             # No sources: nothing retrieved cleared the evidence floor, so
             # showing citations would imply support that does not exist.
             "response_sources": [],
-            "trust_score": 0.0,
-            "trust_components": _trust_components(verdict),
+            "trust_score": ABSTAIN_TRUST_SCORE,
+            "trust_components": abstention_trust_components(verdict),
             "guardrail_score": 1.0,
             "guardrail_passed": True,
             "model_used": ABSTAIN_MODEL_NAME,

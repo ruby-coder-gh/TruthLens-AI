@@ -8,11 +8,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db, require_workspace_editor
-from app.core.exceptions import ConflictException, InvalidInputException, NotFoundException
+from app.core.exceptions import AppException, ConflictException, InvalidInputException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.golden_entry import GoldenEntry
 from app.models.query import Query
@@ -77,6 +78,10 @@ def _eligible_filters(workspace_id: str) -> list[Any]:
         Query.trust_score.is_not(None),
         Query.trust_score < settings.REVIEW_QUEUE_TRUST_THRESHOLD,
         Query.review_status == "needs_review",
+        # A gated abstention scores 0.0 by construction but is a *correct*
+        # refusal, not a low-confidence answer. Reviewing it teaches nothing, so
+        # it must not drown the queue.
+        Query.edge_case.is_(None),
     ]
 
 
@@ -227,7 +232,18 @@ async def promote_query_to_golden_set(
     if existing:
         raise ConflictException("This answer has already been promoted to the golden set")
 
-    reference_answer = (payload.reference_answer or query.response_text or "").strip()
+    supplied_answer = (payload.reference_answer or "").strip()
+    if query.edge_case and not supplied_answer:
+        # The abstention body embeds volatile retrieval counts ("Searched 5
+        # chunks across 2 documents; best evidence score 0.02"), which would
+        # break the moment the corpus is re-indexed. The reviewer must write the
+        # reference answer themselves.
+        raise AppException(
+            "REFERENCE_ANSWER_REQUIRED",
+            "This answer was an abstention; supply an explicit reference_answer to promote it",
+            status_code=422,
+        )
+    reference_answer = supplied_answer or (query.response_text or "").strip()
     if not reference_answer:
         raise InvalidInputException("A reference answer is required to promote this query")
 
@@ -246,7 +262,14 @@ async def promote_query_to_golden_set(
         created_by=current_user.id,
     )
     db.add(entry)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # The pre-check SELECT cannot see a concurrent, uncommitted sibling
+        # insert; uq_golden_entries_source_query decides. Report it as the same
+        # 409 rather than a 500.
+        await db.rollback()
+        raise ConflictException("This answer has already been promoted to the golden set")
     await db.refresh(entry)
     db.add(AuditLog(
         user_id=current_user.id,
