@@ -62,6 +62,7 @@ const ERROR_TITLES: Record<string, string> = {
   auth_error: 'Authentication error',
   auth_expired: 'Session expired',
   RESUME_UNAVAILABLE: 'Answer no longer available',
+  stream_ended: 'Answer incomplete',
 };
 
 /** Codes whose recovery hint is "reconnect or start over". */
@@ -311,7 +312,9 @@ export default function ChatPage() {
                     ...m,
                     status: 'complete' as const,
                     reconnectAttempt: null,
-                    queryId: result.query_id,
+                    // The `ack` id is authoritative; never clobber it with an
+                    // empty one.
+                    queryId: result.query_id || m.queryId,
                     latencyMs: result.latency_ms,
                     modelUsed: result.model_used,
                     tokenCount: result.token_count,
@@ -367,6 +370,40 @@ export default function ChatPage() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId ? { ...m, reconnectAttempt: null } : m,
+            ),
+          );
+        },
+
+        // The server accepted the query — learn its id now rather than waiting
+        // for `complete`, which a dropped stream may never deliver.
+        onAck: (ackQueryId: string) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, queryId: ackQueryId } : m,
+            ),
+          );
+        },
+
+        // The buffered stream expired and the query is being re-run, so the
+        // answer on screen is stale. Every field below is *appended* to as the
+        // stream arrives — without this reset the re-run's answer would be
+        // concatenated onto the old partial one and sources would be doubled.
+        onStreamRestart: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    content: '',
+                    sources: [],
+                    guardrail: null,
+                    trustScore: null,
+                    trustComponents: {},
+                    servedFromCache: false,
+                    queryId: null,
+                    error: null,
+                  }
+                : m,
             ),
           );
         },

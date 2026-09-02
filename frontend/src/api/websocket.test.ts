@@ -98,6 +98,8 @@ function makeCallbacks() {
     onReconnecting: vi.fn<CB['onReconnecting']>(),
     onReconnected: vi.fn<CB['onReconnected']>(),
     onStreamEnd: vi.fn<CB['onStreamEnd']>(),
+    onStreamRestart: vi.fn<CB['onStreamRestart']>(),
+    onAck: vi.fn<CB['onAck']>(),
   };
 }
 
@@ -146,6 +148,7 @@ describe('api/websocket — QueryWebSocket reconnect + resume', () => {
       },
     ]);
     expect(cb.onToken).toHaveBeenCalledWith('Hel');
+    expect(cb.onAck).toHaveBeenCalledWith('q-42');
     expect(cb.onReconnecting).not.toHaveBeenCalled();
   });
 
@@ -231,6 +234,14 @@ describe('api/websocket — QueryWebSocket reconnect + resume', () => {
     const revived = lastSocket();
     revived.serverOpen();
     revived.serverSend({ type: 'auth_success' });
+
+    // ChatPage appends tokens, so the restart signal has to reach it *before*
+    // the re-run's first token, i.e. before the `query` frame goes out.
+    let sentAtRestart = -1;
+    cb.onStreamRestart.mockImplementation(() => {
+      sentAtRestart = revived.sent.length;
+    });
+
     revived.serverSend({
       type: 'error',
       payload: {
@@ -239,6 +250,9 @@ describe('api/websocket — QueryWebSocket reconnect + resume', () => {
         query_id: 'q-42',
       },
     });
+
+    expect(cb.onStreamRestart).toHaveBeenCalledTimes(1);
+    expect(sentAtRestart).toBe(1); // only the `resume` frame had been sent
 
     expect(revived.frames()).toEqual([
       { type: 'resume', payload: { query_id: 'q-42', last_seq: 2 } },
@@ -391,6 +405,119 @@ describe('api/websocket — QueryWebSocket reconnect + resume', () => {
 
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(cb.onReconnecting).not.toHaveBeenCalled();
+  });
+
+  it('falls back again on a later, unrelated RESUME_UNAVAILABLE', async () => {
+    const { cb, socket } = startStream();
+
+    // Episode 1 — buffer gone, re-run the query, stream picks back up.
+    socket.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    const second = lastSocket();
+    second.serverOpen();
+    second.serverSend({ type: 'auth_success' });
+    second.serverSend({ type: 'error', payload: { code: 'RESUME_UNAVAILABLE', message: 'gone' } });
+    second.serverSend({ type: 'ack', seq: 1, payload: { query_id: 'q-99' } });
+    second.serverSend({ type: 'token', seq: 2, payload: { token: 'new' } });
+
+    // Episode 2 — a fresh drop refills the once-only fallback budget.
+    second.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    const third = lastSocket();
+    third.serverOpen();
+    third.serverSend({ type: 'auth_success' });
+    third.serverSend({ type: 'error', payload: { code: 'RESUME_UNAVAILABLE', message: 'gone again' } });
+
+    expect(third.frames()).toEqual([
+      { type: 'resume', payload: { query_id: 'q-99', last_seq: 2 } },
+      {
+        type: 'query',
+        payload: { workspace_id: 'ws-1', query: 'Why is the sky blue?', conversation_id: 'conv-1' },
+      },
+    ]);
+    expect(cb.onStreamRestart).toHaveBeenCalledTimes(2);
+    expect(cb.onError).not.toHaveBeenCalled();
+  });
+
+  it('drops replayed frames at or below the last rendered seq', async () => {
+    const { cb, socket } = startStream(); // rendered through seq 2
+
+    socket.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    const revived = lastSocket();
+    revived.serverOpen();
+    revived.serverSend({ type: 'auth_success' });
+
+    // An overlapping replay: seq 2 is already on screen, seq 3 is new.
+    revived.serverSend({ type: 'token', seq: 2, payload: { token: 'Hel' } });
+    revived.serverSend({ type: 'token', seq: 3, payload: { token: 'lo' } });
+
+    expect(cb.onToken.mock.calls.map(([t]) => t)).toEqual(['Hel', 'lo']);
+  });
+
+  it('reports stream_ended when a finished buffer replays without a terminal frame', async () => {
+    const { cb, socket } = startStream();
+
+    socket.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    const revived = lastSocket();
+    revived.serverOpen();
+    revived.serverSend({ type: 'auth_success' });
+    revived.serverSend({ type: 'token', seq: 3, payload: { token: 'lo' } });
+    revived.serverSend({
+      type: 'resumed',
+      payload: { query_id: 'q-42', from_seq: 2, replayed: 1, live: false },
+    });
+
+    // Badge cleared, but the stream is over with no `complete` — say so, or the
+    // composer stays locked.
+    expect(cb.onReconnected).toHaveBeenCalledTimes(1);
+    expect(cb.onError).toHaveBeenCalledWith('stream_ended', 'Stream ended without completion');
+
+    revived.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('stays quiet when a finished buffer replays its own terminal frame', async () => {
+    const { cb, socket } = startStream();
+
+    socket.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    const revived = lastSocket();
+    revived.serverOpen();
+    revived.serverSend({ type: 'auth_success' });
+    revived.serverSend({ type: 'token', seq: 3, payload: { token: 'lo' } });
+    revived.serverSend({
+      type: 'complete',
+      seq: 4,
+      payload: {
+        query_id: 'q-42',
+        latency_ms: 900,
+        model_used: 'qwen3:4b',
+        token_count: 2,
+        from_cache: false,
+      },
+    });
+    revived.serverSend({
+      type: 'resumed',
+      payload: { query_id: 'q-42', from_seq: 2, replayed: 2, live: false },
+    });
+
+    expect(cb.onComplete).toHaveBeenCalledTimes(1);
+    expect(cb.onError).not.toHaveBeenCalled();
+  });
+
+  it('ignores a cancel_ack frame', () => {
+    const { cb, socket } = startStream();
+
+    // Sent when `cancel` arrives with no stream running: no seq, not an error.
+    socket.serverSend({ type: 'cancel_ack', payload: { query_id: 'q-42', cancelled: false } });
+
+    expect(cb.onError).not.toHaveBeenCalled();
+    expect(cb.onComplete).not.toHaveBeenCalled();
+    expect(cb.onStreamEnd).not.toHaveBeenCalled();
+    expect(cb.onStreamRestart).not.toHaveBeenCalled();
   });
 
   it('does not reconnect after a terminal stream error or a user cancel', async () => {

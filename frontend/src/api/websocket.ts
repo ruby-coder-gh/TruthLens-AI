@@ -27,6 +27,15 @@ export interface QueryWebSocketCallbacks {
   onReconnected?: () => void;
   /** Generation finished emitting tokens (the `complete` frame still follows). */
   onStreamEnd?: () => void;
+  /**
+   * The buffered stream could not be resumed, so the query is being re-run from
+   * scratch. Everything already rendered for this answer is stale and must be
+   * discarded — consumers append tokens and sources, so skipping this would
+   * concatenate the new answer onto the old partial one.
+   */
+  onStreamRestart?: () => void;
+  /** The server accepted the query and minted `queryId` for it. */
+  onAck?: (queryId: string) => void;
 }
 
 /** Raw source object as delivered inside a `sources` message payload. */
@@ -116,6 +125,8 @@ export class QueryWebSocket {
   private userInitiated = false;
   /** True once the stream reached a terminal state; nothing left to resume. */
   private finished = false;
+  /** True once the server sent a terminal frame (`complete` or a fatal `error`). */
+  private terminalSeen = false;
   /** True between a dropped socket and the reconnect being confirmed. */
   private reconnecting = false;
   private reconnectAttempts = 0;
@@ -317,6 +328,9 @@ export class QueryWebSocket {
     if (!this.reconnecting) return;
     this.reconnecting = false;
     this.reconnectAttempts = 0;
+    // The budgets are per drop episode: a stream that recovered gets a full
+    // set of retries, and a fresh fallback, if it drops again later.
+    this.resumeFallbackUsed = false;
     this.callbacks.onReconnected?.();
   }
 
@@ -339,6 +353,9 @@ export class QueryWebSocket {
     this.resumeFallbackUsed = true;
     this.queryId = null;
     this.lastSeq = 0;
+    // Must precede the re-send: the answer already on screen belongs to a
+    // stream that no longer exists, and the re-run replays it from the top.
+    this.callbacks.onStreamRestart?.();
     this.sendQuery();
   }
 
@@ -348,9 +365,14 @@ export class QueryWebSocket {
     const payload: WSMessagePayload = msg.payload ?? {};
 
     // Track the replay high-water mark. Only stream frames carry `seq`;
-    // connection-level frames must not move it.
+    // connection-level frames (`auth_success`, `resumed`, `cancel_ack`,
+    // pre-stream errors) carry none and must not move it.
     if (typeof msg.seq === 'number') {
-      this.lastSeq = msg.seq;
+      // The server replays `seq > last_seq`, but an overlapping replay must
+      // never double-append tokens or sources. `ack` is exempt because it only
+      // records the (idempotent) query id.
+      if (msg.seq <= this.lastSeq && msg.type !== 'ack') return;
+      this.lastSeq = Math.max(this.lastSeq, msg.seq);
     }
 
     switch (msg.type) {
@@ -415,6 +437,7 @@ export class QueryWebSocket {
 
       case 'complete': {
         this.finished = true;
+        this.terminalSeen = true;
         this.callbacks.onComplete?.({
           query_id: payload.query_id ?? '',
           latency_ms: payload.latency_ms ?? 0,
@@ -438,6 +461,7 @@ export class QueryWebSocket {
         if (code === 'UNAUTHORIZED') break;
 
         this.finished = true;
+        this.terminalSeen = true;
         this.callbacks.onError?.(code, payload.message ?? 'Unknown error');
         break;
       }
@@ -452,6 +476,7 @@ export class QueryWebSocket {
         // ask to resume this exact stream.
         if (payload.query_id) {
           this.queryId = payload.query_id;
+          this.callbacks.onAck?.(payload.query_id);
         }
         this.markReconnected();
         break;
@@ -459,10 +484,17 @@ export class QueryWebSocket {
 
       case 'resumed': {
         // Sent *after* the replayed frames — the "replay flushed" marker.
-        if (payload.live === false) {
+        const exhausted = payload.live === false;
+        if (exhausted) {
           this.finished = true;
         }
         this.markReconnected();
+        // The buffer was already done and the replay carried no `complete` or
+        // fatal `error`. Nothing further will arrive for this query_id, so say
+        // so explicitly — otherwise the consumer waits on a stream forever.
+        if (exhausted && !this.terminalSeen) {
+          this.callbacks.onError?.('stream_ended', 'Stream ended without completion');
+        }
         break;
       }
 
