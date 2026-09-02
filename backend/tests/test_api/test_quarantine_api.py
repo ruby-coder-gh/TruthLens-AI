@@ -241,7 +241,7 @@ class TestQuarantineReleaseEndpoint:
             embed_calls.append(chunks)
             return [EmbeddingResult(chunk_id=c.id, embedding=np.zeros(4, dtype=np.float32), metadata={}) for c in chunks]
 
-        async def fake_store(chunks, embeddings, workspace_id, document_id):
+        async def fake_store(chunks, embeddings, workspace_id, document_id, session=None):
             store_calls.append({"chunks": chunks, "workspace_id": workspace_id, "document_id": document_id})
             return len(chunks)
 
@@ -438,7 +438,7 @@ class TestReleaseAtomicity:
             embed_calls.append(chunks)
             return []
 
-        async def fake_store(chunks, embeddings, workspace_id, document_id):
+        async def fake_store(chunks, embeddings, workspace_id, document_id, session=None):
             store_calls.append(chunks)
             return len(chunks)
 
@@ -460,6 +460,51 @@ class TestReleaseAtomicity:
         await test_db.refresh(doc)
         assert doc.quarantined_chunk_count == 0
 
+    async def test_release_compensates_vector_writes_when_the_commit_fails(
+        self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch
+    ):
+        """A release that dies after `store()` must not leave the chunk retrievable.
+
+        `store()` compensates its own ChromaDB/BM25 writes when its DB step
+        fails, but once it returns, those writes are durable while the request
+        transaction is not yet committed. If the commit then fails, the
+        endpoint must remove exactly this chunk from both indexes — otherwise
+        the text a reviewer is still holding in quarantine is answerable.
+        """
+        from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
+        workspace_id, doc = await _make_workspace_and_document(client, auth_headers, test_db)
+        record = await _seed_quarantine_row(test_db, workspace_id, doc.id)
+        removed: list[tuple[str, str, list[int]]] = []
+
+        async def fake_embed(chunks, document_name=""):
+            return []
+
+        async def fake_store(chunks, embeddings, workspace_id, document_id, session=None):
+            return len(chunks)
+
+        async def fake_remove(workspace_id, document_id, chunk_indexes):
+            removed.append((workspace_id, document_id, list(chunk_indexes)))
+
+        async def failing_commit(self):
+            raise RuntimeError("commit failed after the vectors landed")
+
+        monkeypatch.setattr("app.api.review_queue.embed", fake_embed)
+        monkeypatch.setattr("app.api.review_queue.store", fake_store)
+        monkeypatch.setattr("app.api.review_queue.remove_chunk_vectors", fake_remove)
+        monkeypatch.setattr(_AsyncSession, "commit", failing_commit)
+
+        resp = await client.post(
+            f"/api/workspaces/{workspace_id}/review-queue/quarantine/{record.id}/release",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 502
+        assert removed == [(workspace_id, doc.id, [record.chunk_index])]
+
+        monkeypatch.undo()
+        await test_db.refresh(record)
+        assert record.status == "quarantined"
+
     async def test_release_returns_502_and_rolls_back_when_store_fails(
         self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch
     ):
@@ -470,7 +515,7 @@ class TestReleaseAtomicity:
         async def fake_embed(chunks, document_name=""):
             return []
 
-        async def fake_store(chunks, embeddings, workspace_id, document_id):
+        async def fake_store(chunks, embeddings, workspace_id, document_id, session=None):
             raise RuntimeError("chroma unavailable")
 
         monkeypatch.setattr("app.api.review_queue.embed", fake_embed)
@@ -499,7 +544,7 @@ class TestReleaseAtomicity:
         assert audit == []
 
         # Retry after the transient failure is cleared must succeed cleanly.
-        async def fake_store_ok(chunks, embeddings, workspace_id, document_id):
+        async def fake_store_ok(chunks, embeddings, workspace_id, document_id, session=None):
             return len(chunks)
 
         monkeypatch.setattr("app.api.review_queue.store", fake_store_ok)

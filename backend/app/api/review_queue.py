@@ -19,7 +19,7 @@ from app.evaluation.golden_store import STATUS_APPROVED as GOLDEN_STATUS_APPROVE
 from app.evaluation.golden_store import STATUS_PENDING as GOLDEN_STATUS_PENDING
 from app.ingestion.chunker import ChunkResult, _count_tokens
 from app.ingestion.embedder import embed
-from app.ingestion.indexer import store
+from app.ingestion.indexer import remove_chunk_vectors, store
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.chunk_quarantine import ChunkQuarantine
@@ -400,17 +400,22 @@ async def release_quarantined_chunk(
 ):
     """Re-embed + store a single quarantined chunk and mark it released.
 
-    Idempotent by design: `indexer.store()` opens and commits its *own*
-    session (Chroma + BM25 + the `chunks` row), independently of this
-    request's transaction. If this request fails anywhere after `store()`
-    durably succeeds but before its own commit, a retry must not re-run
-    `store()` (it would crash on `uq_document_index`) — it detects the
-    already-persisted `chunks` row and treats the chunk as already released.
+    Atomic by construction: `store()` is handed *this* request's session, so
+    the `chunks` row, the status flip, the audit row and the count updates are
+    one transaction, committed once here. Previously `store()` opened its own
+    session while this request already held an open write transaction, which
+    on SQLite deadlocked deterministically ("database is locked") — and since
+    ChromaDB and BM25 had already been written by then, the quarantined text
+    became retrievable while the DB still said `quarantined`.
 
-    The status flip + audit + count updates are flushed *before* calling
-    `store()`; if `store()` raises, we return 502 and let the request's
-    session roll back (via `get_db`'s exception handling) so nothing here
-    is left half-applied.
+    ChromaDB and BM25 are not transactional, so the invariant *quarantined ⇒
+    not retrievable* is upheld by compensation: any failure after the vectors
+    are written removes exactly this chunk from both indexes
+    (`remove_chunk_vectors`) before returning 502.
+
+    Still idempotent: if a `chunks` row for this (document, index) already
+    exists, `store()` is skipped — re-running it would crash on
+    `uq_document_index`.
     """
     await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
     record = await _get_quarantine_or_404(db, workspace.id, quarantine_id)
@@ -428,6 +433,15 @@ async def release_quarantined_chunk(
             Chunk.document_id == record.document_id, Chunk.index == record.chunk_index
         )
     )).scalar_one_or_none() is not None
+
+    # Snapshot the identifiers as plain values up front. `db.rollback()` on the
+    # error path below expires every ORM instance, so reading `record.id` after
+    # it would trigger a lazy refresh outside SQLAlchemy's greenlet context and
+    # blow up with MissingGreenlet, masking the real failure.
+    quarantine_id_value = record.id
+    document_id_value = record.document_id
+    chunk_index_value = record.chunk_index
+    workspace_id_value = workspace.id
 
     record.status = "released"
     record.reviewed_by = current_user.id
@@ -450,39 +464,50 @@ async def release_quarantined_chunk(
             "already_stored": already_stored,
         }),
     ))
-    await db.flush()
-
-    if not already_stored:
-        chunk_result = ChunkResult(
-            id=str(uuid.uuid4()),
-            document_id=record.document_id,
-            index=record.chunk_index,
-            content=record.content,
-            token_count=_count_tokens(record.content),
-        )
-        try:
+    # `store()` raises only after having already undone its own ChromaDB/BM25
+    # writes; a failure in the commit below happens with the vectors live, so
+    # that path compensates explicitly.
+    vectors_written = False
+    try:
+        if not already_stored:
+            chunk_result = ChunkResult(
+                id=str(uuid.uuid4()),
+                document_id=record.document_id,
+                index=record.chunk_index,
+                content=record.content,
+                token_count=_count_tokens(record.content),
+            )
             embeddings = await embed([chunk_result], document_name=document.original_filename)
             await store(
                 chunks=[chunk_result],
                 embeddings=embeddings,
                 workspace_id=workspace.id,
                 document_id=record.document_id,
+                session=db,
             )
-        except Exception as exc:
-            logger.error(
-                "chunk_release_store_failed",
-                quarantine_id=record.id,
-                document_id=record.document_id,
-                error=str(exc),
-            )
-            raise AppException(
-                code="RELEASE_STORE_FAILED",
-                message="Failed to store the released chunk in the vector index. "
-                "The chunk remains quarantined; please retry.",
-                status_code=502,
-            ) from exc
+            vectors_written = True
 
-    return QuarantineActionResponse(id=record.id, status=record.status, message="Chunk released and re-indexed")  # type: ignore[arg-type]
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        if vectors_written:
+            await remove_chunk_vectors(
+                workspace_id_value, document_id_value, [chunk_index_value]
+            )
+        logger.error(
+            "chunk_release_store_failed",
+            quarantine_id=quarantine_id_value,
+            document_id=document_id_value,
+            error=str(exc),
+        )
+        raise AppException(
+            code="RELEASE_STORE_FAILED",
+            message="Failed to store the released chunk in the vector index. "
+            "The chunk remains quarantined; please retry.",
+            status_code=502,
+        ) from exc
+
+    return QuarantineActionResponse(id=quarantine_id_value, status="released", message="Chunk released and re-indexed")  # type: ignore[arg-type]
 
 
 @router.post(
