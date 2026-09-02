@@ -351,3 +351,23 @@ async def test_usage_export_neutralises_formula_leading_labels(
     assert row[header.index("avg_latency_ms")] == "-5.0"
     # The workspace id is a plain uuid; nothing else may gain a stray quote.
     assert row[header.index("key")] == ws.id
+
+
+# ─── BUG-2: export audit rows must carry a non-null resource_id ──────
+
+
+@pytest.mark.asyncio
+async def test_usage_export_audit_row_has_non_null_resource_id(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, pricing_configured
+):
+    """`usage.export` rows used to be written with `resource_id=NULL`; every
+    consumer that dereferences the id crashed on them."""
+    await _seed_usage_fixture(test_db)
+
+    resp = await client.get("/api/admin/usage/export?format=csv&group_by=model", headers=admin_headers)
+    assert resp.status_code == 200
+
+    row = (await test_db.execute(select(AuditLog).where(AuditLog.action == "usage.export"))).scalar_one()
+    assert row.resource_type == "usage_report"
+    assert row.resource_id is not None
+    assert row.resource_id != ""

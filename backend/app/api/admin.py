@@ -394,6 +394,11 @@ async def export_audit_logs(
         user_id=current_user.id,
         action="audit.export",
         resource_type="audit_log",
+        # The exported artifact's filename identifies *what* was exported and
+        # keeps `resource_id` non-null, matching every single-resource audit
+        # row. Consumers dereference this column unconditionally, so a NULL
+        # here breaks them.
+        resource_id=filename,
         details=json.dumps({"format": format, "filters": filters_summary, "row_count": len(logs)}),
     ))
 
@@ -1125,6 +1130,8 @@ async def export_usage_report(
         user_id=current_user.id,
         action="usage.export",
         resource_type="usage_report",
+        # See `export_audit_logs`: `resource_id` must never be NULL.
+        resource_id=filename,
         details=json.dumps({
             "group_by": group_by,
             "row_count": len(rows),

@@ -304,3 +304,25 @@ async def test_logs_export_neutralises_a_formula_leading_details_cell(
     row = next(r for r in rows if r[0] == log.id)
     assert row[-1] == "'@SUM(1+1)*cmd|'/C calc'!A0"
     assert row[3] == "query.compare"  # untouched: no formula-leading character
+
+
+# ─── BUG-2: export audit rows must carry a non-null resource_id ──────
+
+
+@pytest.mark.asyncio
+async def test_logs_export_audit_row_has_non_null_resource_id(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """`audit.export` rows used to be written with `resource_id=NULL`, which
+    crashed every consumer that dereferences it (the admin audit-log page did
+    `entry.resource_id.slice(...)`). Match how single-resource audit rows are
+    written: a non-null id identifying what was exported."""
+    await _seed_logs(test_db)
+
+    resp = await client.get("/api/admin/logs/export?format=csv", headers=admin_headers)
+    assert resp.status_code == 200
+
+    row = (await test_db.execute(select(AuditLog).where(AuditLog.action == "audit.export"))).scalar_one()
+    assert row.resource_type == "audit_log"
+    assert row.resource_id is not None
+    assert row.resource_id != ""
