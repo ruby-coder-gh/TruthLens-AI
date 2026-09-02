@@ -8,13 +8,14 @@ import {
   FileDiff,
   GitBranch,
   Plus,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   Trash2,
   XCircle,
   Zap,
 } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, Input, Modal, Select, TextArea } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Modal, Select, TextArea, type BadgeColor } from '../components/ui';
 import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
@@ -40,8 +41,6 @@ const EVAL_POLL_INTERVAL_MS = 15_000;
 const EVAL_POLL_MAX_TRIES = 4;
 
 const PROMPTS_KEY = ['admin', 'prompts'];
-
-type BadgeColor = 'green' | 'orange' | 'red' | 'purple' | 'blue' | 'gray';
 
 const STATUS_COLOR: Record<PromptVersionStatus, BadgeColor> = {
   draft: 'gray',
@@ -183,21 +182,26 @@ function DiffView({ lines }: { lines: DiffLine[] }) {
 
 function MetricChip({ evalSummary, spec }: { evalSummary: PromptEvalSummary; spec: MetricSpec }) {
   const score = scoreOf(evalSummary, spec.key);
-  const threshold = evalSummary.verdict?.thresholds?.[spec.threshold];
+  const verdict = evalSummary.verdict;
+  const threshold = verdict?.thresholds?.[spec.threshold];
 
-  if (score === null) {
+  // A metric reads pass/fail only when the run scored it *and* we know the
+  // threshold it was judged against. An eval row with no verdict (or with a
+  // threshold missing for this metric) gets a neutral chip: rendering green
+  // "pass — min —" would assert an approval that nothing ever computed.
+  if (score === null || !verdict || typeof threshold !== 'number') {
     return (
       <span className="inline-flex items-center rounded-full border border-border bg-card-2 px-2 py-0.5 text-[11px] text-text-dim">
-        {spec.label} not scored
+        {score === null
+          ? `${spec.label} not scored`
+          : `${spec.label} ${formatScore(score)} · no threshold`}
       </span>
     );
   }
 
-  // The backend's verdict is authoritative; the numeric compare is only a
-  // fallback for rows written before a verdict was recorded.
-  const failed = evalSummary.verdict
-    ? evalSummary.verdict.failed_metrics.includes(spec.key)
-    : typeof threshold === 'number' && score < threshold;
+  // The backend's verdict is authoritative — it is the same computation that
+  // gates promotion, so the chip must never disagree with the gate.
+  const failed = verdict.failed_metrics.includes(spec.key);
 
   return (
     <span
@@ -491,13 +495,26 @@ export default function AdminPromptsPage() {
           </motion.div>
         ) : null}
 
-        <motion.div variants={staggerItem} className="max-w-xs">
-          <Select
-            label="Status"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as '' | PromptVersionStatus)}
-            options={STATUS_OPTIONS}
-          />
+        <motion.div variants={staggerItem} className="flex flex-wrap items-end gap-3">
+          <div className="w-full max-w-xs">
+            <Select
+              label="Status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as '' | PromptVersionStatus)}
+              options={STATUS_OPTIONS}
+            />
+          </div>
+          {/* An eval finishing in the background is the common reason this list
+              goes stale between polls. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void promptsQuery.refetch()}
+            loading={promptsQuery.isFetching}
+          >
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
         </motion.div>
 
         {promptsQuery.isPending ? (

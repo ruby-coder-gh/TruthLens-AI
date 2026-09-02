@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/utils';
 import AdminPromptsPage from './AdminPromptsPage';
-import type { ActivePrompt, PromptVersion } from '../api/types';
+import type { ActivePrompt, PromptEvalSummary, PromptVersion } from '../api/types';
 
 const {
   list, get, active, create, evaluate, promote, rollback, remove, diff,
@@ -59,28 +59,30 @@ const draftVersion = makeVersion({
   content: 'Line one\nLine three\n',
 });
 
+const STAGED_EVAL: PromptEvalSummary = {
+  id: 'e-1',
+  status: 'passed',
+  subset: 'smoke',
+  model_used: 'llama3.2:3b',
+  golden_set_version: 'bcb6d9b3613b',
+  faithfulness: 0.95,
+  context_precision: null,
+  context_recall: null,
+  answer_relevance: 0.72,
+  answer_correctness: null,
+  refusal_accuracy: 1,
+  trust: 0.86,
+  verdict: { passed: true, failed_metrics: [], thresholds: THRESHOLDS },
+  run_at: '2026-09-02T17:32:36Z',
+};
+
 const stagedVersion = makeVersion({
   id: 'p-staged',
   version: 2,
   status: 'staged',
   content_hash: 'ccc333ddd444',
   eval_run_id: 'e-1',
-  eval: {
-    id: 'e-1',
-    status: 'passed',
-    subset: 'smoke',
-    model_used: 'llama3.2:3b',
-    golden_set_version: 'bcb6d9b3613b',
-    faithfulness: 0.95,
-    context_precision: null,
-    context_recall: null,
-    answer_relevance: 0.72,
-    answer_correctness: null,
-    refusal_accuracy: 1,
-    trust: 0.86,
-    verdict: { passed: true, failed_metrics: [], thresholds: THRESHOLDS },
-    run_at: '2026-09-02T17:32:36Z',
-  },
+  eval: STAGED_EVAL,
 });
 
 const activeVersion = makeVersion({
@@ -243,5 +245,48 @@ describe('AdminPromptsPage', () => {
     renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
 
     expect(await screen.findByText(/no prompt versions/i)).toBeInTheDocument();
+  });
+
+  // Regression: a scored metric with no verdict has no threshold to be judged
+  // against, so it must not render as a green "pass — min —".
+  it('renders neutral chips when the eval has scores but no verdict', async () => {
+    list.mockResolvedValue({
+      data: [makeVersion({
+        id: 'p-ungated',
+        version: 4,
+        status: 'staged',
+        content_hash: 'ggg777hhh888',
+        eval: { ...STAGED_EVAL, verdict: null },
+      })],
+    });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    const row = await screen.findByRole('row', { name: /answer v4/i });
+
+    const faithfulness = within(row).getByText(/faithfulness/i);
+    expect(faithfulness).toHaveTextContent('0.95');
+    expect(faithfulness).toHaveTextContent(/no threshold/i);
+    expect(faithfulness).not.toHaveTextContent(/pass/i);
+    expect(faithfulness).not.toHaveClass('text-green');
+
+    const trust = within(row).getByText(/^trust/i);
+    expect(trust).toHaveTextContent(/no threshold/i);
+    expect(trust).not.toHaveClass('text-green');
+
+    // A metric the run never scored still reads "not scored".
+    expect(within(row).getByText(/context precision/i)).toHaveTextContent(/not scored/i);
+  });
+
+  it('refetches the list when Refresh is clicked', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await screen.findByRole('row', { name: /answer v3/i });
+    expect(list).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
   });
 });
