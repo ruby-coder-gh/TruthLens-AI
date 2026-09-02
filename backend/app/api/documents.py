@@ -7,7 +7,7 @@ import json
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select, func
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
@@ -459,6 +459,17 @@ async def reindex_document(
     # Schedule background processing via asyncio
     file_path = settings.upload_path / doc.filename
     if file_path.exists():
+        # Clear the existing vector index (Chroma/BM25) and `chunks` rows
+        # before re-ingesting. `run_ingestion_pipeline`/`store()` only
+        # INSERT — they don't upsert-by-document — so re-running ingestion
+        # without this first would crash on `uq_document_index` for every
+        # previously-stored chunk index (including released quarantine
+        # chunks) and leave stale Chroma/BM25 entries beyond the new chunk
+        # count.
+        from app.ingestion.indexer import delete_document as delete_index
+        await delete_index(workspace_id, doc.id)
+        await db.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+
         asyncio.create_task(
             process_document_background(
                 document_id=doc.id,
@@ -515,36 +526,62 @@ async def process_document_background(
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
         if doc:
+            # A fresh scan is authoritative for this run — supersede (never
+            # accumulate) prior quarantine state. This also makes reindex
+            # correct: without clearing first, re-running ingestion on the
+            # same poisoned document would double (triple, ...) the
+            # persisted rows and `quarantined_chunk_count` on every run.
+            # Previously "released" rows are deliberately included in the
+            # wipe — a reindex re-scans from scratch, so a chunk that was
+            # manually released before is re-evaluated like any other and,
+            # if still flagged, must go back through review.
+            await session.execute(
+                delete(ChunkQuarantine).where(ChunkQuarantine.document_id == document_id)
+            )
+
+            # The scan step runs before embed/store, so its findings are a
+            # real security signal worth keeping even if a later pipeline
+            # stage crashed — persist on both the success and failure
+            # branches below.
+            quarantined_items = ingest_result.get("quarantined") or []
+            for item in quarantined_items:
+                session.add(ChunkQuarantine(
+                    document_id=document_id,
+                    workspace_id=workspace_id,
+                    chunk_index=item["index"],
+                    content=item["content"],
+                    pattern=item.get("pattern"),
+                    severity=item.get("severity"),
+                    status="quarantined",
+                ))
+            doc.quarantined_chunk_count = len(quarantined_items)
+            if quarantined_items:
+                session.add(AuditLog(
+                    user_id=doc.uploaded_by,
+                    action="document.quarantine",
+                    resource_type="document",
+                    resource_id=document_id,
+                    details=json.dumps({
+                        "count": len(quarantined_items),
+                        "patterns": sorted({
+                            item["pattern"] for item in quarantined_items if item.get("pattern")
+                        }),
+                    }),
+                ))
+
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
-
-                quarantined_items = ingest_result.get("quarantined") or []
-                if quarantined_items:
-                    for item in quarantined_items:
-                        session.add(ChunkQuarantine(
-                            document_id=document_id,
-                            workspace_id=workspace_id,
-                            chunk_index=item["index"],
-                            content=item["content"],
-                            pattern=item.get("pattern"),
-                            severity=item.get("severity"),
-                            status="quarantined",
-                        ))
-                    doc.quarantined_chunk_count = (doc.quarantined_chunk_count or 0) + len(quarantined_items)
-                    session.add(AuditLog(
-                        user_id=doc.uploaded_by,
-                        action="document.quarantine",
-                        resource_type="document",
-                        resource_id=document_id,
-                        details=json.dumps({
-                            "count": len(quarantined_items),
-                            "patterns": sorted({
-                                item["pattern"] for item in quarantined_items if item.get("pattern")
-                            }),
-                        }),
-                    ))
-
+                if doc.chunk_count == 0 and quarantined_items:
+                    # Every chunk was quarantined: not a pipeline failure
+                    # (nothing crashed) but the document has zero
+                    # retrievable content pending human review. Surface
+                    # that via error_message rather than a silent
+                    # "ready, 0 chunks" state; status stays "ready" since
+                    # the document itself was processed successfully.
+                    doc.error_message = f"All {len(quarantined_items)} chunks quarantined for review"
+                else:
+                    doc.error_message = None
                 await bump_workspace_document_version(session, workspace_id)
             else:
                 doc.status = "failed"

@@ -36,6 +36,16 @@ class Document(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     workspace = relationship("Workspace", back_populates="documents", lazy="selectin")
     uploader = relationship("User", back_populates="documents_uploaded", lazy="selectin")
     chunks = relationship("Chunk", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
+    # lazy="noload" was tried first but silently breaks `cascade=
+    # "delete-orphan"` on `session.delete(doc)`: SQLAlchemy's unit-of-work
+    # cascade only enumerates children it can load, so an unloaded ("noload")
+    # collection leaves rows orphaned in the DB instead of deleting them.
+    # `selectin` (confirmed empirically) is required for the cascade to
+    # actually fire; the row count per document is small (a handful of
+    # quarantined chunks) compared to `Document.chunks`' full bodies.
+    quarantines = relationship(
+        "ChunkQuarantine", back_populates="document", cascade="all, delete-orphan", lazy="selectin"
+    )
     collection = relationship("Collection", back_populates="documents", lazy="selectin")
     comparison_results = relationship("ComparisonResult", back_populates="document", lazy="selectin", cascade="all, delete-orphan")
 

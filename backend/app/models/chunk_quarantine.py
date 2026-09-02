@@ -13,11 +13,16 @@ from app.models.base import DeclarativeBase, UUIDPkMixin
 class ChunkQuarantine(UUIDPkMixin, DeclarativeBase):
     __tablename__ = "chunk_quarantines"
 
+    # No `index=True` here — the explicit `Index(...)` entries in
+    # __table_args__ below are the only indexes on these columns (matches
+    # the migration exactly; `index=True` would additionally register an
+    # implicit `ix_*` index under `create_all()`, diverging from the
+    # hand-authored `idx_*` migration).
     document_id: Mapped[str] = mapped_column(
-        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -35,8 +40,12 @@ class ChunkQuarantine(UUIDPkMixin, DeclarativeBase):
         nullable=False,
     )
 
-    # Relationships
-    document = relationship("Document", lazy="selectin")
+    # Relationships. `lazy="raise"` is deliberate: list endpoints must never
+    # lazy-load `document` (which would cascade into `Document.chunks`
+    # selectin-loading every full chunk body for that document) — they join
+    # `Document.original_filename` explicitly instead. Any accidental access
+    # of `.document` raises loudly rather than silently over-fetching.
+    document = relationship("Document", back_populates="quarantines", lazy="raise")
 
     __table_args__ = (
         Index("idx_chunk_quarantines_document", "document_id"),

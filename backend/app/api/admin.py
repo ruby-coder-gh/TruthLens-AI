@@ -208,7 +208,12 @@ async def list_all_quarantined_chunks(
     workspace_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Cross-workspace list of ingest-time quarantined chunks (admin only)."""
+    """Cross-workspace list of ingest-time quarantined chunks (admin only).
+
+    Joins `Document.original_filename` explicitly rather than walking the
+    `ChunkQuarantine.document` relationship (`lazy="raise"`) — `Document`
+    eagerly `selectin`-loads every full chunk body via `Document.chunks`.
+    """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
     filters = []
@@ -218,18 +223,20 @@ async def list_all_quarantined_chunks(
         filters.append(ChunkQuarantine.workspace_id == workspace_id)
 
     count_query = select(func.count(ChunkQuarantine.id))
-    query = select(ChunkQuarantine)
+    query = select(ChunkQuarantine, Document.original_filename).outerjoin(
+        Document, Document.id == ChunkQuarantine.document_id
+    )
     if filters:
         count_query = count_query.where(*filters)
         query = query.where(*filters)
 
     total = (await db.execute(count_query)).scalar() or 0
-    records = (await db.execute(
+    rows = (await db.execute(
         query.order_by(ChunkQuarantine.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    )).scalars().all()
+    )).all()
 
     return PaginatedResponse(
-        data=[to_quarantine_response(record) for record in records],
+        data=[to_quarantine_response(record, document_name) for record, document_name in rows],
         meta={"page": page, "page_size": page_size, "total": total},
     )
 

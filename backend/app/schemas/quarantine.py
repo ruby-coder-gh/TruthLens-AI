@@ -39,18 +39,22 @@ class QuarantineActionResponse(BaseModel):
     message: str
 
 
-def to_quarantine_response(record: "ChunkQuarantine") -> QuarantineChunkResponse:
+def to_quarantine_response(
+    record: "ChunkQuarantine", document_name: str | None = None
+) -> QuarantineChunkResponse:
     """Build the API response for a `ChunkQuarantine` row.
 
-    Pulls `document_name` off the (selectin-loaded) `document` relationship
-    when available, so list endpoints don't need a separate join.
+    `document_name` must be supplied by the caller (e.g. from an explicit
+    `join(Document)` selecting only `Document.original_filename`) — this
+    function deliberately never touches `record.document` (that relationship
+    is `lazy="raise"`; walking it would also selectin-load every full chunk
+    body for the document via `Document.chunks`).
     """
-    document = getattr(record, "document", None)
     return QuarantineChunkResponse(
         id=record.id,
         workspace_id=record.workspace_id,
         document_id=record.document_id,
-        document_name=getattr(document, "original_filename", None),
+        document_name=document_name,
         chunk_index=record.chunk_index,
         content=record.content,
         pattern=record.pattern,
