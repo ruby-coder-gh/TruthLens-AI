@@ -436,6 +436,12 @@ export default function ReviewQueuePage() {
   // The count rides in the tab label (rather than a separate pill) so screen
   // readers announce it with the tab name and `ui.tsx`'s shared `Tabs` — which
   // other lanes also depend on — needs no signature change.
+  //
+  // It is deliberately `quarantine.length` — the rows actually on screen — and
+  // never `meta.total`. The server counts `chunk_quarantines` rows directly, so
+  // rows orphaned by a bulk document delete (BUG-5) inflate that total; binding
+  // the badge to it would advertise "(4)" above a single card with no way for
+  // the operator to reach the other three.
   const tabs = useMemo(
     () => [
       { id: 'queue', label: 'Review queue', icon: <ClipboardCheck size={14} /> },

@@ -658,10 +658,14 @@ function AuditLogsTab({
                   <td className="whitespace-nowrap px-4 py-3 text-text tabular-nums">
                     {formatTimestamp(entry.created_at)}
                   </td>
+                  {/* `user_id` is an `ondelete=SET NULL` FK — deleting a user
+                      must not white-screen the activity table. */}
                   <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                    {entry.user_id.length > 12
-                      ? `${entry.user_id.slice(0, 12)}...`
-                      : entry.user_id}
+                    {!entry.user_id
+                      ? '—'
+                      : entry.user_id.length > 12
+                        ? `${entry.user_id.slice(0, 12)}…`
+                        : entry.user_id}
                   </td>
                   <td className="px-4 py-3">
                     <Badge color={actionBadgeColor(entry.action)}>

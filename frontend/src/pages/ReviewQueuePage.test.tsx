@@ -122,6 +122,26 @@ describe('ReviewQueuePage', () => {
     expect(screen.getByText(/high/i)).toBeInTheDocument();
   });
 
+  // BUG-5: quarantine rows orphaned by a bulk document delete still count
+  // toward the server's `meta.total`, so the badge must track the rows the
+  // page can actually render — never the server count.
+  it('counts the rendered cards, not meta.total, when the server count disagrees', async () => {
+    const user = userEvent.setup();
+    mockQuarantineList.mockResolvedValue({
+      data: [makeChunk()],
+      meta: { page: 1, page_size: 20, total: 4 },
+    });
+    renderPage();
+
+    const tab = await screen.findByRole('tab', { name: /quarantined content/i });
+    await waitFor(() => expect(tab).toHaveTextContent('Quarantined content (1)'));
+    expect(tab).not.toHaveTextContent('(4)');
+
+    await user.click(tab);
+    expect(await screen.findByText('handbook.pdf')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^release/i })).toHaveLength(1);
+  });
+
   it('calls the release API and drops the row when Release is confirmed', async () => {
     const user = userEvent.setup();
     renderPage();

@@ -109,6 +109,17 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Something went wrong.';
 }
 
+/** Tooltip for the Promote button. A `draft` is promotable: the request is what
+ *  runs the eval gate, and a refusal opens the failed-metrics dialog rather
+ *  than dead-ending. */
+function promoteHint(status: PromptVersionStatus): string | undefined {
+  if (status === 'staged') return undefined;
+  if (status === 'draft') {
+    return 'Runs the eval gate — if it refuses, you can review the failed metrics and force the promotion.';
+  }
+  return 'Only a draft or staged version can be promoted.';
+}
+
 /**
  * The promote gate returns the app's standard error envelope, so the
  * machine-readable body lands on `ApiError.details` rather than on `detail`.
@@ -561,7 +572,12 @@ export default function AdminPromptsPage() {
                   const label = `${version.name} v${version.version}`;
                   const subset = subsetById[version.id] ?? 'smoke';
                   const canEvaluate = version.status === 'draft' || version.status === 'staged';
-                  const canPromote = version.status === 'staged';
+                  // The server's eval gate is the gate — not this button. Gating
+                  // it on `staged` made the 409 (and therefore the failed-metrics
+                  // modal and Force promote behind it) unreachable, because a
+                  // failing eval is exactly what keeps a version on `draft`.
+                  // `active`/`retired` never render the button at all.
+                  const canPromote = version.status === 'draft' || version.status === 'staged';
                   const evaluating = evaluateMutation.isPending && evaluateMutation.variables?.id === version.id;
                   const promoting = promoteMutation.isPending && promoteMutation.variables?.version.id === version.id;
                   const rollingBack = rollbackMutation.isPending && rollbackMutation.variables?.id === version.id;
@@ -618,9 +634,7 @@ export default function AdminPromptsPage() {
                                 aria-label={`Promote ${label}`}
                                 disabled={!canPromote}
                                 loading={promoting}
-                                title={canPromote
-                                  ? undefined
-                                  : 'Only a staged version can be promoted — run a passing eval first.'}
+                                title={promoteHint(version.status)}
                                 onClick={() => promoteMutation.mutate({ version, force: false })}
                               >
                                 <ShieldCheck size={13} />

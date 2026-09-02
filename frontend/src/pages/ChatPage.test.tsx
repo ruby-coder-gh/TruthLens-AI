@@ -176,6 +176,50 @@ describe('ChatPage', () => {
     expect(screen.getByRole('button', { name: /retry this question/i })).toBeInTheDocument();
   });
 
+  // S3 regression: Retry used to append a fresh user + assistant pair, leaving
+  // the dead error card (and its still-clickable Retry button) above a second
+  // echo of the same question.
+  it('replaces the errored bubble on Retry instead of appending a second turn', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'A doomed question');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onError?.('connection_lost', 'Lost connection to the server.');
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Connection lost');
+    expect(screen.getAllByText('A doomed question')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: /retry this question/i }));
+
+    // Same question, re-sent on a new socket.
+    expect(instances).toHaveLength(2);
+    expect(instances[1].query).toBe('A doomed question');
+
+    // The stale error card and its Retry control are gone, and the question is
+    // not echoed a second time.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry this question/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText('A doomed question')).toHaveLength(1);
+
+    act(() => {
+      instances[1].callbacks.onToken?.('The retried answer.');
+      instances[1].callbacks.onComplete?.({
+        query_id: 'q-retry',
+        latency_ms: 120,
+        model_used: 'qwen3:4b',
+        token_count: 3,
+        from_cache: false,
+      });
+    });
+
+    expect(screen.getByText('The retried answer.')).toBeInTheDocument();
+    expect(screen.getAllByText('A doomed question')).toHaveLength(1);
+  });
+
   it('renders the abstention card and hides feedback when onComplete reports insufficient evidence', async () => {
     const user = userEvent.setup();
     renderChatPage();

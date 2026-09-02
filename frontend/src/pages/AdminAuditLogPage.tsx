@@ -55,6 +55,16 @@ const RESOURCE_TYPE_FILTERS = [
 
 const PAGE_SIZE = 10;
 
+/** Every nullable audit column renders this instead of being dereferenced.
+ *  `user_id` is `ondelete=SET NULL`, and workspace-wide actions (`audit.export`,
+ *  `usage.export`) legitimately carry no `resource_id`. */
+const NULL_FIELD = '—';
+
+function truncateId(value: string | null | undefined, max: number): string {
+  if (!value) return NULL_FIELD;
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString('en-US', {
@@ -340,17 +350,19 @@ export default function AdminAuditLogPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                          {entry.user_id.length > 16 ? `${entry.user_id.slice(0, 16)}...` : entry.user_id}
+                          {truncateId(entry.user_id, 16)}
                         </td>
                         <td className="px-4 py-3">
                           <Badge color={actionBadgeColor(entry.action)}>{entry.action}</Badge>
                         </td>
                         <td className="px-4 py-3">
                           <span className="text-text-muted text-xs">{entry.resource_type}</span>
-                          <span className="ml-1 font-mono text-[10px] text-text-dim">#{entry.resource_id.slice(0, 8)}</span>
+                          <span className="ml-1 font-mono text-[10px] text-text-dim">
+                            {entry.resource_id ? `#${entry.resource_id.slice(0, 8)}` : NULL_FIELD}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-text-dim text-xs max-w-[200px] truncate">
-                          {entry.details ? JSON.stringify(entry.details).slice(0, 60) : '—'}
+                          {entry.details ? JSON.stringify(entry.details).slice(0, 60) : NULL_FIELD}
                         </td>
                       </motion.tr>
                     );
@@ -363,8 +375,10 @@ export default function AdminAuditLogPage() {
           {/* Expanded row */}
           <AnimatePresence>
             {expandedId && (() => {
+              // Rows with no `details` (an export, a login) must still open —
+              // bailing on a null field made the chevron a silent no-op.
               const entry = logs.find((e) => e.id === expandedId);
-              if (!entry?.details) return null;
+              if (!entry) return null;
               return (
                 <motion.div
                   key="expanded-detail"
@@ -377,9 +391,27 @@ export default function AdminAuditLogPage() {
                     <Shield size={14} className="text-primary-soft" />
                     <span className="text-xs font-medium text-text-muted">Full details</span>
                   </div>
-                  <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
-                    {JSON.stringify(entry.details, null, 2)}
-                  </pre>
+                  <dl className="mb-3 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+                    <div>
+                      <dt className="text-text-dim">User ID</dt>
+                      <dd className="font-mono text-text break-all">{entry.user_id ?? NULL_FIELD}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-text-dim">Resource ID</dt>
+                      <dd className="font-mono text-text break-all">{entry.resource_id ?? NULL_FIELD}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-text-dim">IP address</dt>
+                      <dd className="font-mono text-text break-all">{entry.ip_address ?? NULL_FIELD}</dd>
+                    </div>
+                  </dl>
+                  {entry.details ? (
+                    <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
+                      {JSON.stringify(entry.details, null, 2)}
+                    </pre>
+                  ) : (
+                    <p className="text-xs text-text-dim">No additional details recorded.</p>
+                  )}
                 </motion.div>
               );
             })()}
