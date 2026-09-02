@@ -85,3 +85,76 @@ class TestRouting:
     async def test_unknown_route_returns_404(self, client: AsyncClient):
         response = await client.get("/nonexistent")
         assert response.status_code == 404
+
+
+class TestLifespanShutdown:
+    """Detached /ws/query pipelines must be drained before the engine closes."""
+
+    @staticmethod
+    def _fake_engine(calls: list[str]):
+        class _FakeConn:
+            async def run_sync(self, fn):
+                calls.append("create_all")
+
+        class _FakeBegin:
+            async def __aenter__(self):
+                return _FakeConn()
+
+            async def __aexit__(self, *exc):
+                return False
+
+        class _FakeEngine:
+            def begin(self):
+                return _FakeBegin()
+
+            async def dispose(self):
+                calls.append("dispose")
+
+        return _FakeEngine()
+
+    @staticmethod
+    def _isolate_data_dirs(monkeypatch, tmp_path):
+        for key in ("DATA_DIR", "UPLOAD_DIR", "BM25_INDEX_DIR", "CHROMA_PERSIST_DIR"):
+            monkeypatch.setattr(settings, key, str(tmp_path / key.lower()))
+
+    @pytest.mark.asyncio
+    async def test_drains_ws_pipelines_before_disposing_the_engine(self, monkeypatch, tmp_path):
+        import app.main as main_module
+
+        calls: list[str] = []
+        self._isolate_data_dirs(monkeypatch, tmp_path)
+        monkeypatch.setattr(main_module, "engine", self._fake_engine(calls))
+
+        async def fake_drain(timeout):
+            calls.append(f"drain:{timeout}")
+            return 0
+
+        monkeypatch.setattr(main_module, "drain_pipeline_tasks", fake_drain)
+
+        async with main_module.lifespan(main_module.create_app()):
+            pass
+
+        assert calls == [
+            "create_all",
+            f"drain:{settings.WS_SHUTDOWN_DRAIN_SECONDS}",
+            "dispose",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_disposes_the_engine_even_when_the_drain_times_out(self, monkeypatch, tmp_path):
+        import app.main as main_module
+
+        calls: list[str] = []
+        self._isolate_data_dirs(monkeypatch, tmp_path)
+        monkeypatch.setattr(main_module, "engine", self._fake_engine(calls))
+
+        async def fake_drain(timeout):
+            calls.append("drain")
+            return 2  # two pipelines outlived the grace period
+
+        monkeypatch.setattr(main_module, "drain_pipeline_tasks", fake_drain)
+
+        async with main_module.lifespan(main_module.create_app()):
+            pass
+
+        assert calls[-2:] == ["drain", "dispose"]

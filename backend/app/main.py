@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
+from app.api.stream_registry import drain_pipeline_tasks
 from app.config import settings
 from app.core.exceptions import (
     AppException,
@@ -50,6 +51,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("app_shutting_down")
+    # A /ws/query client that disconnects no longer cancels its pipeline, so a
+    # detached run may still be inside `_save_query`. Let those finish before the
+    # engine goes away, otherwise a rolling restart loses the persisted answer.
+    still_running = await drain_pipeline_tasks(settings.WS_SHUTDOWN_DRAIN_SECONDS)
+    if still_running:
+        logger.warning("ws_pipelines_abandoned_at_shutdown", count=still_running)
     await engine.dispose()
 
 

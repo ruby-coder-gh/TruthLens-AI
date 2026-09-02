@@ -118,6 +118,18 @@ class Settings(BaseSettings):
     # many per-query buffers the in-memory registry may hold at once.
     WS_RESUME_TTL_SECONDS: int = 120
     WS_RESUME_MAX_BUFFERS: int = 500
+    # Per-buffer frame ceiling. One streamed token is one frame (~410 B), so this
+    # bounds a single answer's replay buffer at roughly 0.6 MB. A stream that
+    # exceeds it keeps streaming but stops being resumable (its buffer is
+    # released and dropped) — never truncated, which would put gaps in `seq`.
+    WS_RESUME_MAX_FRAMES_PER_BUFFER: int = 1500
+    # Concurrent in-flight /ws/query pipelines per user. Because a disconnect no
+    # longer cancels the pipeline, this is what stops repeated connect-query-drop
+    # cycles from piling up generations.
+    WS_MAX_INFLIGHT_PER_USER: int = 3
+    # How long shutdown waits for detached pipelines to finish persisting before
+    # the DB engine is disposed.
+    WS_SHUTDOWN_DRAIN_SECONDS: int = 10
 
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True

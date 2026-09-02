@@ -33,6 +33,9 @@ class WSResumePayload(BaseModel):
 class WSResumedPayload(BaseModel):
     """Server -> client: sent once the replay for a `resume` has been flushed.
 
+    Emitted inside the sink's replay lock, so it is guaranteed to arrive after
+    every replayed frame and before any live frame of the resumed stream.
+
     `live` is True when the stream is still running and now delivers to this
     socket; False when the buffer was already complete (nothing more follows).
     """
@@ -41,6 +44,19 @@ class WSResumedPayload(BaseModel):
     from_seq: int
     replayed: int
     live: bool
+
+
+class WSCancelAckPayload(BaseModel):
+    """Server -> client: `cancel` arrived with no query running.
+
+    A no-op cancel (e.g. Stop pressed on unmount after the stream finished) is
+    acknowledged rather than treated as an error, and leaves the buffer
+    resumable. When a query *is* cancelled the server still sends the
+    `CANCELLED` error frame instead.
+    """
+
+    query_id: str | None = None
+    cancelled: bool = False
 
 
 class WSFeedbackPayload(BaseModel):

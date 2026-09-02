@@ -16,6 +16,7 @@ from app.api.stream_registry import (
     StreamBuffer,
     StreamSink,
     stream_registry,
+    track_task,
 )
 from app.core.auth import decode_token
 from app.database import async_session_factory
@@ -485,12 +486,27 @@ async def _handle_resume(
             return False
         return await _check_workspace_access(user_id, buffer.workspace_id)
 
+    async def _send_resumed_marker(replayed: int, live: bool) -> None:
+        # Runs inside the sink's replay lock, after the re-attach, so this frame
+        # is genuinely "backlog flushed, live frames follow" — a frame emitted by
+        # the pipeline mid-replay queues behind it.
+        await send_json({
+            "type": "resumed",
+            "payload": {
+                "query_id": query_id,
+                "from_seq": last_seq,
+                "replayed": replayed,
+                "live": live,
+            },
+        })
+
     result = await stream_registry.resume(
         query_id=query_id,
         user_id=user_id,
         last_seq=last_seq,
         send=send_json,
         authorize=_authorize,
+        on_flushed=_send_resumed_marker,
     )
 
     if not result.ok:
@@ -506,16 +522,6 @@ async def _handle_resume(
             },
         })
         return None
-
-    await send_json({
-        "type": "resumed",
-        "payload": {
-            "query_id": query_id,
-            "from_seq": last_seq,
-            "replayed": result.replayed,
-            "live": result.live,
-        },
-    })
 
     if not result.live:
         return None
@@ -545,11 +551,21 @@ async def websocket_query(websocket: WebSocket):
     {"type": "resume", "payload": {"query_id": "...", "last_seq": <int>}}.
     The server replays every buffered frame with seq > last_seq, then sends
     {"type": "resumed", "payload": {query_id, from_seq, replayed, live}}; when
-    `live` is true the running stream continues on this socket. If the stream is
-    unknown, expired, owned by another user, or the workspace is no longer
-    accessible, the server replies
+    `live` is true the running stream continues on this socket. The `resumed`
+    frame is emitted inside the replay lock, so it always lands after the last
+    replayed frame and before the first live one. If the stream is unknown,
+    expired, dropped for outgrowing its frame ceiling, owned by another user, or
+    the workspace is no longer accessible, the server replies
     {"type": "error", "payload": {"code": "RESUME_UNAVAILABLE", ...}} and the
     client should re-send the query.
+
+    Cancel: {"type": "cancel"} stops a running query (CANCELLED error frame, and
+    the stream stops being resumable). With nothing running the server replies
+    {"type": "cancel_ack", "payload": {query_id, "cancelled": false}} and leaves
+    the buffer resumable.
+
+    A missing, null, or non-object `payload` is answered with an INVALID_INPUT
+    error frame; it never closes the connection.
 
     Close codes: 4001 = authentication failed, 1011 = unhandled server error.
     """
@@ -584,7 +600,16 @@ async def websocket_query(websocket: WebSocket):
                 continue
 
             msg_type = data.get("type")
-            msg_payload = data.get("payload", {})
+            # `data.get("payload", {})` returns None for an explicit null and any
+            # scalar the client sends; both used to blow up on `.get` and close
+            # the socket with 1011.
+            msg_payload = data.get("payload") or {}
+            if not isinstance(msg_payload, dict):
+                await send_json({
+                    "type": "error",
+                    "payload": {"code": "INVALID_INPUT", "message": "payload must be an object"},
+                })
+                continue
 
             if msg_type == "query":
                 # Supersede the in-flight query: the client abandoned it.
@@ -638,8 +663,10 @@ async def websocket_query(websocket: WebSocket):
                     )
                 )
                 # The buffer keeps the task reachable (and alive) across a
-                # disconnect so a resumed connection can still cancel it.
+                # disconnect so a resumed connection can still cancel it;
+                # `track_task` lets shutdown drain it before the engine closes.
                 current_sink.buffer.task = current_task
+                track_task(current_task)
 
             elif msg_type == "resume":
                 resumed_sink = await _handle_resume(
@@ -652,6 +679,7 @@ async def websocket_query(websocket: WebSocket):
                     current_task = resumed_sink.buffer.task
 
             elif msg_type == "cancel":
+                cancel_target = current_sink.query_id if current_sink else None
                 if current_task and not current_task.done():
                     current_task.cancel()
                     await send_json({
@@ -659,12 +687,20 @@ async def websocket_query(websocket: WebSocket):
                         "payload": {
                             "code": "CANCELLED",
                             "message": "Query cancelled",
-                            "query_id": current_sink.query_id if current_sink else None,
+                            "query_id": cancel_target,
                         },
                     })
-                if current_sink is not None:
-                    # An explicitly cancelled query is not resumable.
-                    await stream_registry.drop(current_sink.query_id)
+                    if current_sink is not None:
+                        # An explicitly cancelled query is not resumable.
+                        await stream_registry.drop(current_sink.query_id)
+                else:
+                    # Nothing to stop (e.g. Stop pressed on unmount after the
+                    # stream finished). Acknowledge without destroying the
+                    # buffer, which the client may still want to resume.
+                    await send_json({
+                        "type": "cancel_ack",
+                        "payload": {"query_id": cancel_target, "cancelled": False},
+                    })
 
             else:
                 await send_json({

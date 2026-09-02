@@ -816,3 +816,284 @@ class TestWebSocketQueryOpcodes:
 
         ws_b.disconnect()
         await task_b
+
+
+# ─── Fix round 1: per-buffer ceiling, task lifecycle, drain ───────────────────
+
+
+async def _hanging_task() -> asyncio.Task:
+    """A task that never finishes unless cancelled."""
+
+    async def _forever() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_forever())
+    await asyncio.sleep(0)
+    return task
+
+
+class TestPerBufferFrameCeiling:
+    async def test_buffer_past_the_frame_ceiling_is_dropped_not_truncated(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_frames_per_buffer=3)
+        recorder = Recorder()
+        sink = await _new_sink(registry, recorder)
+
+        for i in range(4):
+            await sink.emit("token", {"query_id": "q-1", "index": i})
+
+        assert await registry.get("q-1") is None, "over-long buffer must be dropped"
+        assert sink.buffer.overflowed is True
+        assert sink.buffer.frames == [], "frames are released, not kept"
+
+        result = await registry.resume(
+            query_id="q-1", user_id="user-1", last_seq=0, send=Recorder()
+        )
+        assert result.ok is False
+        assert result.reason == "unknown_query"
+
+    async def test_live_delivery_survives_overflow_with_gapless_seq(self):
+        """Losing resumability must not disturb the client that is still attached."""
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_frames_per_buffer=2)
+        recorder = Recorder()
+        sink = await _new_sink(registry, recorder)
+
+        for i in range(5):
+            await sink.emit("token", {"query_id": "q-1", "index": i})
+
+        assert recorder.seqs == [1, 2, 3, 4, 5]
+
+    async def test_frame_ceiling_defaults_to_settings(self):
+        from app.api.stream_registry import StreamRegistry
+        from app.config import settings
+
+        assert StreamRegistry().max_frames_per_buffer == settings.WS_RESUME_MAX_FRAMES_PER_BUFFER
+
+
+class TestTaskLifecycle:
+    async def test_age_expired_buffer_cancels_its_pipeline_task(self, registry):
+        from app.api.stream_registry import MAX_BUFFER_AGE_SECONDS
+
+        sink = await _new_sink(registry, Recorder())
+        task = await _hanging_task()
+        sink.buffer.task = task
+        sink.buffer.created_at = time.time() - (MAX_BUFFER_AGE_SECONDS + 1)
+
+        assert await registry.sweep() == 1
+        await asyncio.sleep(0)
+        assert task.cancelled() or task.cancelling()
+
+    async def test_evicting_a_live_buffer_cancels_its_task(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_buffers=1)
+        sink = await _new_sink(registry, Recorder(), query_id="old")
+        task = await _hanging_task()
+        sink.buffer.task = task
+
+        await _new_sink(registry, Recorder(), query_id="new")
+        await asyncio.sleep(0)
+
+        assert await registry.get("old") is None
+        assert task.cancelled() or task.cancelling()
+
+    async def test_ttl_sweep_of_a_finished_buffer_leaves_its_task_alone(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(ttl_seconds=1)
+        sink = await _new_sink(registry, Recorder())
+        task = await _hanging_task()  # stand-in for an already-finished pipeline
+        sink.buffer.task = task
+        sink.mark_done()
+        sink.buffer.last_activity = time.time() - 5
+
+        assert await registry.sweep() == 1
+        await asyncio.sleep(0)
+        assert not task.cancelled()
+        task.cancel()
+
+    async def test_per_user_inflight_cap_cancels_the_users_oldest_live_stream(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_inflight_per_user=2)
+        first = await _new_sink(registry, Recorder(), query_id="q-1")
+        oldest_task = await _hanging_task()
+        first.buffer.task = oldest_task
+        second = await _new_sink(registry, Recorder(), query_id="q-2")
+        second.buffer.task = await _hanging_task()
+
+        await _new_sink(registry, Recorder(), query_id="q-3")
+        await asyncio.sleep(0)
+
+        assert await registry.get("q-1") is None, "oldest live stream is reclaimed"
+        assert oldest_task.cancelled() or oldest_task.cancelling()
+        assert await registry.get("q-2") is not None
+        assert await registry.get("q-3") is not None
+        for query_id in ("q-2", "q-3"):
+            buffer = await registry.get(query_id)
+            if buffer and buffer.task:
+                buffer.task.cancel()
+
+    async def test_per_user_cap_counts_only_live_streams(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_inflight_per_user=1)
+        finished = await _new_sink(registry, Recorder(), query_id="done-1")
+        finished.mark_done()
+
+        await _new_sink(registry, Recorder(), query_id="live-1")
+
+        assert await registry.get("done-1") is not None, "finished streams stay resumable"
+        assert await registry.get("live-1") is not None
+
+    async def test_per_user_cap_is_scoped_to_one_user(self):
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry(max_inflight_per_user=1)
+        await _new_sink(registry, Recorder(), query_id="a-1", user_id="alice")
+        await _new_sink(registry, Recorder(), query_id="b-1", user_id="bob")
+
+        assert await registry.get("a-1") is not None
+        assert await registry.get("b-1") is not None
+
+    async def test_inflight_cap_defaults_to_settings(self):
+        from app.api.stream_registry import StreamRegistry
+        from app.config import settings
+
+        assert StreamRegistry().max_inflight_per_user == settings.WS_MAX_INFLIGHT_PER_USER
+
+
+class TestShutdownDrain:
+    async def test_tracked_task_is_discarded_once_it_finishes(self):
+        from app.api import stream_registry as registry_module
+
+        async def _quick() -> None:
+            return None
+
+        task = asyncio.create_task(_quick())
+        registry_module.track_task(task)
+        assert task in registry_module.pending_tasks()
+
+        await task
+        await asyncio.sleep(0)
+        assert task not in registry_module.pending_tasks()
+
+    async def test_drain_waits_for_a_pipeline_to_finish(self):
+        from app.api import stream_registry as registry_module
+
+        release = asyncio.Event()
+
+        async def _pipeline() -> None:
+            await release.wait()
+
+        task = asyncio.create_task(_pipeline())
+        registry_module.track_task(task)
+        release.set()
+
+        assert await registry_module.drain_pipeline_tasks(timeout=1.0) == 0
+        assert task.done()
+
+    async def test_drain_reports_tasks_that_outlive_the_timeout(self):
+        from app.api import stream_registry as registry_module
+
+        task = await _hanging_task()
+        registry_module.track_task(task)
+
+        assert await registry_module.drain_pipeline_tasks(timeout=0.01) == 1
+
+        task.cancel()
+        await asyncio.sleep(0)
+
+
+class TestResumedOrdering:
+    async def test_resumed_marker_is_flushed_before_any_live_frame(self):
+        """A frame emitted mid-replay must queue behind the `resumed` marker."""
+        from app.api.stream_registry import StreamRegistry
+
+        registry = StreamRegistry()
+        sink = await _new_sink(registry, Recorder())
+        await sink.emit("token", {"query_id": "q-1", "index": 0})
+        sink.detach()
+
+        order: list[str] = []
+        first_replay_frame = asyncio.Event()
+        let_replay_finish = asyncio.Event()
+
+        async def slow_send(frame: dict[str, Any]) -> None:
+            order.append(f"{frame['type']}#{frame.get('seq')}")
+            if not first_replay_frame.is_set():
+                first_replay_frame.set()
+                await let_replay_finish.wait()
+
+        async def on_flushed(replayed: int, live: bool) -> None:
+            order.append("resumed")
+
+        resume_task = asyncio.create_task(
+            registry.resume(
+                query_id="q-1",
+                user_id="user-1",
+                last_seq=0,
+                send=slow_send,
+                on_flushed=on_flushed,
+            )
+        )
+        await first_replay_frame.wait()
+
+        emit_task = asyncio.create_task(sink.emit("token", {"query_id": "q-1", "index": 1}))
+        await asyncio.sleep(0)
+        let_replay_finish.set()
+        await resume_task
+        await emit_task
+
+        assert order == ["token#1", "resumed", "token#2"]
+
+
+class TestCancelSemantics:
+    async def test_cancel_with_no_active_query_keeps_the_stream_resumable(self, ws_harness):
+        ws, task = await _connect(ws_harness)
+        ws_harness["release"].set()  # pipeline runs straight through
+        ws.push(_query_msg())
+        await ws.wait_for("complete")
+        query_id = ws_harness["query_id"]
+
+        ws.push({"type": "cancel"})
+        ack = await ws.wait_for("cancel_ack")
+
+        assert ack["payload"] == {"query_id": query_id, "cancelled": False}
+        assert ws.frames("error") == [], "a no-op cancel is not an error"
+        assert await ws_harness["registry"].get(query_id) is not None
+
+        ws.disconnect()
+        await task
+
+
+class TestMalformedPayloads:
+    async def test_null_payload_does_not_kill_the_connection(self, ws_harness):
+        ws, task = await _connect(ws_harness)
+
+        ws.push({"type": "resume", "payload": None})
+        error = await ws.wait_for("error")
+        assert error["payload"]["code"] == "INVALID_INPUT"
+        assert ws.closed_code is None
+
+        ws.push({"type": "resume", "payload": {"query_id": "nope", "last_seq": 0}})
+        second = await ws.wait_for("error", start=len(ws.sent))
+        assert second["payload"]["code"] == "RESUME_UNAVAILABLE", "connection still usable"
+
+        ws.disconnect()
+        await task
+
+    async def test_non_dict_payload_is_rejected_as_invalid_input(self, ws_harness):
+        ws, task = await _connect(ws_harness)
+
+        ws.push({"type": "query", "payload": "not-a-dict"})
+        error = await ws.wait_for("error")
+
+        assert error["payload"]["code"] == "INVALID_INPUT"
+        assert ws.closed_code is None
+
+        ws.disconnect()
+        await task
