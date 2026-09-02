@@ -145,3 +145,116 @@ describe('AdminDocumentsPage — bulk document ops', () => {
     });
   });
 });
+
+describe('AdminDocumentsPage — Fix round 1', () => {
+  beforeEach(() => {
+    mockListAll.mockReset();
+    mockBulk.mockReset();
+    mockListAll.mockResolvedValue(mockDocsResponse());
+    mockBulk.mockResolvedValue({
+      results: [
+        { id: 'doc-2', status: 'ok' },
+        { id: 'doc-3', status: 'ok' },
+      ],
+      summary: { ok: 2, accepted: 0, failed: 0 },
+    });
+  });
+
+  it('prunes stale selection when the visible set changes (e.g., search narrows results)', async () => {
+    const user = userEvent.setup();
+    mockListAll.mockImplementation((params) => {
+      if (params?.search) {
+        return Promise.resolve({ data: [], meta: { page: 1, page_size: 20, total: 0 } });
+      }
+      return Promise.resolve(mockDocsResponse());
+    });
+
+    await renderPage();
+
+    await user.click(screen.getByLabelText('Select all documents'));
+    expect(screen.getByText('3 selected')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Search documents...'), 'z');
+
+    await waitFor(() => {
+      expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('delete confirm modal lists the selected filenames', async () => {
+    const user = userEvent.setup();
+    await renderPage();
+
+    await user.click(screen.getByLabelText('Select all documents'));
+    await user.click(screen.getByLabelText('Select Contract.pdf'));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /delete/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Documents' });
+
+    expect(within(dialog).getByText('Invoice.pdf')).toBeInTheDocument();
+    expect(within(dialog).getByText('Report.pdf')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Contract.pdf')).not.toBeInTheDocument();
+  });
+
+  it('total failure: keeps the selection, closes the modal, and shows a distinct toast', async () => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    mockBulk.mockResolvedValueOnce({
+      results: [
+        { id: 'doc-2', status: 'failed', error: 'boom' },
+        { id: 'doc-3', status: 'failed', error: 'boom' },
+      ],
+      summary: { ok: 0, accepted: 0, failed: 2 },
+    });
+    await renderPage(addToast);
+
+    await user.click(screen.getByLabelText('Select all documents'));
+    await user.click(screen.getByLabelText('Select Contract.pdf'));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /delete/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Documents' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith('All 2 failed — selection kept', 'error');
+    });
+
+    // Selection is kept — nothing succeeded.
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    // Modal still closes.
+    expect(screen.queryByRole('dialog', { name: 'Delete Documents' })).not.toBeInTheDocument();
+  });
+
+  it('partial failure: clears only the ids that succeeded', async () => {
+    const user = userEvent.setup();
+    const addToast = vi.fn();
+    mockBulk.mockResolvedValueOnce({
+      results: [
+        { id: 'doc-2', status: 'ok' },
+        { id: 'doc-3', status: 'failed', error: 'boom' },
+      ],
+      summary: { ok: 1, accepted: 0, failed: 1 },
+    });
+    await renderPage(addToast);
+
+    await user.click(screen.getByLabelText('Select all documents'));
+    await user.click(screen.getByLabelText('Select Contract.pdf'));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /delete/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Documents' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(addToast).toHaveBeenCalledWith('Delete: 1 ok, 0 accepted, 1 failed', 'error');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Select Invoice.pdf')).not.toBeChecked();
+    expect(screen.getByLabelText('Select Report.pdf')).toBeChecked();
+  });
+});

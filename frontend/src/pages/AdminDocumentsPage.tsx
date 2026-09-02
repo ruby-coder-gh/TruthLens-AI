@@ -8,7 +8,7 @@ import { useToast } from '../components/toast-context';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
-import type { BulkDocumentAction } from '../api/types';
+import type { BulkDocumentAction, BulkDocumentResponse } from '../api/types';
 
 const ACTION_LABELS: Record<BulkDocumentAction, string> = {
   delete: 'Delete',
@@ -70,6 +70,36 @@ export default function AdminDocumentsPage() {
     placeholderData: (prev) => prev,
   });
 
+  // Tracks the last `data` reference the selection was pruned against — lets
+  // us detect "the visible set changed" during render and adjust `selected`
+  // synchronously (React's documented "adjust state while rendering" escape
+  // hatch), instead of a useEffect that would set state after an extra paint.
+  const [prunedAgainst, setPrunedAgainst] = useState(data);
+  if (data !== prunedAgainst) {
+    setPrunedAgainst(data);
+    if (data) {
+      // Prune stale ids whenever the visible set changes (new page, new
+      // search, new tag filter, or a same-page refetch after a bulk action).
+      // Pruning against the fetched data — rather than resetting on
+      // page/search/tagFilter change — means a refetch of the *same* page
+      // keeps an unaffected selection intact, while ids that scrolled out of
+      // view (or were deleted) are dropped.
+      const visibleIds = new Set(data.data.map((doc) => doc.id));
+      setSelected((prev) => {
+        let changed = false;
+        const next = new Set<string>();
+        prev.forEach((id) => {
+          if (visibleIds.has(id)) {
+            next.add(id);
+          } else {
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }
+
   const documents = data?.data ?? [];
   const total = data?.meta?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 20));
@@ -89,8 +119,11 @@ export default function AdminDocumentsPage() {
       documentApi.bulk(action, ids, tags),
     onSuccess: (response, variables) => {
       const { ok, accepted, failed } = response.summary;
+      const allFailed = failed > 0 && ok === 0 && accepted === 0;
       addToast(
-        `${ACTION_LABELS[variables.action]}: ${ok} ok, ${accepted} accepted, ${failed} failed`,
+        allFailed
+          ? `All ${failed} failed — selection kept`
+          : `${ACTION_LABELS[variables.action]}: ${ok} ok, ${accepted} accepted, ${failed} failed`,
         failed > 0 ? 'error' : 'success',
       );
       queryClient.invalidateQueries({ queryKey: ['admin', 'documents'] });
@@ -99,6 +132,24 @@ export default function AdminDocumentsPage() {
       addToast(err instanceof Error ? err.message : 'Bulk action failed.', 'error');
     },
   });
+
+  // Drops only the ids the server actually completed (status "ok"/"accepted")
+  // from the selection, so a failed item stays selected for retry. On a total
+  // failure (every id failed) the selection is left untouched entirely.
+  function clearSucceeded(response: BulkDocumentResponse) {
+    const { ok, accepted, failed } = response.summary;
+    if (failed > 0 && ok === 0 && accepted === 0) return;
+    const succeededIds = new Set(
+      response.results
+        .filter((r) => r.status === 'ok' || r.status === 'accepted')
+        .map((r) => r.id),
+    );
+    setSelected((prev) => {
+      const next = new Set(prev);
+      succeededIds.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
 
   function toggleSelectAll() {
     setSelected((prev) => {
@@ -124,7 +175,7 @@ export default function AdminDocumentsPage() {
     const ids = Array.from(selected);
     bulkMutation.mutate(
       { action: 'delete', ids },
-      { onSuccess: () => { setSelected(new Set()); setDeleteModalOpen(false); } },
+      { onSuccess: (response) => { clearSucceeded(response); setDeleteModalOpen(false); } },
     );
   }
 
@@ -132,7 +183,7 @@ export default function AdminDocumentsPage() {
     const ids = Array.from(selected);
     bulkMutation.mutate(
       { action: 'reindex', ids },
-      { onSuccess: () => { setSelected(new Set()); setReindexModalOpen(false); } },
+      { onSuccess: (response) => { clearSucceeded(response); setReindexModalOpen(false); } },
     );
   }
 
@@ -142,11 +193,13 @@ export default function AdminDocumentsPage() {
     const ids = Array.from(selected);
     bulkMutation.mutate(
       { action: 'tag', ids, tags },
-      { onSuccess: () => { setSelected(new Set()); setTagModalOpen(false); setTagInput(''); } },
+      { onSuccess: (response) => { clearSucceeded(response); setTagModalOpen(false); setTagInput(''); } },
     );
   }
 
   function removeTag(tag: string) {
+    // Deliberately does not touch selection/close the modal — lets the user
+    // remove several common tags from the same selection in one sitting.
     const ids = Array.from(selected);
     bulkMutation.mutate({ action: 'untag', ids, tags: [tag] });
   }
@@ -415,6 +468,13 @@ export default function AdminDocumentsPage() {
               </p>
             </div>
           </div>
+          <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-card-2/60 p-2">
+            {selectedDocs.map((doc) => (
+              <li key={doc.id} className="truncate px-2 py-1 text-xs text-text">
+                {doc.original_filename}
+              </li>
+            ))}
+          </ul>
           <div className="flex gap-3">
             <Button variant="danger" size="sm" loading={bulkMutation.isPending} onClick={confirmDelete}>
               <Trash2 size={14} />
