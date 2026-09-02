@@ -161,39 +161,80 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     )
 
 
+def _apply_audit_log_filters(
+    stmt: Any,
+    *,
+    action: str | None,
+    q: str | None,
+    user_id: str | None,
+    resource_type: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> Any:
+    """Apply the shared audit-log filter set to a select(...) statement.
+
+    Used for both the data query and the count query (list endpoint) and
+    the export query, so filtering stays identical across all three.
+    """
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+
+    if q:
+        search_term = f"%{q.strip()}%"
+        stmt = stmt.where(or_(
+            AuditLog.action.ilike(search_term),
+            AuditLog.resource_type.ilike(search_term),
+            AuditLog.resource_id.ilike(search_term),
+            AuditLog.details.ilike(search_term),
+            AuditLog.ip_address.ilike(search_term),
+        ))
+
+    if user_id:
+        stmt = stmt.where(AuditLog.user_id == user_id)
+
+    if resource_type:
+        stmt = stmt.where(AuditLog.resource_type == resource_type)
+
+    naive_from = _to_naive_utc(date_from)
+    if naive_from:
+        stmt = stmt.where(AuditLog.created_at >= naive_from)
+
+    naive_to = _to_naive_utc(date_to)
+    if naive_to:
+        stmt = stmt.where(AuditLog.created_at <= naive_to)
+
+    return stmt
+
+
 @router.get("/logs", response_model=PaginatedResponse[AuditLogResponse])
 async def get_audit_logs(
     page: int = 1,
     page_size: int = 50,
     action: str | None = None,
     q: str | None = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Get audit log entries (admin only).
 
     `q` performs a case-insensitive substring match across the meaningful
     text columns (action, resource_type, resource_id, details, ip_address).
+    `user_id`/`resource_type` are exact matches; `date_from`/`date_to` (ISO
+    8601) bound `created_at` inclusively.
     """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
-    query = select(AuditLog)
-    count_query = select(func.count(AuditLog.id))
-
-    if action:
-        query = query.where(AuditLog.action == action)
-        count_query = count_query.where(AuditLog.action == action)
-
-    if q:
-        search_term = f"%{q.strip()}%"
-        search_filter = or_(
-            AuditLog.action.ilike(search_term),
-            AuditLog.resource_type.ilike(search_term),
-            AuditLog.resource_id.ilike(search_term),
-            AuditLog.details.ilike(search_term),
-            AuditLog.ip_address.ilike(search_term),
-        )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
+    query = _apply_audit_log_filters(
+        select(AuditLog), action=action, q=q, user_id=user_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+    count_query = _apply_audit_log_filters(
+        select(func.count(AuditLog.id)), action=action, q=q, user_id=user_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -219,6 +260,93 @@ async def get_audit_logs(
             for log in logs
         ],
         meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.get("/logs/export")
+async def export_audit_logs(
+    format: Literal["csv", "json"] = "csv",
+    action: str | None = None,
+    q: str | None = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export audit log entries as CSV or JSON (admin only).
+
+    Bypasses the list endpoint's page-size clamp but hard-caps the result at
+    `AUDIT_EXPORT_MAX_ROWS`, ordered newest-first. The export itself is
+    audited (mirrors `investigations.py` audit-bundle export).
+    """
+    stmt = _apply_audit_log_filters(
+        select(AuditLog),
+        action=action, q=q, user_id=user_id, resource_type=resource_type,
+        date_from=date_from, date_to=date_to,
+    )
+    stmt = stmt.order_by(AuditLog.created_at.desc()).limit(settings.AUDIT_EXPORT_MAX_ROWS)
+    result = await db.execute(stmt)
+    logs = result.scalars().all()
+
+    ts = _export_timestamp()
+    filters_summary = {
+        "action": action,
+        "q": q,
+        "user_id": user_id,
+        "resource_type": resource_type,
+        "date_from": utc_iso(date_from),
+        "date_to": utc_iso(date_to),
+    }
+
+    if format == "json":
+        payload = [
+            AuditLogResponse(
+                id=log.id,
+                user_id=log.user_id,
+                action=log.action,
+                resource_type=log.resource_type,
+                resource_id=log.resource_id,
+                details=json.loads(log.details) if log.details else None,
+                ip_address=log.ip_address,
+                created_at=log.created_at,
+            ).model_dump(mode="json")
+            for log in logs
+        ]
+        content: str = json.dumps(payload)
+        media_type = "application/json"
+        filename = f"audit-log-{ts}.json"
+    else:
+        headers = ["id", "created_at", "user_id", "action", "resource_type", "resource_id", "ip_address", "details"]
+        csv_rows = [
+            [
+                log.id,
+                utc_iso(log.created_at),
+                log.user_id or "",
+                log.action,
+                log.resource_type,
+                log.resource_id or "",
+                log.ip_address or "",
+                log.details or "",
+            ]
+            for log in logs
+        ]
+        content = rows_to_csv(headers, csv_rows)
+        media_type = "text/csv"
+        filename = f"audit-log-{ts}.csv"
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="audit.export",
+        resource_type="audit_log",
+        details=json.dumps({"format": format, "filters": filters_summary, "row_count": len(logs)}),
+    ))
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
