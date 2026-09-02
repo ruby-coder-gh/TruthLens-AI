@@ -57,6 +57,7 @@ from app.schemas.golden import GoldenEntryResponse, GoldenStatus
 from app.schemas.quarantine import QuarantineChunkResponse, to_quarantine_response
 from app.schemas.user import UserResponse
 from app.utils.logger import logger
+from app.utils.sql import escape_like
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
@@ -223,14 +224,16 @@ def _apply_audit_log_filters(
     if action:
         stmt = stmt.where(AuditLog.action == action)
 
+    # LIKE-escaped: `q` is a substring search across five columns, so a "%" or
+    # "_" the admin typed must match itself rather than act as a wildcard.
     if q:
-        search_term = f"%{q.strip()}%"
+        search_term = f"%{escape_like(q.strip())}%"
         stmt = stmt.where(or_(
-            AuditLog.action.ilike(search_term),
-            AuditLog.resource_type.ilike(search_term),
-            AuditLog.resource_id.ilike(search_term),
-            AuditLog.details.ilike(search_term),
-            AuditLog.ip_address.ilike(search_term),
+            AuditLog.action.ilike(search_term, escape="\\"),
+            AuditLog.resource_type.ilike(search_term, escape="\\"),
+            AuditLog.resource_id.ilike(search_term, escape="\\"),
+            AuditLog.details.ilike(search_term, escape="\\"),
+            AuditLog.ip_address.ilike(search_term, escape="\\"),
         ))
 
     if user_id:

@@ -215,3 +215,48 @@ async def test_list_all_documents_tags_filter_escapes_like_wildcards(
     ids = [d["id"] for d in resp.json()["data"]]
     assert doc_exact.id not in ids
     assert doc_wild.id not in ids
+
+
+# ─── SEC-1 (LOW): LIKE wildcards in the `search` filter ──────────────
+
+
+@pytest.mark.asyncio
+async def test_list_all_documents_search_treats_wildcards_literally(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """`search` is a substring filter, not a LIKE pattern: `%` and `_` are literal."""
+    ws = Workspace(name="Search escape WS", owner_id=test_user.id)
+    test_db.add(ws)
+    await test_db.commit()
+    await test_db.refresh(ws)
+
+    def _doc(original_filename: str) -> Document:
+        return Document(
+            workspace_id=ws.id,
+            filename=f"{uuid.uuid4().hex}.txt",
+            original_filename=original_filename,
+            mime_type="text/plain",
+            file_size=1,
+            status="ready",
+        )
+
+    literal = _doc("100% coverage.txt")
+    decoy = _doc("100 percent coverage.txt")
+    underscore = _doc("q1_2026 notes.txt")
+    underscore_decoy = _doc("q1x2026 notes.txt")
+    test_db.add_all([literal, decoy, underscore, underscore_decoy])
+    await test_db.commit()
+    for doc in (literal, decoy, underscore, underscore_decoy):
+        await test_db.refresh(doc)
+
+    resp = await client.get("/api/documents?search=100%25", headers=admin_headers)
+    assert resp.status_code == 200
+    ids = [d["id"] for d in resp.json()["data"]]
+    assert literal.id in ids
+    assert decoy.id not in ids
+
+    resp = await client.get("/api/documents?search=q1_2026", headers=admin_headers)
+    assert resp.status_code == 200
+    ids = [d["id"] for d in resp.json()["data"]]
+    assert underscore.id in ids
+    assert underscore_decoy.id not in ids

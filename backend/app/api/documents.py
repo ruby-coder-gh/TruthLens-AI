@@ -35,6 +35,7 @@ from app.schemas.document import (
 )
 from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
+from app.utils.sql import escape_like
 
 router = APIRouter(tags=["documents"])
 
@@ -52,11 +53,6 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024
 MIN_PAGE_SIZE = 1
 MAX_PAGE_SIZE = 100
 MAX_DETAIL_CHUNKS = 200
-
-
-def _escape_like(value: str) -> str:
-    """Escape SQL LIKE wildcards in a user-supplied value (paired with ``escape="\\\\"``)."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @router.post("/workspaces/{workspace_id}/documents", response_model=DocumentResponse, status_code=202)
@@ -384,10 +380,14 @@ async def list_all_documents(
 
     # Apply the same controlled filters to the data and count queries. Search
     # is server-backed, so results on later pages remain discoverable.
+    # LIKE-escaped: `search` is a substring filter, so a "%" or "_" the user
+    # typed must match itself rather than act as a wildcard.
     if search and search.strip():
-        filename_pattern = f"%{search.strip()}%"
-        query = query.where(Document.original_filename.ilike(filename_pattern))
-        count_query = count_query.where(Document.original_filename.ilike(filename_pattern))
+        filename_pattern = f"%{escape_like(search.strip())}%"
+        query = query.where(Document.original_filename.ilike(filename_pattern, escape="\\"))
+        count_query = count_query.where(
+            Document.original_filename.ilike(filename_pattern, escape="\\")
+        )
 
     allowed_types = {"pdf", "docx", "txt", "md", "csv", "json"}
     normalized_type = (file_type or "").lower().lstrip(".")
@@ -404,7 +404,7 @@ async def list_all_documents(
     # (e.g. "q1_2026") are SQL wildcards and would match unrelated tags.
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
     for tag in tag_list:
-        tag_pattern = f'%"{_escape_like(tag)}"%'
+        tag_pattern = f'%"{escape_like(tag)}"%'
         query = query.where(Document.tags.like(tag_pattern, escape="\\"))
         count_query = count_query.where(Document.tags.like(tag_pattern, escape="\\"))
 
