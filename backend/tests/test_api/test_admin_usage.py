@@ -170,6 +170,88 @@ async def test_usage_date_filter_excludes_out_of_range(
     assert body_all["totals"]["queries"] == 6  # no filter includes it
 
 
+async def _seed_evening_query(test_db: AsyncSession, day: datetime) -> None:
+    """One query created at 18:00 UTC on `day` (midnight), used to test the
+    inclusive/exclusive edges of `date_to`."""
+    user = User(
+        email="usage-eod@example.com", username="usage-eod",
+        password_hash=hash_password("Pass1234"), role="user", is_active=True,
+    )
+    test_db.add(user)
+    await test_db.flush()
+    ws = Workspace(name="Workspace EOD", owner_id=user.id)
+    test_db.add(ws)
+    await test_db.flush()
+    test_db.add(Query(
+        workspace_id=ws.id, user_id=user.id, query_text="eod", model_used="gpt-4o-mini",
+        token_count=10, prompt_tokens=5, latency_ms=10, cache_hit_count=0,
+        created_at=day.replace(hour=18),
+    ))
+    await test_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_usage_date_to_bare_date_includes_full_day(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """A bare `date_to=YYYY-MM-DD` must include the whole day (a row created
+    at 18:00 that day), not just its first instant (midnight)."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_query(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/usage",
+        params={"group_by": "model", "date_from": day.isoformat(), "date_to": day.date().isoformat()},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["totals"]["queries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_date_to_explicit_midnight_excludes_same_day_evening_row(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """An explicit `T00:00:00` date_to is NOT widened -- it still means
+    midnight, unlike a bare date."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_query(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/usage",
+        params={
+            "group_by": "model",
+            "date_from": day.isoformat(),
+            "date_to": f"{day.date().isoformat()}T00:00:00",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["totals"]["queries"] == 0
+
+
+@pytest.mark.asyncio
+async def test_usage_date_to_frontend_end_of_day_still_works(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """The frontend's explicit `...T23:59:59.999` end-of-day marker keeps
+    working unchanged."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_query(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/usage",
+        params={
+            "group_by": "model",
+            "date_from": day.isoformat(),
+            "date_to": f"{day.date().isoformat()}T23:59:59.999",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["totals"]["queries"] == 1
+
+
 @pytest.mark.asyncio
 async def test_usage_pricing_endpoint(client: AsyncClient, admin_headers: dict[str, str], pricing_configured):
     resp = await client.get("/api/admin/usage/pricing", headers=admin_headers)
