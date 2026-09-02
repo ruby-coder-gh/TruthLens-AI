@@ -62,7 +62,8 @@ def _patch_pipeline_steps(
     async def default_stream_tokens(gen_input, query_id: str, send_fn):
         await send_fn({"type": "token", "payload": {"query_id": query_id, "token": "ok", "index": 0}})
         await send_fn({"type": "stream_end", "payload": {"query_id": query_id}})
-        return "final answer", 1, "mock-model"
+        # 5-tuple since F1: (text, token_count, model_used, prompt_tokens, prompt_version).
+        return "final answer", 1, "mock-model", 12, "promptv1hash"
 
     async def fake_guardrail_check(answer: str, contexts):
         return SimpleNamespace(passed=True, score=0.95, details="ok")

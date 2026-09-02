@@ -226,7 +226,12 @@ class TestQueryGraph:
             return results
 
         async def fake_generate(gen_input):
-            return SimpleNamespace(text="Alice signed it.", cited_spans=[], model_used="qwen3:4b", latency_ms=7)
+            # `_generate_node` reads the F1 provenance fields off the result, so
+            # the stub has to carry the full `GenerationResult` shape.
+            return SimpleNamespace(
+                text="Alice signed it.", cited_spans=[], model_used="qwen3:4b", latency_ms=7,
+                prompt_version="hash-from-generator", token_count=3, prompt_tokens=42,
+            )
 
         async def fake_guardrail(answer, contexts):
             from app.generation.guardrail import GuardrailResult
@@ -579,3 +584,105 @@ class TestIngestionGraph:
             assert result["error"] is not None
         else:
             assert result["chunk_count"] > 0
+
+
+class TestGenerateNodePromptPinning:
+    """Both graph generate nodes resolve the active prompt and record its hash."""
+
+    @staticmethod
+    def _point_graph_at_test_engine(monkeypatch, module, test_engine):
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        monkeypatch.setattr(
+            module,
+            "async_session_factory",
+            async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+        )
+
+    @staticmethod
+    def _capture_generate(monkeypatch, module, captured, result):
+        async def _generate(gen_input):
+            captured["system_prompt"] = gen_input.system_prompt
+            captured["model"] = gen_input.model
+            return result
+
+        monkeypatch.setattr(module, "generate_answer", _generate)
+
+    @staticmethod
+    def _result(**overrides):
+        from app.generation.generator import GenerationResult
+
+        defaults = dict(
+            text="answer",
+            token_count=9,
+            model_used="served:7b",
+            latency_ms=5,
+            prompt_tokens=77,
+            prompt_version="hash-from-generator",
+        )
+        defaults.update(overrides)
+        return GenerationResult(**defaults)
+
+    async def _seed_active_prompt(self, test_db, content, model_name=None):
+        from app.models.prompt_version import PromptVersion
+        from app.prompts import registry
+
+        test_db.add(
+            PromptVersion(
+                name="answer",
+                version=1,
+                content=content,
+                content_hash=registry.compute_hash(content),
+                status="active",
+                model_name=model_name,
+            )
+        )
+        await test_db.commit()
+        registry.invalidate("answer")
+
+    async def test_query_graph_uses_default_prompt_when_none_active(
+        self, monkeypatch, test_engine
+    ):
+        from app.graph import query_graph
+
+        self._point_graph_at_test_engine(monkeypatch, query_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, query_graph, captured, self._result())
+
+        out = await query_graph._generate_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] is None
+        assert captured["model"] is None
+        assert out["prompt_version"] == "hash-from-generator"
+        assert out["token_count"] == 9
+        assert out["prompt_tokens"] == 77
+
+    async def test_query_graph_threads_active_prompt_and_pinned_model(
+        self, monkeypatch, test_db, test_engine
+    ):
+        from app.graph import query_graph
+
+        await self._seed_active_prompt(test_db, "Pinned graph prompt.", "pinned:1b")
+        self._point_graph_at_test_engine(monkeypatch, query_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, query_graph, captured, self._result())
+
+        await query_graph._generate_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] == "Pinned graph prompt."
+        assert captured["model"] == "pinned:1b"
+
+    async def test_crag_graph_threads_active_prompt(self, monkeypatch, test_db, test_engine):
+        from app.graph import crag_graph
+
+        await self._seed_active_prompt(test_db, "Pinned CRAG prompt.")
+        self._point_graph_at_test_engine(monkeypatch, crag_graph, test_engine)
+        captured: dict = {}
+        self._capture_generate(monkeypatch, crag_graph, captured, self._result())
+
+        out = await crag_graph._generate_primary_node({"query": "q", "contexts": []})
+
+        assert captured["system_prompt"] == "Pinned CRAG prompt."
+        assert out["prompt_version"] == "hash-from-generator"
+        assert out["token_count"] == 9
+        assert out["prompt_tokens"] == 77

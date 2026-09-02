@@ -196,6 +196,62 @@ class TestEvaluatePipelineWritePath:
         assert row.answer_relevance is not None
 
 
+class TestEvaluatePipelinePromptPinning:
+    """The standalone runner scores the promoted prompt, not a stale constant."""
+
+    async def test_threads_the_active_prompt_and_pinned_model(self, monkeypatch, test_db):
+        from evaluation import evaluate as evaluate_module
+
+        from app.models.prompt_version import PromptVersion
+        from app.prompts import registry
+
+        content = "You are the promoted evaluation prompt."
+        test_db.add(
+            PromptVersion(
+                name="answer",
+                version=1,
+                content=content,
+                content_hash=registry.compute_hash(content),
+                status="active",
+                model_name="pinned:1b",
+            )
+        )
+        await test_db.commit()
+        registry.invalidate("answer")
+
+        seen: list[tuple[str | None, str | None]] = []
+
+        async def _generate(gen_input):
+            seen.append((gen_input.system_prompt, gen_input.model))
+            ctx = gen_input.contexts[0]["content"] if gen_input.contexts else ""
+            return GenerationResult(text=ctx, token_count=len(ctx.split()), model_used="mock")
+
+        monkeypatch.setattr("app.generation.generator.generate", _generate)
+        monkeypatch.setattr("app.generation.guardrail.check", _mock_guardrail_factory())
+
+        await evaluate_module.evaluate_pipeline(limit=2)
+
+        assert seen
+        assert set(seen) == {(content, "pinned:1b")}
+
+    async def test_default_prompt_is_left_to_the_generator(self, monkeypatch, test_db):
+        """No promoted row → the generator keeps using DEFAULT_SYSTEM_PROMPT."""
+        from evaluation import evaluate as evaluate_module
+
+        seen: list[tuple[str | None, str | None]] = []
+
+        async def _generate(gen_input):
+            seen.append((gen_input.system_prompt, gen_input.model))
+            return GenerationResult(text="x", token_count=1, model_used="mock")
+
+        monkeypatch.setattr("app.generation.generator.generate", _generate)
+        monkeypatch.setattr("app.generation.guardrail.check", _mock_guardrail_factory())
+
+        await evaluate_module.evaluate_pipeline(limit=2)
+
+        assert set(seen) == {(None, None)}
+
+
 class TestRunEvaluationEndpoint:
     """Test C: POST /admin/evaluation/run returns the queued contract."""
 

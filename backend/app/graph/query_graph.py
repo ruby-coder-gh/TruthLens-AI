@@ -13,6 +13,7 @@ from app.database import async_session_factory
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.prompts.registry import get_active as get_active_prompt
 from app.query_cache import cached_query_sources, get_workspace_document_version, lookup_cached_query
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query
@@ -72,6 +73,9 @@ class GraphState(TypedDict):
     # Metadata
     model_used: str
     latency_ms: int
+    prompt_version: str | None
+    token_count: int | None
+    prompt_tokens: int | None
     error: str | None
 
 
@@ -89,11 +93,15 @@ async def _cache_lookup_node(state: GraphState) -> dict:
                 "workspace_document_version": document_version,
             }
 
+        # Keyed on the active prompt too: a promoted prompt invalidates answers
+        # the retired one produced (same reason as the WS path).
+        resolved_prompt = await get_active_prompt(session)
         cached_query = await lookup_cached_query(
             session,
             workspace_id=workspace_id,
             query_text=state["query"],
             document_version=document_version,
+            prompt_version=resolved_prompt.hash,
             force_refresh=state.get("force_refresh", False),
         )
         await session.commit()
@@ -170,10 +178,19 @@ async def _rewrite_node(state: GraphState) -> dict:
 async def _generate_node(state: GraphState) -> dict:
     """Generate answer from retrieved contexts."""
     contexts = state.get("contexts", [])
+
+    # Resolve the pinned prompt/model for this deployment; `is_default` keeps
+    # the generator on its own DEFAULT_SYSTEM_PROMPT so nothing changes on a
+    # database with no promoted version.
+    async with async_session_factory() as db:
+        resolved_prompt = await get_active_prompt(db)
+
     gen_input = GenerationInput(
         query=state["query"],
         rewritten_query=state.get("rewritten_query"),
         contexts=contexts,
+        system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+        model=resolved_prompt.model_name,
     )
 
     result: GenerationResult = await generate_answer(gen_input)
@@ -183,6 +200,9 @@ async def _generate_node(state: GraphState) -> dict:
         "cited_spans": [vars(s) if hasattr(s, "__dict__") else {"text": s.text, "chunk_id": s.chunk_id, "start_index": s.start_index, "end_index": s.end_index} for s in result.cited_spans],
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
+        "prompt_version": result.prompt_version or None,
+        "token_count": result.token_count,
+        "prompt_tokens": result.prompt_tokens,
     }
 
 

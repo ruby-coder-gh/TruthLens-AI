@@ -14,6 +14,7 @@ from app.models.investigation import Investigation
 from app.models.query_pin import QueryPin
 from app.models.annotation import Annotation
 from app.models.refresh_token_session import RefreshTokenSession
+from app.models.prompt_version import PromptVersion
 
 __all__ = [
     "DeclarativeBase",
@@ -37,4 +38,5 @@ __all__ = [
     "QueryPin",
     "Annotation",
     "RefreshTokenSession",
+    "PromptVersion",
 ]

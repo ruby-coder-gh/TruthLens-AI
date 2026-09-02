@@ -67,7 +67,8 @@ async def pipeline(monkeypatch):
     async def fake_stream_tokens(gen_input, query_id: str, token_sender):
         state["stream_called"] = True
         await token_sender({"type": "token", "payload": {"query_id": query_id, "token": "ok", "index": 0}})
-        return "final answer", 1, "mock-model"
+        # 5-tuple since F1: (text, token_count, model_used, prompt_tokens, prompt_version).
+        return "final answer", 1, "mock-model", 12, "promptv1hash"
 
     async def fake_guardrail_check(answer: str, contexts):
         return SimpleNamespace(passed=True, score=0.95, details="ok")
@@ -340,3 +341,54 @@ async def test_save_query_leaves_edge_case_null_for_normal_answers(monkeypatch, 
 
     row = (await test_db.execute(select(Query).where(Query.id == "query-normal-1"))).scalar_one()
     assert row.edge_case is None
+
+
+@pytest.mark.asyncio
+async def test_abstention_records_the_prompt_that_was_active(pipeline, monkeypatch):
+    """An abstention still stamps the active prompt, with no prompt tokens.
+
+    Without this the abstention row has `prompt_version IS NULL`, and
+    `lookup_cached_query` (which now filters on the active hash) can never
+    replay it — nor can it ever be invalidated by a promotion.
+    """
+    from app.api import ws as ws_api
+    from app.prompts.registry import ResolvedPrompt
+
+    async def fake_get_active(db, name="answer"):
+        return ResolvedPrompt(content="pinned text", hash="activehash01", is_default=False)
+
+    monkeypatch.setattr(ws_api, "get_active_prompt", fake_get_active)
+
+    await pipeline.run()
+
+    saved = pipeline.state["saved"]
+    assert isinstance(saved, dict)
+    assert saved["edge_case"] == "insufficient_evidence"
+    assert saved["prompt_version"] == "activehash01"
+    # No LLM ran, so there is nothing to charge for.
+    assert saved["prompt_tokens"] is None
+
+
+@pytest.mark.asyncio
+async def test_cached_replay_reports_the_prompt_version_that_wrote_the_row():
+    """Cache hits are keyed on the active prompt, so the replay can echo it."""
+    from app.api import ws as ws_api
+
+    recorder = Recorder()
+    cached = Query(
+        id="cached-pinned",
+        workspace_id="ws-1",
+        query_text="What is RAG?",
+        response_text="Retrieval Augmented Generation.",
+        response_sources="[]",
+        trust_score=0.9,
+        model_used="qwen3:4b",
+        token_count=4,
+        prompt_version="activehash01",
+    )
+
+    await ws_api._send_cached_query(cached, _sink(recorder, "cached-pinned"), 3)
+
+    complete = recorder.frames[-1]["payload"]
+    assert complete["from_cache"] is True
+    assert complete["prompt_version"] == "activehash01"

@@ -145,7 +145,9 @@ class TestBuildAbstention:
         assert "I cannot find this information in your documents." in DEFAULT_SYSTEM_PROMPT
 
     def test_abstention_is_recognised_by_the_golden_refusal_markers(self):
-        from tests.test_evaluation.test_golden_regression import _REFUSAL_MARKERS
+        # The markers moved out of the test module and into the extracted
+        # production harness (F1); this now reads the real predicate's source.
+        from app.evaluation.golden_runner import _REFUSAL_MARKERS
         from app.retrieval.sufficiency import assess_sufficiency, build_abstention
 
         text = build_abstention(assess_sufficiency([])).lower()

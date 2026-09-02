@@ -38,6 +38,8 @@ async def test_review_queue_filters_by_threshold_and_records_review_audit(
     assert queue.status_code == 200
     assert [item["id"] for item in queue.json()["data"]] == [low.id]
     assert queue.json()["data"][0]["trust_components"]["faithfulness"] == 0.2
+    # Reviewers need to know which prompt produced the answer they are judging.
+    assert "prompt_version" in queue.json()["data"][0]
 
     review = await client.patch(
         f"/api/workspaces/{workspace_id}/review-queue/{low.id}",

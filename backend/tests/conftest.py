@@ -24,6 +24,21 @@ from app.models.user import User
 TEST_DB_URL = "sqlite+aiosqlite:///./test_data/test.db"
 
 
+@pytest.fixture(autouse=True)
+def _reset_prompt_registry_cache():
+    """Clear the process-local prompt-registry cache around every test.
+
+    `app.prompts.registry` memoises the resolved active prompt per name; each
+    test gets a fresh database, so a resolution cached by a previous test would
+    otherwise leak across the boundary.
+    """
+    from app.prompts import registry
+
+    registry.invalidate()
+    yield
+    registry.invalidate()
+
+
 @pytest_asyncio.fixture
 async def test_engine():
     """Create test database engine (module-scoped)."""

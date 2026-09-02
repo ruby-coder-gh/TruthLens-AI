@@ -25,6 +25,7 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
+from app.prompts.registry import get_active as get_active_prompt
 from app.query_cache import (
     cached_query_sources,
     get_workspace_document_version,
@@ -171,6 +172,10 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
             "model_used": query.model_used or "cached",
             "token_count": query.token_count or 0,
             "from_cache": True,
+            # A cache hit is keyed on the active prompt hash, so this is always
+            # the prompt currently in force; echoing it saves the client a
+            # `GET /admin/prompts/active`. NULL on rows written before pinning.
+            "prompt_version": getattr(query, "prompt_version", None),
             # A gated abstention is cacheable (response_text is not NULL), so the
             # replay has to keep saying it was an abstention.
             "edge_case": getattr(query, "edge_case", None),
@@ -223,6 +228,9 @@ async def _run_query_pipeline(
 
         async with async_session_factory() as db:
             document_version = await get_workspace_document_version(db, workspace_id)
+            # Resolve the active prompt here (not just before generation): a
+            # promoted prompt must invalidate answers written by the old one.
+            resolved_prompt = await get_active_prompt(db)
             if filters:
                 logger.info("query_cache_bypassed", workspace_id=workspace_id, reason="filtered_query")
                 cached_query = None
@@ -232,6 +240,7 @@ async def _run_query_pipeline(
                     workspace_id=workspace_id,
                     query_text=sanitized_query,
                     document_version=document_version,
+                    prompt_version=resolved_prompt.hash,
                     force_refresh=force_refresh,
                 )
             await db.commit()
@@ -278,7 +287,13 @@ async def _run_query_pipeline(
                 query_id=query_id, workspace_id=workspace_id, user_id=user_id,
                 query_text=sanitized_query, rewritten_query=rewritten,
                 normalized_query=normalize_query(sanitized_query),
-                document_version=document_version, **abstention.save_fields,
+                document_version=document_version,
+                # An abstention still records which prompt was active: the row
+                # has to drop out of the cache once that prompt is replaced,
+                # exactly like a generated answer. No LLM ran, so there are no
+                # prompt tokens to account for.
+                prompt_version=resolved_prompt.hash, prompt_tokens=None,
+                **abstention.save_fields,
             )
             return
 
@@ -326,9 +341,11 @@ async def _run_query_pipeline(
             query=sanitized_query,
             rewritten_query=rewritten,
             contexts=contexts,
+            system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+            model=resolved_prompt.model_name,
         )
 
-        full_text, token_count, model_used = await stream_tokens(
+        full_text, token_count, model_used, prompt_tokens, prompt_version = await stream_tokens(
             gen_input, query_id, sink.send
         )
         total_tokens = token_count
@@ -381,6 +398,7 @@ async def _run_query_pipeline(
                 "query_id": query_id,
                 "latency_ms": elapsed_ms,
                 "model_used": model_used,
+                "prompt_version": prompt_version,
                 "token_count": total_tokens,
                 "from_cache": False,
             },
@@ -409,6 +427,8 @@ async def _run_query_pipeline(
             token_count=total_tokens,
             normalized_query=normalize_query(sanitized_query),
             document_version=document_version,
+            prompt_tokens=prompt_tokens,
+            prompt_version=prompt_version,
         )
 
     except asyncio.CancelledError:
@@ -448,6 +468,8 @@ async def _save_query(
     normalized_query: str,
     document_version: int,
     edge_case: str | None = None,
+    prompt_tokens: int | None = None,
+    prompt_version: str | None = None,
 ) -> None:
     """Save query result to database."""
     import json as json_mod
@@ -471,6 +493,8 @@ async def _save_query(
             latency_ms=latency_ms,
             token_count=token_count,
             edge_case=edge_case,
+            prompt_tokens=prompt_tokens,
+            prompt_version=prompt_version,
         )
         db.add(query)
         await db.commit()

@@ -9,9 +9,11 @@ from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from app.config import settings
+from app.database import async_session_factory
 from app.evaluation.trust_score import TrustScoreComponents, compute_trust
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.prompts.registry import get_active as get_active_prompt
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.query_rewrite import rewrite as rewrite_query, expand
 from app.retrieval.reranker import rerank
@@ -62,6 +64,9 @@ class CRAGState(TypedDict):
     # Metadata
     model_used: str
     latency_ms: int
+    prompt_version: str | None
+    token_count: int | None
+    prompt_tokens: int | None
     error: str | None
 
 
@@ -145,10 +150,17 @@ def _relevance_check(state: CRAGState) -> Literal["generate", "expand_query", "f
 async def _generate_primary_node(state: CRAGState) -> dict:
     """Generate answer using primary LLM."""
     contexts = state.get("contexts", [])
+
+    # Same pinned prompt/model the standard graph and the WS path use.
+    async with async_session_factory() as db:
+        resolved_prompt = await get_active_prompt(db)
+
     gen_input = GenerationInput(
         query=state["query"],
         rewritten_query=state.get("rewritten_query"),
         contexts=contexts,
+        system_prompt=None if resolved_prompt.is_default else resolved_prompt.content,
+        model=resolved_prompt.model_name,
     )
 
     result: GenerationResult = await generate_answer(gen_input)
@@ -157,6 +169,9 @@ async def _generate_primary_node(state: CRAGState) -> dict:
         "response_text": result.text,
         "model_used": result.model_used,
         "latency_ms": result.latency_ms,
+        "prompt_version": result.prompt_version or None,
+        "token_count": result.token_count,
+        "prompt_tokens": result.prompt_tokens,
         "edge_case": "normal",
     }
 

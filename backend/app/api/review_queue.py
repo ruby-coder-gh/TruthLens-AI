@@ -54,6 +54,7 @@ def _to_item(query: Query) -> ReviewQueueItem:
         trust_components=query.trust_components or {},
         guardrail_score=query.guardrail_score,
         guardrail_passed=query.guardrail_passed,
+        prompt_version=query.prompt_version,
         review_status=query.review_status,
         review_note=query.review_note,
         reviewed_by=query.reviewed_by,

@@ -108,6 +108,50 @@ async def test_answer_comparison_persists_rerun_and_returns_source_diff_and_trus
 
 
 @pytest.mark.asyncio
+async def test_answer_comparison_persists_prompt_version_and_token_counts(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """The A/B view needs "v3 → v4": the rerun row must record its provenance.
+
+    Also fixes the rerun writing `token_count=None` — the graph now reports the
+    counts the provider gave us.
+    """
+    workspace_id, [original, *_] = await _seed_queries(client, auth_headers, test_db, count=1)
+
+    async def fake_rerun(**_: object):
+        return {
+            "query_id": str(uuid.uuid4()),
+            "workspace_document_version": 2,
+            "response_text": "A revised answer",
+            "contexts": [],
+            "trust_score": 0.7,
+            "trust_components": {},
+            "guardrail_result": {"passed": True, "score": 0.9},
+            "model_used": "served:7b",
+            "latency_ms": 23,
+            "prompt_version": "deadbeef1234",
+            "token_count": 42,
+            "prompt_tokens": 120,
+        }
+
+    monkeypatch.setattr("app.api.queries._run_fresh_query", fake_rerun)
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/queries/{original.id}/compare", headers=auth_headers
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["rerun"]["prompt_version"] == "deadbeef1234"
+    assert body["rerun"]["token_count"] == 42
+    assert body["rerun"]["prompt_tokens"] == 120
+
+    rerun = (await test_db.execute(select(Query).where(Query.id == body["rerun"]["id"]))).scalar_one()
+    assert rerun.prompt_version == "deadbeef1234"
+    assert rerun.token_count == 42
+    assert rerun.prompt_tokens == 120
+
+
+@pytest.mark.asyncio
 async def test_answer_comparison_handles_unchanged_sources(
     client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):

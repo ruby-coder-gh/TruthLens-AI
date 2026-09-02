@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import auth, users, workspaces, documents, admin_documents, queries, feedback, admin, ws, collections, comparisons, investigations, search, review_queue, annotations
+from app.api import auth, users, workspaces, documents, admin_documents, queries, feedback, admin, admin_prompts, ws, collections, comparisons, investigations, search, review_queue, annotations
 
 api_router = APIRouter(prefix="/api")
 
@@ -17,6 +17,7 @@ api_router.include_router(admin_documents.router)
 api_router.include_router(queries.router)
 api_router.include_router(feedback.router)
 api_router.include_router(admin.router)
+api_router.include_router(admin_prompts.router)
 api_router.include_router(collections.router)
 api_router.include_router(comparisons.router)
 api_router.include_router(investigations.router)

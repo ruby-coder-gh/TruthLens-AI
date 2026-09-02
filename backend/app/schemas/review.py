@@ -39,6 +39,7 @@ class ReviewQueueItem(BaseModel):
     trust_components: dict[str, Any] = Field(default_factory=dict)
     guardrail_score: float | None = None
     guardrail_passed: bool | None = None
+    prompt_version: str | None = None
     review_status: ReviewDisposition
     review_note: str | None = None
     reviewed_by: str | None = None

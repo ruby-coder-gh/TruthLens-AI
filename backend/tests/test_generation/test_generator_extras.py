@@ -96,8 +96,12 @@ class TestStreamer:
         async def mock_send(msg: dict) -> None:
             pass
 
-        text, count, model = await stream_tokens(inp, "query-id", mock_send)
+        text, count, model, prompt_tokens, prompt_version = await stream_tokens(
+            inp, "query-id", mock_send
+        )
         # Should return some text even on error
         assert isinstance(text, str)
         assert isinstance(count, int)
         assert isinstance(model, str)
+        assert prompt_tokens is None
+        assert isinstance(prompt_version, str)

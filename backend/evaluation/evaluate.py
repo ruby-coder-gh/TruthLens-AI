@@ -298,6 +298,24 @@ def _print_terminal_report(summary: dict[str, Any]) -> None:
             print(f"  {entry['id']:<10} {status:<8} {m.get('word_f1', 0):<8.4f} {m.get('word_precision', 0):<8.4f} {m.get('word_recall', 0):<8.4f} {m.get('guardrail_score', 0):<8.4f}")
 
 
+async def _resolve_active_prompt() -> Any | None:
+    """Resolve the promoted system prompt, or None to use the code default.
+
+    Standalone runner: a missing/unreadable database must degrade to the
+    generator's own DEFAULT_SYSTEM_PROMPT rather than abort the evaluation.
+    """
+    try:
+        from app.database import async_session_factory
+        from app.prompts.registry import get_active
+
+        async with async_session_factory() as db:
+            resolved = await get_active(db)
+    except Exception as e:  # noqa: BLE001 — standalone script, best effort
+        print(f"  ! prompt registry unavailable ({e}); using the default prompt")
+        return None
+    return None if resolved.is_default else resolved
+
+
 async def evaluate_pipeline(
     ollama_url: str = "http://localhost:11434",
     model: str = "qwen3:4b",
@@ -332,6 +350,8 @@ async def evaluate_pipeline(
     if limit:
         dataset = dataset[:limit]
 
+    resolved_prompt = await _resolve_active_prompt()
+
     results: list[dict[str, Any]] = []
     total_start = time.time()
 
@@ -349,6 +369,8 @@ async def evaluate_pipeline(
             gen_input = GenerationInput(
                 query=query,
                 contexts=[{"content": ground_truth, "chunk_id": "gd-ref", "score": 1.0}],
+                system_prompt=resolved_prompt.content if resolved_prompt else None,
+                model=resolved_prompt.model_name if resolved_prompt else None,
             )
             gen_result = await generate_answer(gen_input)
 
