@@ -1,8 +1,24 @@
-"""Shared Markdown rendering helpers for evidence-backed exports."""
+"""Shared Markdown rendering and tabular export helpers."""
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+import csv
+from io import StringIO
+from typing import Any, Iterable, Sequence
+
+
+def rows_to_csv(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> str:
+    """Render tabular rows to a CSV string via the stdlib `csv` module.
+
+    Uses `csv.writer`'s standard quoting rules, so values containing commas,
+    double-quotes, or newlines are escaped correctly (quoted, with embedded
+    quotes doubled) and round-trip cleanly through `csv.reader`.
+    """
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return buffer.getvalue()
 
 
 def render_evidence_markdown(sources: Iterable[dict[str, Any]]) -> str:

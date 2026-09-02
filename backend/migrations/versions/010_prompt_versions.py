@@ -1,12 +1,13 @@
-"""Add prompt_versions table, queries.prompt_version/prompt_tokens, eval_runs gate columns.
+"""Add queries.prompt_tokens.
 
 Revision ID: 010
 Revises: 009
+Create Date: 2026-09-02
 """
-from __future__ import annotations
 
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
+
 
 revision = "010"
 down_revision = "009"
@@ -15,9 +16,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Filled in by the owning sprint lane (see plan: migration slots).
-    pass
+    op.add_column("queries", sa.Column("prompt_tokens", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:
-    pass
+    with op.batch_alter_table("queries") as batch_op:
+        batch_op.drop_column("prompt_tokens")

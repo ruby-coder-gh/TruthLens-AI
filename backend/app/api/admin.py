@@ -6,13 +6,13 @@ import asyncio
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_serializer, field_validator
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 from app.config import settings
 from app.core.auth import hash_password
@@ -26,14 +26,19 @@ from app.models.feedback import Feedback
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.report_export import rows_to_csv
 from app.schemas._datetime import utc_iso
 from app.schemas.analytics import (
     AdminSettingsResponse,
     AdminSettingsUpdate,
     EvalRunResponse,
     FlaggedAnswerResponse,
+    PricingResponse,
     TrustScoreDistribution,
+    UsageReportResponse,
+    UsageRow,
     UsageStatsResponse,
+    UsageTotals,
     UserActivityResponse,
 )
 from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
@@ -48,6 +53,25 @@ _settings_overrides: dict[str, Any] = {}
 TRUST_SCORE_LOW_THRESHOLD = 0.4
 MIN_PAGE_SIZE = 1
 MAX_PAGE_SIZE = 100
+
+
+def _to_naive_utc(dt: datetime | None) -> datetime | None:
+    """Normalize an optional (possibly tz-aware) datetime to naive UTC.
+
+    Stored timestamps (`created_at` columns) are naive UTC on SQLite (see
+    `app/schemas/_datetime.py`), so incoming filter bounds must match that
+    representation for the SQL comparison to be correct.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _export_timestamp() -> str:
+    """UTC timestamp suitable for embedding in export filenames."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 # ─── Inline schemas for admin-only operations ────────────────────────
@@ -137,39 +161,80 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
     )
 
 
+def _apply_audit_log_filters(
+    stmt: Any,
+    *,
+    action: str | None,
+    q: str | None,
+    user_id: str | None,
+    resource_type: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> Any:
+    """Apply the shared audit-log filter set to a select(...) statement.
+
+    Used for both the data query and the count query (list endpoint) and
+    the export query, so filtering stays identical across all three.
+    """
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+
+    if q:
+        search_term = f"%{q.strip()}%"
+        stmt = stmt.where(or_(
+            AuditLog.action.ilike(search_term),
+            AuditLog.resource_type.ilike(search_term),
+            AuditLog.resource_id.ilike(search_term),
+            AuditLog.details.ilike(search_term),
+            AuditLog.ip_address.ilike(search_term),
+        ))
+
+    if user_id:
+        stmt = stmt.where(AuditLog.user_id == user_id)
+
+    if resource_type:
+        stmt = stmt.where(AuditLog.resource_type == resource_type)
+
+    naive_from = _to_naive_utc(date_from)
+    if naive_from:
+        stmt = stmt.where(AuditLog.created_at >= naive_from)
+
+    naive_to = _to_naive_utc(date_to)
+    if naive_to:
+        stmt = stmt.where(AuditLog.created_at <= naive_to)
+
+    return stmt
+
+
 @router.get("/logs", response_model=PaginatedResponse[AuditLogResponse])
 async def get_audit_logs(
     page: int = 1,
     page_size: int = 50,
     action: str | None = None,
     q: str | None = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Get audit log entries (admin only).
 
     `q` performs a case-insensitive substring match across the meaningful
     text columns (action, resource_type, resource_id, details, ip_address).
+    `user_id`/`resource_type` are exact matches; `date_from`/`date_to` (ISO
+    8601) bound `created_at` inclusively.
     """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
-    query = select(AuditLog)
-    count_query = select(func.count(AuditLog.id))
-
-    if action:
-        query = query.where(AuditLog.action == action)
-        count_query = count_query.where(AuditLog.action == action)
-
-    if q:
-        search_term = f"%{q.strip()}%"
-        search_filter = or_(
-            AuditLog.action.ilike(search_term),
-            AuditLog.resource_type.ilike(search_term),
-            AuditLog.resource_id.ilike(search_term),
-            AuditLog.details.ilike(search_term),
-            AuditLog.ip_address.ilike(search_term),
-        )
-        query = query.where(search_filter)
-        count_query = count_query.where(search_filter)
+    query = _apply_audit_log_filters(
+        select(AuditLog), action=action, q=q, user_id=user_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+    count_query = _apply_audit_log_filters(
+        select(func.count(AuditLog.id)), action=action, q=q, user_id=user_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
 
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -195,6 +260,93 @@ async def get_audit_logs(
             for log in logs
         ],
         meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.get("/logs/export")
+async def export_audit_logs(
+    format: Literal["csv", "json"] = "csv",
+    action: str | None = None,
+    q: str | None = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export audit log entries as CSV or JSON (admin only).
+
+    Bypasses the list endpoint's page-size clamp but hard-caps the result at
+    `AUDIT_EXPORT_MAX_ROWS`, ordered newest-first. The export itself is
+    audited (mirrors `investigations.py` audit-bundle export).
+    """
+    stmt = _apply_audit_log_filters(
+        select(AuditLog),
+        action=action, q=q, user_id=user_id, resource_type=resource_type,
+        date_from=date_from, date_to=date_to,
+    )
+    stmt = stmt.order_by(AuditLog.created_at.desc()).limit(settings.AUDIT_EXPORT_MAX_ROWS)
+    result = await db.execute(stmt)
+    logs = result.scalars().all()
+
+    ts = _export_timestamp()
+    filters_summary = {
+        "action": action,
+        "q": q,
+        "user_id": user_id,
+        "resource_type": resource_type,
+        "date_from": utc_iso(date_from),
+        "date_to": utc_iso(date_to),
+    }
+
+    if format == "json":
+        payload = [
+            AuditLogResponse(
+                id=log.id,
+                user_id=log.user_id,
+                action=log.action,
+                resource_type=log.resource_type,
+                resource_id=log.resource_id,
+                details=json.loads(log.details) if log.details else None,
+                ip_address=log.ip_address,
+                created_at=log.created_at,
+            ).model_dump(mode="json")
+            for log in logs
+        ]
+        content: str = json.dumps(payload)
+        media_type = "application/json"
+        filename = f"audit-log-{ts}.json"
+    else:
+        headers = ["id", "created_at", "user_id", "action", "resource_type", "resource_id", "ip_address", "details"]
+        csv_rows = [
+            [
+                log.id,
+                utc_iso(log.created_at),
+                log.user_id or "",
+                log.action,
+                log.resource_type,
+                log.resource_id or "",
+                log.ip_address or "",
+                log.details or "",
+            ]
+            for log in logs
+        ]
+        content = rows_to_csv(headers, csv_rows)
+        media_type = "text/csv"
+        filename = f"audit-log-{ts}.csv"
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="audit.export",
+        resource_type="audit_log",
+        details=json.dumps({"format": format, "filters": filters_summary, "row_count": len(logs)}),
+    ))
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -648,6 +800,238 @@ async def get_trust_score_distribution(
         TrustScoreDistribution(range="51-75", count=row.bucket_51_75 or 0),
         TrustScoreDistribution(range="76-100", count=row.bucket_76_100 or 0),
     ]
+
+
+# ─── Usage & Cost Reporting ─────────────────────────────────────────
+
+UsageGroupBy = Literal["user", "workspace", "model"]
+
+
+def _parse_model_pricing() -> dict[str, dict[str, float]]:
+    """Parse `settings.MODEL_PRICING_JSON` into a rate map.
+
+    Malformed JSON, a non-dict top level, or a malformed per-model entry is
+    dropped (never raises) — an unrecognized/unparseable model simply costs
+    $0, same as a local Ollama model that was never priced.
+    """
+    try:
+        raw = json.loads(settings.MODEL_PRICING_JSON or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    parsed: dict[str, dict[str, float]] = {}
+    for model, rates in raw.items():
+        if not isinstance(rates, dict):
+            continue
+        try:
+            parsed[model] = {
+                "input_per_1k": float(rates.get("input_per_1k", 0) or 0),
+                "output_per_1k": float(rates.get("output_per_1k", 0) or 0),
+            }
+        except (TypeError, ValueError):
+            continue
+    return parsed
+
+
+def _model_cost(model: str, prompt_tokens: int, output_tokens: int, pricing: dict[str, dict[str, float]]) -> float:
+    """Estimated cost for one model's token usage; $0 for an unpriced model."""
+    rates = pricing.get(model)
+    if not rates:
+        return 0.0
+    return (prompt_tokens / 1000) * rates.get("input_per_1k", 0.0) + (output_tokens / 1000) * rates.get("output_per_1k", 0.0)
+
+
+async def _usage_rollup(
+    db: AsyncSession,
+    group_by: UsageGroupBy,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, dict[str, float]]]:
+    """Aggregate query usage grouped by user/workspace/model.
+
+    The grouped `select(...)` always breaks out `model` as an extra grouping
+    dimension (in addition to the requested `group_by` key) so that a group
+    spanning more than one model (e.g. a user who queried both a local and a
+    priced model) still gets a correct, per-model-weighted `est_cost_usd`
+    instead of one blended rate applied to a mixed token pool. The per-model
+    rows for the same key are merged in Python after the single query runs.
+    """
+    model_col = func.coalesce(Query.model_used, "unknown")
+    # Heterogeneous across branches (labeled `coalesce(...)` expressions vs.
+    # plain mapped columns) — typed loosely on purpose, only used to build
+    # the SELECT/GROUP BY below.
+    key_col: Any
+    label_col: Any
+
+    if group_by == "user":
+        key_col = func.coalesce(Query.user_id, "unattributed")
+        label_col = func.coalesce(User.username, "Unattributed")
+        stmt = select(
+            key_col.label("key"),
+            label_col.label("label"),
+            model_col.label("model"),
+            func.count(Query.id).label("queries"),
+            func.coalesce(func.sum(Query.token_count), 0).label("output_tokens"),
+            func.coalesce(func.sum(Query.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(Query.latency_ms), 0).label("latency_sum"),
+            func.coalesce(func.sum(Query.cache_hit_count), 0).label("cache_hits"),
+        ).outerjoin(User, Query.user_id == User.id)
+    elif group_by == "workspace":
+        key_col = Workspace.id
+        label_col = Workspace.name
+        stmt = select(
+            key_col.label("key"),
+            label_col.label("label"),
+            model_col.label("model"),
+            func.count(Query.id).label("queries"),
+            func.coalesce(func.sum(Query.token_count), 0).label("output_tokens"),
+            func.coalesce(func.sum(Query.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(Query.latency_ms), 0).label("latency_sum"),
+            func.coalesce(func.sum(Query.cache_hit_count), 0).label("cache_hits"),
+        ).outerjoin(Workspace, Query.workspace_id == Workspace.id)
+    else:  # model
+        key_col = model_col
+        label_col = model_col
+        stmt = select(
+            key_col.label("key"),
+            label_col.label("label"),
+            model_col.label("model"),
+            func.count(Query.id).label("queries"),
+            func.coalesce(func.sum(Query.token_count), 0).label("output_tokens"),
+            func.coalesce(func.sum(Query.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(Query.latency_ms), 0).label("latency_sum"),
+            func.coalesce(func.sum(Query.cache_hit_count), 0).label("cache_hits"),
+        )
+
+    naive_from = _to_naive_utc(date_from)
+    if naive_from:
+        stmt = stmt.where(Query.created_at >= naive_from)
+    naive_to = _to_naive_utc(date_to)
+    if naive_to:
+        stmt = stmt.where(Query.created_at <= naive_to)
+
+    stmt = stmt.group_by(key_col, label_col, model_col)
+    result = await db.execute(stmt)
+    raw_rows = result.all()
+
+    pricing = _parse_model_pricing()
+    merged: dict[str, dict[str, Any]] = {}
+    for row in raw_rows:
+        entry = merged.setdefault(row.key, {
+            "key": row.key,
+            "label": row.label,
+            "queries": 0,
+            "output_tokens": 0,
+            "prompt_tokens": 0,
+            "latency_sum": 0,
+            "cache_hits": 0,
+            "est_cost_usd": 0.0,
+        })
+        entry["queries"] += row.queries
+        entry["output_tokens"] += row.output_tokens
+        entry["prompt_tokens"] += row.prompt_tokens
+        entry["latency_sum"] += row.latency_sum
+        entry["cache_hits"] += row.cache_hits
+        entry["est_cost_usd"] += _model_cost(row.model, row.prompt_tokens, row.output_tokens, pricing)
+
+    rows_out: list[dict[str, Any]] = []
+    totals = {"queries": 0, "output_tokens": 0, "prompt_tokens": 0, "latency_sum": 0, "cache_hits": 0, "est_cost_usd": 0.0}
+    for entry in merged.values():
+        avg_latency = round(entry["latency_sum"] / entry["queries"], 2) if entry["queries"] else None
+        rows_out.append({
+            "key": str(entry["key"]),
+            "label": str(entry["label"]),
+            "queries": entry["queries"],
+            "output_tokens": entry["output_tokens"],
+            "prompt_tokens": entry["prompt_tokens"],
+            "avg_latency_ms": avg_latency,
+            "cache_hits": entry["cache_hits"],
+            "est_cost_usd": round(entry["est_cost_usd"], 8),
+        })
+        for k in ("queries", "output_tokens", "prompt_tokens", "latency_sum", "cache_hits"):
+            totals[k] += entry[k]
+        totals["est_cost_usd"] += entry["est_cost_usd"]
+
+    rows_out.sort(key=lambda r: r["label"])
+    totals_out = {
+        "queries": totals["queries"],
+        "output_tokens": totals["output_tokens"],
+        "prompt_tokens": totals["prompt_tokens"],
+        "avg_latency_ms": round(totals["latency_sum"] / totals["queries"], 2) if totals["queries"] else None,
+        "cache_hits": totals["cache_hits"],
+        "est_cost_usd": round(totals["est_cost_usd"], 8),
+    }
+    return rows_out, totals_out, pricing
+
+
+@router.get("/usage", response_model=UsageReportResponse)
+async def get_usage_report(
+    group_by: UsageGroupBy = "model",
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Usage & estimated cost rolled up by user/workspace/model (admin only).
+
+    Cost is an *estimate*: `token_count` is currently output word-count (see
+    `generator.py`) rather than true provider tokens, and only models present
+    in `MODEL_PRICING_JSON` are priced — everything else (e.g. local Ollama
+    models) costs $0.
+    """
+    rows, totals, pricing = await _usage_rollup(db, group_by, date_from, date_to)
+    return UsageReportResponse(
+        rows=[UsageRow(**row) for row in rows],
+        totals=UsageTotals(**totals),
+        pricing_source="config" if pricing else "none",
+        period={"from": utc_iso(date_from), "to": utc_iso(date_to)},
+    )
+
+
+@router.get("/usage/pricing", response_model=PricingResponse)
+async def get_usage_pricing():
+    """Return the parsed `MODEL_PRICING_JSON` rate map (admin only)."""
+    return PricingResponse(pricing=_parse_model_pricing())
+
+
+@router.get("/usage/export")
+async def export_usage_report(
+    format: Literal["csv"] = "csv",
+    group_by: UsageGroupBy = "model",
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export the usage & cost rollup as CSV (admin only). Audited."""
+    rows, _totals, _pricing = await _usage_rollup(db, group_by, date_from, date_to)
+
+    headers = ["key", "label", "queries", "output_tokens", "prompt_tokens", "avg_latency_ms", "cache_hits", "est_cost_usd"]
+    csv_rows = [
+        [r["key"], r["label"], r["queries"], r["output_tokens"], r["prompt_tokens"], r["avg_latency_ms"], r["cache_hits"], r["est_cost_usd"]]
+        for r in rows
+    ]
+    content = rows_to_csv(headers, csv_rows)
+    filename = f"usage-{group_by}-{_export_timestamp()}.csv"
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="usage.export",
+        resource_type="usage_report",
+        details=json.dumps({
+            "group_by": group_by,
+            "row_count": len(rows),
+            "date_from": utc_iso(date_from),
+            "date_to": utc_iso(date_to),
+        }),
+    ))
+
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ─── Evaluation history ─────────────────────────────────────────────

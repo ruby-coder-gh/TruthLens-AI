@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     REVIEW_QUEUE_TRUST_THRESHOLD: float = 0.5
     QUERY_PIN_LIMIT: int = 20
 
+    # ─── Usage & Cost Reporting ────────────────
+    # JSON map of model name -> {"input_per_1k": float, "output_per_1k": float}.
+    # Models absent from the map (e.g. local Ollama models) cost $0.
+    MODEL_PRICING_JSON: str = "{}"
+
+    # ─── Audit Export ──────────────────────────
+    AUDIT_EXPORT_MAX_ROWS: int = 50000
+
     # ─── Evaluation ───────────────────────────
     EVAL_MIN_FAITHFULNESS: float = 0.6
     EVAL_MIN_TRUST: float = 0.5
