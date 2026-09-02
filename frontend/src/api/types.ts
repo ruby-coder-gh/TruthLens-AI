@@ -74,6 +74,7 @@ export interface Document {
   uploaded_by: string;
   created_at: string;
   updated_at: string;
+  tags: string[];
 }
 
 export interface DocumentStatus {
@@ -533,4 +534,28 @@ export interface EvalRunNotes {
   };
   thresholds?: EvalThresholds;
   [key: string]: unknown;
+}
+
+// ─── Bulk document operations ────────────────────────────────────────────────
+export type BulkDocumentAction = 'delete' | 'reindex' | 'tag' | 'untag';
+
+export interface BulkDocumentRequest {
+  action: BulkDocumentAction;
+  document_ids: string[];
+  tags?: string[];
+}
+
+export interface BulkDocumentResult {
+  id: string;
+  status: 'ok' | 'accepted' | 'failed';
+  error?: string | null;
+}
+
+export interface BulkDocumentResponse {
+  results: BulkDocumentResult[];
+  summary: {
+    ok: number;
+    accepted: number;
+    failed: number;
+  };
 }

@@ -1,12 +1,21 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FileText, Search, Upload, ChevronRight, Clock } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { Button, Badge, Input, EmptyState } from '../components/ui';
+import { FileText, Search, Upload, ChevronRight, Clock, Tag as TagIcon, Trash2, RefreshCw, AlertTriangle, X } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button, Badge, Input, EmptyState, Modal } from '../components/ui';
+import { useToast } from '../components/toast-context';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
+import type { BulkDocumentAction, BulkDocumentResponse } from '../api/types';
+
+const ACTION_LABELS: Record<BulkDocumentAction, string> = {
+  delete: 'Delete',
+  reindex: 'Reindex',
+  tag: 'Tag',
+  untag: 'Untag',
+};
 
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
@@ -38,22 +47,162 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
 
 export default function AdminDocumentsPage() {
   const navigate = useNavigate();
+  const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
   const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [reindexModalOpen, setReindexModalOpen] = useState(false);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [tagInput, setTagInput] = useState('');
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['admin', 'documents', search, page],
-    queryFn: () => documentApi.listAll({ page, page_size: 20 }),
+    queryKey: ['admin', 'documents', search, tagFilter, page],
+    queryFn: () => documentApi.listAll({
+      page,
+      page_size: 20,
+      search: search || undefined,
+      tags: tagFilter || undefined,
+    }),
     placeholderData: (prev) => prev,
   });
+
+  // Tracks the last `data` reference the selection was pruned against — lets
+  // us detect "the visible set changed" during render and adjust `selected`
+  // synchronously (React's documented "adjust state while rendering" escape
+  // hatch), instead of a useEffect that would set state after an extra paint.
+  const [prunedAgainst, setPrunedAgainst] = useState(data);
+  if (data !== prunedAgainst) {
+    setPrunedAgainst(data);
+    if (data) {
+      // Prune stale ids whenever the visible set changes (new page, new
+      // search, new tag filter, or a same-page refetch after a bulk action).
+      // Pruning against the fetched data — rather than resetting on
+      // page/search/tagFilter change — means a refetch of the *same* page
+      // keeps an unaffected selection intact, while ids that scrolled out of
+      // view (or were deleted) are dropped.
+      const visibleIds = new Set(data.data.map((doc) => doc.id));
+      setSelected((prev) => {
+        let changed = false;
+        const next = new Set<string>();
+        prev.forEach((id) => {
+          if (visibleIds.has(id)) {
+            next.add(id);
+          } else {
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }
 
   const documents = data?.data ?? [];
   const total = data?.meta?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 20));
 
-  const filtered = documents.filter((doc) =>
-    doc.original_filename.toLowerCase().includes(search.toLowerCase()),
-  );
+  const allSelected = documents.length > 0 && documents.every((doc) => selected.has(doc.id));
+  const someSelected = !allSelected && documents.some((doc) => selected.has(doc.id));
+  const selectedDocs = documents.filter((doc) => selected.has(doc.id));
+  const commonTags = selectedDocs.length === 0
+    ? []
+    : selectedDocs.reduce<string[]>(
+      (acc, doc, index) => (index === 0 ? [...(doc.tags ?? [])] : acc.filter((tag) => (doc.tags ?? []).includes(tag))),
+      [],
+    );
+
+  const bulkMutation = useMutation({
+    mutationFn: ({ action, ids, tags }: { action: BulkDocumentAction; ids: string[]; tags?: string[] }) =>
+      documentApi.bulk(action, ids, tags),
+    onSuccess: (response, variables) => {
+      const { ok, accepted, failed } = response.summary;
+      const allFailed = failed > 0 && ok === 0 && accepted === 0;
+      addToast(
+        allFailed
+          ? `All ${failed} failed — selection kept`
+          : `${ACTION_LABELS[variables.action]}: ${ok} ok, ${accepted} accepted, ${failed} failed`,
+        failed > 0 ? 'error' : 'success',
+      );
+      queryClient.invalidateQueries({ queryKey: ['admin', 'documents'] });
+    },
+    onError: (err) => {
+      addToast(err instanceof Error ? err.message : 'Bulk action failed.', 'error');
+    },
+  });
+
+  // Drops only the ids the server actually completed (status "ok"/"accepted")
+  // from the selection, so a failed item stays selected for retry. On a total
+  // failure (every id failed) the selection is left untouched entirely.
+  function clearSucceeded(response: BulkDocumentResponse) {
+    const { ok, accepted, failed } = response.summary;
+    if (failed > 0 && ok === 0 && accepted === 0) return;
+    const succeededIds = new Set(
+      response.results
+        .filter((r) => r.status === 'ok' || r.status === 'accepted')
+        .map((r) => r.id),
+    );
+    setSelected((prev) => {
+      const next = new Set(prev);
+      succeededIds.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        documents.forEach((doc) => next.delete(doc.id));
+      } else {
+        documents.forEach((doc) => next.add(doc.id));
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function confirmDelete() {
+    const ids = Array.from(selected);
+    bulkMutation.mutate(
+      { action: 'delete', ids },
+      { onSuccess: (response) => { clearSucceeded(response); setDeleteModalOpen(false); } },
+    );
+  }
+
+  function confirmReindex() {
+    const ids = Array.from(selected);
+    bulkMutation.mutate(
+      { action: 'reindex', ids },
+      { onSuccess: (response) => { clearSucceeded(response); setReindexModalOpen(false); } },
+    );
+  }
+
+  function applyTags() {
+    const tags = tagInput.split(',').map((t) => t.trim()).filter(Boolean);
+    if (tags.length === 0) return;
+    const ids = Array.from(selected);
+    bulkMutation.mutate(
+      { action: 'tag', ids, tags },
+      { onSuccess: (response) => { clearSucceeded(response); setTagModalOpen(false); setTagInput(''); } },
+    );
+  }
+
+  function removeTag(tag: string) {
+    // Deliberately does not touch selection/close the modal — lets the user
+    // remove several common tags from the same selection in one sitting.
+    const ids = Array.from(selected);
+    bulkMutation.mutate({ action: 'untag', ids, tags: [tag] });
+  }
 
   if (isLoading) {
     return (
@@ -99,15 +248,47 @@ export default function AdminDocumentsPage() {
         />
       </motion.div>
 
-      {/* Search */}
-      <motion.div variants={staggerItem} className="max-w-md">
+      {/* Search + tag filter */}
+      <motion.div variants={staggerItem} className="flex flex-col gap-3 sm:flex-row sm:max-w-2xl">
         <Input
           placeholder="Search documents..."
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           icon={<Search size={16} />}
+          className="sm:max-w-md"
+        />
+        <Input
+          placeholder="Filter by tags (comma-separated)"
+          value={tagFilter}
+          onChange={(e) => { setTagFilter(e.target.value); setPage(1); }}
+          icon={<TagIcon size={16} />}
+          className="sm:max-w-xs"
         />
       </motion.div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <motion.div
+          variants={staggerItem}
+          className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 backdrop-blur-md"
+        >
+          <p className="text-sm font-medium text-text">{selected.size} selected</p>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setTagModalOpen(true)}>
+              <TagIcon size={14} />
+              Tag
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setReindexModalOpen(true)}>
+              <RefreshCw size={14} />
+              Reindex
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setDeleteModalOpen(true)}>
+              <Trash2 size={14} />
+              Delete
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
       {/* Table */}
       <motion.div
@@ -117,35 +298,55 @@ export default function AdminDocumentsPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border bg-card-2/80">
+              <th className="px-4 py-3 w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleSelectAll}
+                  aria-label="Select all documents"
+                  className="h-4 w-4 accent-primary"
+                />
+              </th>
               <th className="px-4 py-3 font-medium text-text-muted">Name</th>
               <th className="px-4 py-3 font-medium text-text-muted">Type</th>
               <th className="px-4 py-3 font-medium text-text-muted">Status</th>
               <th className="px-4 py-3 font-medium text-text-muted">Chunks</th>
               <th className="px-4 py-3 font-medium text-text-muted">Size</th>
+              <th className="px-4 py-3 font-medium text-text-muted">Tags</th>
               <th className="px-4 py-3 font-medium text-text-muted">Uploaded By</th>
               <th className="px-4 py-3 font-medium text-text-muted">Date</th>
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
           <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
-            {filtered.length === 0 ? (
+            {documents.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-12">
+                <td colSpan={10} className="px-4 py-12">
                   <EmptyState
                     icon={<FileText size={24} />}
                     title="No documents found"
-                    description={search ? 'Try a different search term.' : 'No documents have been uploaded yet.'}
+                    description={search || tagFilter ? 'Try a different search term or tag filter.' : 'No documents have been uploaded yet.'}
                   />
                 </td>
               </tr>
             ) : (
-              filtered.map((doc) => (
+              documents.map((doc) => (
                 <motion.tr
                   key={doc.id}
                   variants={staggerItem}
                   onClick={() => navigate(`/admin/documents/${doc.id}`)}
                   className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50 cursor-pointer"
                 >
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(doc.id)}
+                      onChange={() => toggleSelectOne(doc.id)}
+                      aria-label={`Select ${doc.original_filename}`}
+                      className="h-4 w-4 accent-primary"
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-primary-soft shrink-0" />
@@ -158,6 +359,15 @@ export default function AdminDocumentsPage() {
                   </td>
                   <td className="px-4 py-3 text-text tabular-nums">{doc.chunk_count ?? '—'}</td>
                   <td className="px-4 py-3 text-text-muted tabular-nums">{formatFileSize(doc.file_size)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1 max-w-[160px]">
+                      {(doc.tags ?? []).length === 0 ? (
+                        <span className="text-xs text-text-dim">—</span>
+                      ) : (
+                        doc.tags.map((tag) => <Badge key={tag} color="purple">{tag}</Badge>)
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-text-muted text-xs">{doc.uploaded_by}</td>
                   <td className="px-4 py-3 text-text-dim text-xs whitespace-nowrap">
                     <span className="flex items-center gap-1">
@@ -178,7 +388,7 @@ export default function AdminDocumentsPage() {
       {/* Pagination */}
       <motion.div variants={staggerItem} className="flex items-center justify-between">
         <p className="text-xs text-text-muted">
-          Showing {filtered.length} of {total} documents
+          Showing {documents.length} of {total} documents
         </p>
         <div className="flex items-center gap-2">
           <Button
@@ -202,6 +412,98 @@ export default function AdminDocumentsPage() {
           </Button>
         </div>
       </motion.div>
+
+      {/* Tag modal */}
+      <Modal open={tagModalOpen} onClose={() => setTagModalOpen(false)} title="Tag Documents">
+        <div className="space-y-4">
+          <p className="text-sm text-text-muted">
+            Apply tags to <strong className="text-text">{selected.size}</strong> selected document{selected.size === 1 ? '' : 's'}.
+          </p>
+          {commonTags.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-medium text-text-muted">Existing tags</p>
+              <div className="flex flex-wrap gap-2">
+                {commonTags.map((tag) => (
+                  <Badge key={tag} color="purple" className="gap-1.5 pr-1.5">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      aria-label={`Remove tag ${tag}`}
+                      className="ml-1 rounded-full p-0.5 hover:bg-black/20"
+                    >
+                      <X size={10} />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+          <Input
+            label="Add tags (comma-separated)"
+            placeholder="legal, finance"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+          />
+          <div className="flex gap-3">
+            <Button size="sm" loading={bulkMutation.isPending} onClick={applyTags}>
+              Apply Tags
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setTagModalOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete confirm modal */}
+      <Modal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Documents">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-red/20 bg-red/10 p-4">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red" />
+            <div>
+              <p className="text-sm font-medium text-red">Are you sure?</p>
+              <p className="mt-1 text-xs text-text-muted">
+                This will permanently delete <strong className="text-text">{selected.size}</strong> document{selected.size === 1 ? '' : 's'} and all associated chunks.
+              </p>
+            </div>
+          </div>
+          <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-card-2/60 p-2">
+            {selectedDocs.map((doc) => (
+              <li key={doc.id} className="truncate px-2 py-1 text-xs text-text">
+                {doc.original_filename}
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-3">
+            <Button variant="danger" size="sm" loading={bulkMutation.isPending} onClick={confirmDelete}>
+              <Trash2 size={14} />
+              Delete
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setDeleteModalOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reindex confirm modal */}
+      <Modal open={reindexModalOpen} onClose={() => setReindexModalOpen(false)} title="Reindex Documents">
+        <div className="space-y-4">
+          <p className="text-sm text-text-muted">
+            Re-index <strong className="text-text">{selected.size}</strong> document{selected.size === 1 ? '' : 's'}? This will re-process each file and rebuild its embeddings.
+          </p>
+          <div className="flex gap-3">
+            <Button size="sm" loading={bulkMutation.isPending} onClick={confirmReindex}>
+              <RefreshCw size={14} />
+              Reindex
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setReindexModalOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
       </PageShell>
     </motion.div>
   );
