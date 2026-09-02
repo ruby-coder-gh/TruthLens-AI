@@ -208,6 +208,12 @@ export interface ReviewQueueItem {
   created_at: string;
   /** Non-null once this answer has been promoted into the golden set (F7b). */
   golden_entry_id?: string | null;
+  /**
+   * F7c. The live queue no longer lists abstentions, but a promote flow reached
+   * from query history / chat detail can hand one here — and the backend then
+   * rejects any auto-filled reference answer with 422.
+   */
+  edge_case?: QueryEdgeCase | null;
 }
 
 export interface ReviewQueueCount {

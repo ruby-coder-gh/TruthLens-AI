@@ -190,6 +190,11 @@ describe('ChatPage', () => {
     // No citations, no feedback thumbs on an abstention.
     expect(screen.queryByLabelText('Thumbs up')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Thumbs down')).not.toBeInTheDocument();
+
+    // The evidence panel must not present trust 0.0 as a generic low-trust
+    // verdict — an abstention is a correct refusal, not a bad answer.
+    expect(screen.getByText('ABSTAINED')).toBeInTheDocument();
+    expect(screen.queryByText('Flagged')).not.toBeInTheDocument();
   });
 
   it('calls cancel() on the socket when Stop is clicked', async () => {

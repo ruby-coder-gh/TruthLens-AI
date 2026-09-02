@@ -163,8 +163,12 @@ function fileTypeIcon(mime?: string) {
 }
 
 /** Overall status badge at top — a wax-seal stamp once a real trust score exists. */
-function StatusBadge({ trustScore, isLoading, hasError }: { trustScore: number | null; isLoading: boolean; hasError?: boolean }) {
+function StatusBadge({ trustScore, isLoading, hasError, abstained }: { trustScore: number | null; isLoading: boolean; hasError?: boolean; abstained?: boolean }) {
   if (hasError) return <Badge color="red"><XCircle size={10} className="mr-1" /> GENERATION FAILED</Badge>;
+  // F7c — an abstention is a correct refusal persisted at trust 0.0. Falling
+  // through to the wax-seal stamp would brand it "Flagged 0%", i.e. a bad
+  // answer, when in fact no answer was generated at all.
+  if (abstained) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> ABSTAINED</Badge>;
   if (isLoading) return <Badge color="gray"><Loader2 size={10} className="animate-spin mr-1" /> ANALYZING</Badge>;
   if (trustScore === null) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
 
@@ -1029,7 +1033,7 @@ export default function EvidenceSidebar({
                   <h3 className="text-xs font-semibold text-text">
                     Evidence
                   </h3>
-                  <StatusBadge trustScore={trustScore} isLoading={isLoading} hasError={hasError} />
+                  <StatusBadge trustScore={trustScore} isLoading={isLoading} hasError={hasError} abstained={abstained} />
                 </div>
                 <motion.button
                   type="button"

@@ -44,6 +44,15 @@ const DIFFICULTY_OPTIONS = [
 
 const CONTENT_PREVIEW_CHARS = 400;
 
+/** HTTP status off a rejected `request()` — `ApiError` carries one, others don't. */
+function errorStatus(reason: unknown): number | undefined {
+  if (typeof reason === 'object' && reason !== null && 'status' in reason) {
+    const status = (reason as { status?: unknown }).status;
+    if (typeof status === 'number') return status;
+  }
+  return undefined;
+}
+
 function severityColor(severity: string): 'red' | 'orange' | 'gray' {
   const normalized = severity.toLowerCase();
   if (normalized === 'high' || normalized === 'critical') return 'red';
@@ -143,16 +152,24 @@ function QuarantineRow({
 function PromoteGoldenModal({
   item,
   submitting,
+  serverError,
   onClose,
   onSubmit,
 }: {
   item: ReviewQueueItem;
   submitting: boolean;
+  /** Server-side rejection (e.g. 422 REFERENCE_ANSWER_REQUIRED) — shown inline. */
+  serverError: string | null;
   onClose: () => void;
   onSubmit: (payload: { category: GoldenCategory; reference_answer: string; difficulty: number; notes?: string }) => void;
 }) {
+  // An abstention's answer text embeds volatile retrieval counts ("Searched 5
+  // chunks across 2 documents…") which change on every re-index, so it is
+  // worthless as a golden reference answer — the backend returns 422 rather
+  // than bake it in. Start the field empty and make the reviewer write one.
+  const isAbstention = Boolean(item.edge_case);
   const [category, setCategory] = useState<GoldenCategory>('answerable');
-  const [referenceAnswer, setReferenceAnswer] = useState(item.response_text ?? '');
+  const [referenceAnswer, setReferenceAnswer] = useState(isAbstention ? '' : item.response_text ?? '');
   const [difficulty, setDifficulty] = useState('1');
   const [notes, setNotes] = useState('');
   const [touched, setTouched] = useState(false);
@@ -191,15 +208,26 @@ function PromoteGoldenModal({
           options={CATEGORY_OPTIONS}
         />
 
-        <TextArea
-          id="golden-reference-answer"
-          label="Reference answer"
-          rows={5}
-          value={referenceAnswer}
-          error={answerError}
-          onChange={(event) => setReferenceAnswer(event.target.value)}
-          placeholder="Correct the answer before promoting it…"
-        />
+        <div className="space-y-1.5">
+          <TextArea
+            id="golden-reference-answer"
+            label="Reference answer"
+            rows={5}
+            value={referenceAnswer}
+            error={answerError}
+            onChange={(event) => setReferenceAnswer(event.target.value)}
+            placeholder={
+              isAbstention
+                ? 'Write the answer the documents should have supported…'
+                : 'Correct the answer before promoting it…'
+            }
+          />
+          {isAbstention && (
+            <p className="text-xs text-orange">
+              This answer was an abstention — write the reference answer manually.
+            </p>
+          )}
+        </div>
 
         <Select
           id="golden-difficulty"
@@ -217,6 +245,15 @@ function PromoteGoldenModal({
           onChange={(event) => setNotes(event.target.value)}
           placeholder="Why this belongs in the regression set (optional)…"
         />
+
+        {serverError && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red/30 bg-red/10 px-3 py-2 text-xs text-red"
+          >
+            {serverError}
+          </p>
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" size="sm" variant="ghost" onClick={onClose} disabled={submitting}>
@@ -252,6 +289,7 @@ export default function ReviewQueuePage() {
   const [releaseTarget, setReleaseTarget] = useState<QuarantinedChunk | null>(null);
   const [promoteTarget, setPromoteTarget] = useState<ReviewQueueItem | null>(null);
   const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!workspaceId) return undefined;
@@ -371,6 +409,7 @@ export default function ReviewQueuePage() {
       if (!workspaceId || !promoteTarget) return;
       const target = promoteTarget;
       setPromoting(true);
+      setPromoteError(null);
       try {
         const entry = await reviewQueueApi.promoteGolden(workspaceId, target.id, payload);
         setItems((current) =>
@@ -379,10 +418,12 @@ export default function ReviewQueuePage() {
         setPromoteTarget(null);
         addToast('Promoted to the golden set.', 'success');
       } catch (reason) {
-        addToast(
-          reason instanceof Error ? reason.message : 'Could not promote this answer.',
-          'error',
-        );
+        const message = reason instanceof Error ? reason.message : 'Could not promote this answer.';
+        // 422 (REFERENCE_ANSWER_REQUIRED) is a field-level rejection: keep the
+        // modal open with the server's wording so the reviewer can fix it in
+        // place. A toast alone would dismiss itself and lose the reason.
+        setPromoteError(message);
+        if (errorStatus(reason) !== 422) addToast(message, 'error');
       } finally {
         setPromoting(false);
       }
@@ -409,7 +450,18 @@ export default function ReviewQueuePage() {
   const changeTab = useCallback((tabId: string) => {
     setReleaseTarget(null);
     setPromoteTarget(null);
+    setPromoteError(null);
     setActiveTab(tabId);
+  }, []);
+
+  const openPromote = useCallback((item: ReviewQueueItem) => {
+    setPromoteError(null);
+    setPromoteTarget(item);
+  }, []);
+
+  const closePromote = useCallback(() => {
+    setPromoteError(null);
+    setPromoteTarget(null);
   }, []);
 
   return (
@@ -497,7 +549,7 @@ export default function ReviewQueuePage() {
                           <XCircle size={13} /> Dismiss
                         </Button>
                         {!item.golden_entry_id && (
-                          <Button size="sm" variant="ghost" onClick={() => setPromoteTarget(item)}>
+                          <Button size="sm" variant="ghost" onClick={() => openPromote(item)}>
                             <Sparkles size={13} /> Promote to golden set
                           </Button>
                         )}
@@ -582,9 +634,11 @@ export default function ReviewQueuePage() {
 
       {promoteTarget && (
         <PromoteGoldenModal
+          key={promoteTarget.id}
           item={promoteTarget}
           submitting={promoting}
-          onClose={() => setPromoteTarget(null)}
+          serverError={promoteError}
+          onClose={closePromote}
           onSubmit={(payload) => void promote(payload)}
         />
       )}

@@ -41,6 +41,11 @@ vi.mock('../api/client', () => ({
   workspaceApi: { get: mockWorkspaceGet },
 }));
 
+/** Mirrors `ApiError` from client.ts — an Error carrying an HTTP `status`. */
+function apiError(message: string, status: number): Error & { status: number } {
+  return Object.assign(new Error(message), { status });
+}
+
 function makeItem(overrides: Partial<ReviewQueueItem> = {}): ReviewQueueItem {
   return {
     id: 'q-1',
@@ -201,5 +206,47 @@ describe('ReviewQueuePage', () => {
 
     expect(await screen.findByText(/golden ✓/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /promote to golden set/i })).not.toBeInTheDocument();
+  });
+
+  // The abstention text embeds volatile retrieval counts, so the backend rejects
+  // it as a golden reference answer (422 REFERENCE_ANSWER_REQUIRED).
+  it('does not prefill the reference answer for an abstention and shows a hint', async () => {
+    mockList.mockResolvedValue({
+      data: [makeItem({
+        edge_case: 'insufficient_evidence',
+        response_text: 'I cannot find this information in your documents. Searched 5 chunks across 2 documents…',
+      })],
+      meta: { page: 1, page_size: 20, total: 1, enabled: true },
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /promote to golden set/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText(/reference answer/i)).toHaveValue('');
+    expect(
+      within(dialog).getByText(/this answer was an abstention — write the reference answer manually/i),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the promote modal open and shows the server message on a 422', async () => {
+    mockPromoteGolden.mockRejectedValue(
+      apiError('A reviewer-written reference answer is required for an abstention.', 422),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /promote to golden set/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^promote$/i }));
+
+    await waitFor(() => expect(mockPromoteGolden).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      await within(screen.getByRole('dialog')).findByRole('alert'),
+    ).toHaveTextContent('A reviewer-written reference answer is required for an abstention.');
   });
 });
