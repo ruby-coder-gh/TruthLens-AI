@@ -20,7 +20,14 @@ from app.core.auth import hash_password
 from app.core.refresh_tokens import revoke_all_refresh_tokens
 from app.core.deps import get_current_admin, get_db
 from app.core.exceptions import ConflictException, NotFoundException
-from app.evaluation.golden_store import golden_counts, golden_set_version, load_promoted_entries
+from app.evaluation.golden_store import (
+    STATUS_APPROVED as GOLDEN_STATUS_APPROVED,
+)
+from app.evaluation.golden_store import (
+    golden_counts,
+    golden_set_version,
+    list_promoted_entries,
+)
 from app.models.audit_log import AuditLog
 from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.document import Document
@@ -46,7 +53,7 @@ from app.schemas.analytics import (
     UserActivityResponse,
 )
 from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
-from app.schemas.golden import GoldenEntryResponse
+from app.schemas.golden import GoldenEntryResponse, GoldenStatus
 from app.schemas.quarantine import QuarantineChunkResponse, to_quarantine_response
 from app.schemas.user import UserResponse
 from app.utils.logger import logger
@@ -1232,6 +1239,9 @@ def _builtin_golden_responses() -> list[GoldenEntryResponse]:
             difficulty=entry.difficulty,
             notes=entry.notes or None,
             source="builtin",
+            # The hard-coded dataset is the curated baseline: it is in force
+            # unconditionally, so it is `approved` by definition.
+            status=GOLDEN_STATUS_APPROVED,
         )
         for index, entry in enumerate(get_golden_dataset())
     ]
@@ -1240,6 +1250,7 @@ def _builtin_golden_responses() -> list[GoldenEntryResponse]:
 @router.get("/golden", response_model=PaginatedResponse[GoldenEntryResponse])
 async def list_golden_entries(
     source: Literal["promoted", "builtin", "all"] = "promoted",
+    status: GoldenStatus | None = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -1248,14 +1259,22 @@ async def list_golden_entries(
 
     Paginates over an in-memory merge: the builtin dataset is a fixed ~100-entry
     Python list, so there is nothing to gain from pushing this into SQL.
+
+    `status` narrows promoted rows to `pending` (the admin's approval queue) or
+    `approved` (what an eval run actually scores). Builtin entries are always
+    `approved`, so `status=pending` never returns any. Omitting it returns both,
+    which is what the approval screen needs.
     """
     page = max(1, page)
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
     entries: list[GoldenEntryResponse] = []
-    if source in ("builtin", "all"):
+    if source in ("builtin", "all") and status in (None, GOLDEN_STATUS_APPROVED):
         entries.extend(_builtin_golden_responses())
     if source in ("promoted", "all"):
-        entries.extend(GoldenEntryResponse.from_row(row) for row in await load_promoted_entries(db))
+        entries.extend(
+            GoldenEntryResponse.from_row(row)
+            for row in await list_promoted_entries(db, status=status)
+        )
     offset = (page - 1) * page_size
     counts = await golden_counts(db)
     return PaginatedResponse(
@@ -1265,11 +1284,54 @@ async def list_golden_entries(
             "page_size": page_size,
             "total": len(entries),
             "source": source,
+            "status": status,
             "builtin_count": counts["builtin"],
             "promoted_count": counts["promoted"],
             "golden_set_version": await golden_set_version(db),
         },
     )
+
+
+@router.post("/golden/{entry_id}/approve", response_model=GoldenEntryResponse)
+async def approve_golden_entry(
+    entry_id: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admit a promoted entry into the golden set that gates prompt promotion.
+
+    Until this runs the entry is `pending` and no eval run sees it, so the
+    reviewer who promoted it cannot steer the gate. Idempotent: re-approving an
+    approved entry returns it unchanged rather than restamping the approver, so
+    the audit trail keeps naming whoever actually made the call.
+    """
+    entry = (await db.execute(
+        select(GoldenEntry).where(GoldenEntry.id == entry_id)
+    )).scalar_one_or_none()
+    if not entry:
+        raise NotFoundException("GoldenEntry", entry_id)
+
+    if entry.status != GOLDEN_STATUS_APPROVED:
+        entry.status = GOLDEN_STATUS_APPROVED
+        entry.approved_by = current_user.id
+        entry.approved_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(entry)
+        db.add(AuditLog(
+            user_id=current_user.id,
+            action="golden.approve",
+            resource_type="golden_entry",
+            resource_id=entry.id,
+            details=json.dumps({
+                # Who proposed it — the whole point of the gate is that this is
+                # someone other than the approver.
+                "promoted_by": entry.created_by,
+                "source_query_id": entry.source_query_id,
+                "workspace_id": entry.workspace_id,
+                "category": entry.category,
+            }),
+        ))
+    return GoldenEntryResponse.from_row(entry)
 
 
 @router.delete("/golden/{entry_id}", status_code=204)

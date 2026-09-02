@@ -86,12 +86,17 @@ async def load_eval_entries(db: Any, subset: str | None = None) -> list[Any]:
     This is what an application eval run scores; `run_golden_eval` calls it
     whenever `entries` is omitted.
 
-    A smoke run samples the builtin set but keeps **every** promoted entry.
-    Sampling them too would make the default gate path silently ignore the
-    corrections a reviewer deliberately recorded — which is the whole point of
-    promoting one. The promoted set is human-curated and therefore small; a
-    deployment that grows it far enough to slow smoke runs down should be
-    running `subset=full` anyway.
+    Only admin-approved promotions are visible here — `load_golden_entries`
+    filters them — so a non-admin cannot steer the gate by promoting entries.
+
+    A smoke run samples the builtin set down to 5 entries and takes at most
+    `EVAL_SMOKE_PROMOTED_LIMIT` promoted ones. Sampling promoted entries away
+    entirely would make the default gate path silently ignore the corrections a
+    reviewer deliberately recorded; keeping *every* one lets a bulk promoter
+    dominate the unweighted metric means the gate reads. The subset is the
+    oldest N by `(created_at, id)`, which is the order `load_promoted_entries`
+    already returns — so two runs over the same table score the same entries.
+    A deployment that wants all of them should run `subset=full`.
     """
     from evaluation.golden_dataset import get_golden_dataset
 
@@ -104,7 +109,8 @@ async def load_eval_entries(db: Any, subset: str | None = None) -> list[Any]:
     # `load_golden_entries` returns builtin first, then promoted (documented
     # contract), so the split point is the builtin length.
     builtin_count = len(get_golden_dataset())
-    return _smoke_sample(entries[:builtin_count]) + entries[builtin_count:]
+    promoted_limit = max(0, settings.EVAL_SMOKE_PROMOTED_LIMIT)
+    return _smoke_sample(entries[:builtin_count]) + entries[builtin_count:][:promoted_limit]
 
 
 # Phrases a well-behaved system emits when it declines to answer. Kept in sync

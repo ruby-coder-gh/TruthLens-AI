@@ -10,7 +10,9 @@ stays deterministic.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import DeclarativeBase, TimestampMixin, UUIDPkMixin
@@ -28,6 +30,19 @@ class GoldenEntry(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     category: Mapped[str] = mapped_column(String(32), nullable=False, default="answerable")
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Approval gate. `promote-golden` is reachable by any workspace editor, and
+    # any authenticated user can create a workspace and become its owner — so a
+    # promotion is a *proposal*. Only `approved` rows are loaded by
+    # `app.evaluation.golden_store`, which feeds the eval gate on admin prompt
+    # promotion. An admin promoting through the same route is approved on the
+    # spot; everyone else needs POST /admin/golden/{id}/approve.
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    approved_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Unique so one reviewed answer yields at most one golden entry (409 on
     # re-promotion). SET NULL rather than CASCADE: deleting the originating
     # query must not silently shrink the golden set.
@@ -47,4 +62,7 @@ class GoldenEntry(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     )
 
     def __repr__(self) -> str:
-        return f"<GoldenEntry(id={self.id}, category={self.category}, question={self.question[:40]})>"
+        return (
+            f"<GoldenEntry(id={self.id}, status={self.status}, "
+            f"category={self.category}, question={self.question[:40]})>"
+        )

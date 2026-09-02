@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # by the promotion gate and lazily marked `error`, so a lost background
     # task can never permanently wedge a prompt version.
     EVAL_RUN_STALE_SECONDS: int = 1800
+    # A smoke run samples the builtin set down to 5 entries, so keeping *every*
+    # approved promoted entry would let a bulk promoter dominate the unweighted
+    # metric means the promotion gate reads. Cap their share instead; the subset
+    # is chosen deterministically (oldest first by created_at, id).
+    EVAL_SMOKE_PROMOTED_LIMIT: int = 10
 
     # ─── JWT Auth ────────────────────────────
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30

@@ -38,12 +38,20 @@ def upgrade() -> None:
         sa.Column("category", sa.String(length=32), nullable=False, server_default="answerable"),
         sa.Column("difficulty", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("notes", sa.Text(), nullable=True),
+        # Approval gate: a promotion is inert until an admin approves it. Any
+        # authenticated user can own a workspace and therefore reach
+        # promote-golden, and promoted rows feed the eval gate that decides
+        # whether an admin may promote a system prompt.
+        sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
+        sa.Column("approved_by", sa.String(length=36), nullable=True),
+        sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("source_query_id", sa.String(length=36), nullable=True),
         sa.Column("workspace_id", sa.String(length=36), nullable=True),
         sa.Column("created_by", sa.String(length=36), nullable=True),
         sa.ForeignKeyConstraint(["source_query_id"], ["queries.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["approved_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         # One golden entry per reviewed answer; re-promotion is a 409.
         sa.UniqueConstraint("source_query_id", name="uq_golden_entries_source_query"),

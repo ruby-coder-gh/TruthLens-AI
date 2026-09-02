@@ -38,6 +38,7 @@ async def test_load_golden_entries_appends_promoted_rows_tagged_with_their_id(te
         category="answerable",
         difficulty=2,
         notes="from review queue",
+        status="approved",
     )
     test_db.add(row)
     await test_db.commit()
@@ -61,7 +62,7 @@ async def test_load_golden_entries_does_not_mutate_the_builtin_dataset(test_db: 
     from evaluation.golden_dataset import get_golden_dataset
     from app.evaluation.golden_store import load_golden_entries
 
-    test_db.add(GoldenEntryRow(question="q", reference_answer="a", category="unanswerable"))
+    test_db.add(GoldenEntryRow(question="q", reference_answer="a", category="unanswerable", status="approved"))
     await test_db.commit()
 
     before = len(get_golden_dataset())
@@ -87,11 +88,11 @@ async def test_golden_set_version_changes_on_every_promotion(test_db: AsyncSessi
 
     baseline = await golden_set_version(test_db)
 
-    test_db.add(GoldenEntryRow(question="q1", reference_answer="a1"))
+    test_db.add(GoldenEntryRow(question="q1", reference_answer="a1", status="approved"))
     await test_db.commit()
     after_first = await golden_set_version(test_db)
 
-    test_db.add(GoldenEntryRow(question="q2", reference_answer="a2"))
+    test_db.add(GoldenEntryRow(question="q2", reference_answer="a2", status="approved"))
     await test_db.commit()
     after_second = await golden_set_version(test_db)
 
@@ -105,8 +106,8 @@ async def test_golden_set_version_is_stable_for_the_same_promotions(test_db: Asy
     from app.evaluation.golden_store import golden_set_version
 
     test_db.add_all([
-        GoldenEntryRow(question="q1", reference_answer="a1"),
-        GoldenEntryRow(question="q2", reference_answer="a2"),
+        GoldenEntryRow(question="q1", reference_answer="a1", status="approved"),
+        GoldenEntryRow(question="q2", reference_answer="a2", status="approved"),
     ])
     await test_db.commit()
 
@@ -173,3 +174,55 @@ async def test_editing_the_dataset_file_invalidates_the_memoized_hash(test_db: A
 
     assert await golden_store.golden_set_version(test_db) != baseline
     golden_store._builtin_digest_cache.clear()
+
+
+# ─── SEC-1: only admin-approved promotions reach an eval run ─────────
+
+
+@pytest.mark.asyncio
+async def test_pending_entries_are_never_loaded_for_evaluation(test_db: AsyncSession):
+    """A `pending` row is inert: not loaded, and it does not move the version."""
+    from app.evaluation.golden_store import (
+        golden_set_version,
+        load_golden_entries,
+        load_promoted_entries,
+    )
+
+    baseline = await golden_set_version(test_db)
+    test_db.add(GoldenEntryRow(question="unapproved?", reference_answer="a", status="pending"))
+    await test_db.commit()
+
+    assert await load_promoted_entries(test_db) == []
+    assert len(await load_golden_entries(test_db)) == _builtin_count()
+    assert await golden_set_version(test_db) == baseline
+
+
+@pytest.mark.asyncio
+async def test_only_approved_rows_are_hashed_into_the_version(test_db: AsyncSession):
+    """Two rows, one approved: the version equals the approved-only version."""
+    from app.evaluation.golden_store import golden_set_version
+
+    test_db.add(GoldenEntryRow(question="approved?", reference_answer="a", status="approved"))
+    await test_db.commit()
+    approved_only = await golden_set_version(test_db)
+
+    test_db.add(GoldenEntryRow(question="pending?", reference_answer="b", status="pending"))
+    await test_db.commit()
+
+    assert await golden_set_version(test_db) == approved_only
+
+
+@pytest.mark.asyncio
+async def test_list_promoted_entries_shows_pending_rows_for_the_admin_surface(test_db: AsyncSession):
+    """Admins must be able to *see* pending rows in order to approve them."""
+    from app.evaluation.golden_store import list_promoted_entries
+
+    test_db.add_all([
+        GoldenEntryRow(question="p?", reference_answer="a", status="pending"),
+        GoldenEntryRow(question="a?", reference_answer="b", status="approved"),
+    ])
+    await test_db.commit()
+
+    assert {row.question for row in await list_promoted_entries(test_db)} == {"p?", "a?"}
+    assert [row.question for row in await list_promoted_entries(test_db, status="pending")] == ["p?"]
+    assert [row.question for row in await list_promoted_entries(test_db, status="approved")] == ["a?"]

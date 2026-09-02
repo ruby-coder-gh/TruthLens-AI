@@ -11,6 +11,9 @@ from app.schemas._datetime import utc_iso
 
 GoldenCategory = Literal["answerable", "unanswerable", "ambiguous"]
 GoldenSource = Literal["builtin", "promoted"]
+# A promotion is a proposal until an admin approves it; only `approved` rows
+# are loaded into an eval run. Builtin entries are `approved` by definition.
+GoldenStatus = Literal["pending", "approved"]
 
 
 class GoldenPromoteRequest(BaseModel):
@@ -33,12 +36,15 @@ class GoldenEntryResponse(BaseModel):
     difficulty: int
     notes: str | None = None
     source: GoldenSource = "promoted"
+    status: GoldenStatus = "pending"
+    approved_by: str | None = None
+    approved_at: datetime | None = None
     source_query_id: str | None = None
     workspace_id: str | None = None
     created_by: str | None = None
     created_at: datetime | None = None
 
-    _serialize_created_at = field_serializer("created_at")(utc_iso)
+    _serialize_datetimes = field_serializer("approved_at", "created_at")(utc_iso)
 
     @classmethod
     def from_row(cls, row: Any) -> "GoldenEntryResponse":
@@ -56,6 +62,9 @@ class GoldenEntryResponse(BaseModel):
             difficulty=row.difficulty,
             notes=row.notes,
             source="promoted",
+            status=row.status,
+            approved_by=row.approved_by,
+            approved_at=row.approved_at,
             source_query_id=row.source_query_id,
             workspace_id=row.workspace_id,
             created_by=row.created_by,

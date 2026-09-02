@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db, require_workspace_editor
 from app.core.exceptions import AppException, ConflictException, InvalidInputException, NotFoundException
+from app.evaluation.golden_store import STATUS_APPROVED as GOLDEN_STATUS_APPROVED
+from app.evaluation.golden_store import STATUS_PENDING as GOLDEN_STATUS_PENDING
 from app.ingestion.chunker import ChunkResult, _count_tokens
 from app.ingestion.embedder import embed
 from app.ingestion.indexer import store
@@ -28,7 +30,7 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.query_cache import bump_workspace_document_version
 from app.schemas.common import PaginatedResponse
-from app.schemas.golden import GoldenEntryResponse, GoldenPromoteRequest
+from app.schemas.golden import GoldenEntryResponse, GoldenPromoteRequest, GoldenStatus
 from app.schemas.quarantine import QuarantineActionResponse, QuarantineChunkResponse, to_quarantine_response
 from app.schemas.review import (
     ReviewQueueCountResponse,
@@ -73,14 +75,28 @@ def _to_item(query: Query) -> ReviewQueueItem:
     )
 
 
-async def _promoted_entry_ids(db: AsyncSession, query_ids: list[str]) -> dict[str, str]:
-    """Map query id -> golden entry id for the queue page (one batched select)."""
+async def _promoted_entries(
+    db: AsyncSession, query_ids: list[str]
+) -> dict[str, tuple[str, GoldenStatus]]:
+    """Map query id -> (golden entry id, approval status) for the queue page.
+
+    One batched select. The status travels with the id so the queue can tell a
+    reviewer their promotion is still waiting on an admin rather than showing an
+    unqualified "Golden" badge for a row no eval run will ever score.
+    """
     if not query_ids:
         return {}
     rows = (await db.execute(
-        select(GoldenEntry.source_query_id, GoldenEntry.id).where(GoldenEntry.source_query_id.in_(query_ids))
+        select(GoldenEntry.source_query_id, GoldenEntry.id, GoldenEntry.status)
+        .where(GoldenEntry.source_query_id.in_(query_ids))
     )).all()
-    return {source_query_id: entry_id for source_query_id, entry_id in rows if source_query_id}
+    return {
+        # Cast at the DB boundary: the column is a plain String constrained by
+        # its only writers (this module and /admin/golden/{id}/approve).
+        source_query_id: (entry_id, cast(GoldenStatus, status))
+        for source_query_id, entry_id, status in rows
+        if source_query_id
+    }
 
 
 def _eligible_filters(workspace_id: str) -> list[Any]:
@@ -121,9 +137,11 @@ async def list_review_queue(
         .limit(page_size)
     )).scalars().all()
     items = [_to_item(record) for record in records]
-    promoted = await _promoted_entry_ids(db, [item.id for item in items])
+    promoted = await _promoted_entries(db, [item.id for item in items])
     for item in items:
-        item.golden_entry_id = promoted.get(item.id)
+        entry_id, status = promoted.get(item.id, (None, None))
+        item.golden_entry_id = entry_id
+        item.golden_status = status
     return PaginatedResponse(
         data=items,
         meta={"page": page, "page_size": page_size, "total": total, "enabled": True, "threshold": settings.REVIEW_QUEUE_TRUST_THRESHOLD},
@@ -223,12 +241,19 @@ async def promote_query_to_golden_set(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Turn a reviewed answer into a permanent golden-set regression entry.
+    """Turn a reviewed answer into a golden-set regression entry proposal.
 
     The reviewer's correction (or the model's own answer) becomes the reference
     answer and the cited documents become the expected sources, so human review
     compounds into regression protection. One golden entry per query —
     re-promotion is a 409, never a silent duplicate.
+
+    The new entry is ``pending`` and therefore inert: golden entries feed the
+    eval gate on admin prompt promotion, and this route is reachable by any
+    workspace editor — which, since any authenticated user can create a
+    workspace and become its owner, means any authenticated user. An admin needs
+    no second pair of eyes, so an admin promotion is ``approved`` on the spot;
+    everyone else's waits for ``POST /admin/golden/{id}/approve``.
     """
     await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
     query = (await db.execute(
@@ -258,6 +283,7 @@ async def promote_query_to_golden_set(
     if not reference_answer:
         raise InvalidInputException("A reference answer is required to promote this query")
 
+    is_admin = current_user.role == "admin"
     entry = GoldenEntry(
         question=query.query_text,
         reference_answer=reference_answer,
@@ -268,6 +294,9 @@ async def promote_query_to_golden_set(
         category=payload.category,
         difficulty=payload.difficulty,
         notes=payload.notes.strip() if payload.notes else None,
+        status=GOLDEN_STATUS_APPROVED if is_admin else GOLDEN_STATUS_PENDING,
+        approved_by=current_user.id if is_admin else None,
+        approved_at=datetime.now(timezone.utc) if is_admin else None,
         source_query_id=query.id,
         workspace_id=workspace.id,
         created_by=current_user.id,
@@ -294,6 +323,7 @@ async def promote_query_to_golden_set(
             "difficulty": entry.difficulty,
             "source_documents": entry.source_documents,
             "reviewer_corrected": bool(payload.reference_answer),
+            "status": entry.status,
         }),
     ))
     return GoldenEntryResponse.from_row(entry)

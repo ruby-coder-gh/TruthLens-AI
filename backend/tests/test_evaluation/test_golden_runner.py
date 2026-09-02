@@ -378,6 +378,8 @@ class TestPromotedEntriesReachTheRunner:
                 expected_grounding=True,
                 category="answerable",
                 difficulty=1,
+                # SEC-1: only admin-approved rows reach an eval run.
+                status="approved",
             )
         )
         await db.commit()
@@ -437,9 +439,11 @@ class TestPromotedEntriesReachTheRunner:
         assert "Who signed the 1994 lease?" not in seen
         assert run.golden_set_version == builtin_version()
 
-    async def test_smoke_samples_the_builtin_set_but_keeps_every_promoted_entry(self, test_db):
-        """Sampling promoted entries would make the default gate path ignore
-        exactly the corrections a reviewer bothered to record."""
+    async def test_smoke_keeps_promoted_entries_up_to_the_configured_limit(self, test_db):
+        """Sampling promoted entries away would make the default gate path ignore
+        exactly the corrections a reviewer bothered to record; keeping *every*
+        one lets a bulk promoter dominate the mean (SEC-1), so the count is
+        capped by EVAL_SMOKE_PROMOTED_LIMIT."""
         await self._promote(test_db, "Who signed the 1994 lease?")
         seen: list[str] = []
 
@@ -469,4 +473,96 @@ class TestPromotedEntriesReachTheRunner:
             subset="smoke",
         )
 
+        assert len(seen) == 5
+
+
+class TestSmokePromotedLimit:
+    """SEC-1: a smoke run takes at most `EVAL_SMOKE_PROMOTED_LIMIT` promoted
+    entries, chosen deterministically, so no single contributor can flood the
+    dataset that gates admin prompt promotion."""
+
+    @staticmethod
+    async def _promote_many(db, count: int, *, status: str = "approved") -> list[str]:
+        from datetime import datetime, timedelta, timezone
+
+        from app.models.golden_entry import GoldenEntry as GoldenEntryRow
+
+        base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        questions = [f"Promoted question {index}?" for index in range(count)]
+        # Insert newest-first so a naive "insertion order" implementation would
+        # pick the wrong subset; the loader must order by (created_at, id).
+        for offset, question in reversed(list(enumerate(questions))):
+            db.add(
+                GoldenEntryRow(
+                    question=question,
+                    reference_answer="The reviewer-corrected answer.",
+                    source_documents=["Reviewed Doc"],
+                    expected_grounding=True,
+                    category="answerable",
+                    difficulty=1,
+                    status=status,
+                    created_at=base + timedelta(minutes=offset),
+                )
+            )
+        await db.commit()
+        return questions
+
+    @staticmethod
+    def _recording_generate(seen: list[str]):
+        async def _generate(inp: GenerationInput) -> GenerationResult:
+            seen.append(inp.query)
+            ref = inp.contexts[0]["content"] if inp.contexts else ""
+            return GenerationResult(text=ref, token_count=1, model_used="mock")
+
+        return _generate
+
+    @pytest.mark.asyncio
+    async def test_smoke_caps_promoted_entries_at_the_configured_limit(self, test_db, monkeypatch):
+        monkeypatch.setattr(settings, "EVAL_SMOKE_PROMOTED_LIMIT", 2)
+        questions = await self._promote_many(test_db, 5)
+        seen: list[str] = []
+
+        await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            subset="smoke",
+        )
+
+        promoted_seen = [q for q in seen if q in questions]
+        # Oldest two by (created_at, id) — deterministic, not insertion order.
+        assert promoted_seen == questions[:2]
+        assert len(seen) == 5 + 2
+
+    @pytest.mark.asyncio
+    async def test_a_full_run_is_not_capped(self, test_db, monkeypatch):
+        monkeypatch.setattr(settings, "EVAL_SMOKE_PROMOTED_LIMIT", 2)
+        questions = await self._promote_many(test_db, 5)
+        seen: list[str] = []
+
+        await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+        )
+
+        assert [q for q in seen if q in questions] == questions
+
+    @pytest.mark.asyncio
+    async def test_pending_entries_never_reach_a_smoke_run(self, test_db, monkeypatch):
+        monkeypatch.setattr(settings, "EVAL_SMOKE_PROMOTED_LIMIT", 10)
+        questions = await self._promote_many(test_db, 3, status="pending")
+        seen: list[str] = []
+
+        await run_golden_eval(
+            generate_fn=self._recording_generate(seen),
+            guardrail_fn=_guardrail_fn,
+            trust_fn=_trust_fn,
+            db=test_db,
+            subset="smoke",
+        )
+
+        assert [q for q in seen if q in questions] == []
         assert len(seen) == 5

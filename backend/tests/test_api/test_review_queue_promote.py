@@ -87,19 +87,22 @@ async def test_promote_creates_golden_entry_from_the_reviewed_answer(
 
 @pytest.mark.asyncio
 async def test_promote_bumps_the_golden_set_version(
-    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
 ):
-    """A promotion must change golden_set_version so EvalRuns stay comparable."""
+    """An *approved* promotion changes golden_set_version so EvalRuns stay
+    comparable. An admin promotion is approved on the spot (SEC-1)."""
     from app.evaluation.golden_store import golden_set_version
 
-    workspace_id = await _workspace(client, auth_headers, "Version workspace")
+    # The admin owns this workspace: `promote-golden` runs the strict
+    # `check_workspace_access`, which deliberately has no admin bypass.
+    workspace_id = await _workspace(client, admin_headers, "Version workspace")
     query = await _query(test_db, workspace_id)
     before = await golden_set_version(test_db)
 
     response = await client.post(
         f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
         json={"category": "answerable"},
-        headers=auth_headers,
+        headers=admin_headers,
     )
     assert response.status_code == 201
 
@@ -445,3 +448,230 @@ async def test_a_concurrent_promotion_losing_the_unique_race_gets_409(
     )
 
     assert response.status_code == 409
+
+
+# ─── SEC-1: admin approval gate on promoted golden entries ───────────
+#
+# `promote-golden` is reachable by any workspace editor, and any authenticated
+# user can create a workspace and become its owner. Promoted rows feed the
+# eval gate that decides whether an admin may promote a system prompt, so a
+# promotion must be inert until an admin approves it.
+
+
+@pytest.mark.asyncio
+async def test_editor_promotion_is_pending_and_stays_out_of_the_eval_set(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    """A non-admin promotion is `pending`: not loaded, and the version is unmoved."""
+    from app.evaluation.golden_store import golden_set_version, load_golden_entries
+
+    workspace_id = await _workspace(client, auth_headers, "Pending workspace")
+    query = await _query(test_db, workspace_id)
+    before_version = await golden_set_version(test_db)
+    before_entries = await load_golden_entries(test_db)
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["approved_by"] is None
+    assert body["approved_at"] is None
+
+    assert await golden_set_version(test_db) == before_version
+    after_entries = await load_golden_entries(test_db)
+    assert len(after_entries) == len(before_entries)
+    assert query.query_text not in [entry.question for entry in after_entries]
+
+
+@pytest.mark.asyncio
+async def test_admin_promotion_is_auto_approved(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """An admin promoting through the same route needs no second approval step.
+
+    The admin owns the workspace: `promote-golden` runs the strict
+    `check_workspace_access`, which deliberately has no admin bypass.
+    """
+    from app.evaluation.golden_store import load_golden_entries
+
+    workspace_id = await _workspace(client, admin_headers, "Admin promote workspace")
+    query = await _query(test_db, workspace_id)
+
+    response = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "approved"
+    assert body["approved_by"] == body["created_by"]
+    assert body["approved_at"] is not None
+
+    assert query.query_text in [entry.question for entry in await load_golden_entries(test_db)]
+
+
+@pytest.mark.asyncio
+async def test_admin_approval_admits_a_pending_entry_to_the_eval_set(
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """Approving flips the row to `approved`, loads it, and moves the version."""
+    from app.evaluation.golden_store import golden_set_version, load_golden_entries
+
+    workspace_id = await _workspace(client, auth_headers, "Approval workspace")
+    query = await _query(test_db, workspace_id)
+    created = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )
+    entry_id = created.json()["id"]
+    promoter_id = created.json()["created_by"]
+    pending_version = await golden_set_version(test_db)
+
+    approved = await client.post(f"/api/admin/golden/{entry_id}/approve", headers=admin_headers)
+
+    assert approved.status_code == 200
+    body = approved.json()
+    assert body["id"] == entry_id
+    assert body["status"] == "approved"
+    assert body["approved_by"] is not None
+    assert body["approved_by"] != promoter_id
+    assert body["approved_at"] is not None
+
+    assert await golden_set_version(test_db) != pending_version
+    assert query.query_text in [entry.question for entry in await load_golden_entries(test_db)]
+
+    audit = (await test_db.execute(
+        select(AuditLog).where(AuditLog.action == "golden.approve")
+    )).scalar_one()
+    assert audit.resource_id == entry_id
+    assert json.loads(audit.details or "{}")["promoted_by"] == promoter_id
+
+
+@pytest.mark.asyncio
+async def test_approving_an_already_approved_entry_is_idempotent(
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """A second approve returns the same approved row rather than erroring."""
+    workspace_id = await _workspace(client, auth_headers, "Idempotent approval workspace")
+    query = await _query(test_db, workspace_id)
+    created = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )
+    entry_id = created.json()["id"]
+
+    first = await client.post(f"/api/admin/golden/{entry_id}/approve", headers=admin_headers)
+    second = await client.post(f"/api/admin/golden/{entry_id}/approve", headers=admin_headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["approved_at"] == first.json()["approved_at"]
+
+
+@pytest.mark.asyncio
+async def test_approving_an_unknown_golden_entry_is_404(
+    client: AsyncClient, admin_headers: dict[str, str]
+):
+    response = await client.post("/api/admin/golden/does-not-exist/approve", headers=admin_headers)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_approve_a_golden_entry(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
+):
+    """The whole point of the gate: the promoter cannot approve their own row."""
+    from app.evaluation.golden_store import load_promoted_entries
+
+    workspace_id = await _workspace(client, auth_headers, "Self approval workspace")
+    query = await _query(test_db, workspace_id)
+    created = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )
+    entry_id = created.json()["id"]
+
+    response = await client.post(f"/api/admin/golden/{entry_id}/approve", headers=auth_headers)
+
+    assert response.status_code == 403
+    assert await load_promoted_entries(test_db) == []
+
+
+@pytest.mark.asyncio
+async def test_admin_golden_list_filters_by_status(
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """`status=` narrows the promoted listing to pending or approved rows."""
+    workspace_id = await _workspace(client, auth_headers, "Status filter workspace")
+    pending_query = await _query(test_db, workspace_id, query_text="Pending question?")
+    approved_query = await _query(test_db, workspace_id, query_text="Approved question?")
+    pending_id = (await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{pending_query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )).json()["id"]
+    approved_id = (await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{approved_query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )).json()["id"]
+    assert (await client.post(f"/api/admin/golden/{approved_id}/approve", headers=admin_headers)).status_code == 200
+
+    unfiltered = await client.get("/api/admin/golden?source=promoted", headers=admin_headers)
+    pending = await client.get("/api/admin/golden?source=promoted&status=pending", headers=admin_headers)
+    approved = await client.get("/api/admin/golden?source=promoted&status=approved", headers=admin_headers)
+
+    assert {item["id"] for item in unfiltered.json()["data"]} == {pending_id, approved_id}
+    assert [item["id"] for item in pending.json()["data"]] == [pending_id]
+    assert [item["id"] for item in approved.json()["data"]] == [approved_id]
+    assert approved.json()["meta"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_golden_list_rejects_an_unknown_status(
+    client: AsyncClient, admin_headers: dict[str, str]
+):
+    response = await client.get("/api/admin/golden?status=whatever", headers=admin_headers)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_review_queue_items_report_the_golden_approval_status(
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """The queue tells the reviewer whether their promotion is still pending."""
+    workspace_id = await _workspace(client, auth_headers, "Queue status workspace")
+    query = await _query(test_db, workspace_id, review_status="needs_review", trust_score=0.1)
+
+    before = await client.get(f"/api/workspaces/{workspace_id}/review-queue", headers=auth_headers)
+    item = next(i for i in before.json()["data"] if i["id"] == query.id)
+    assert item["golden_status"] is None
+
+    entry_id = (await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "answerable"},
+        headers=auth_headers,
+    )).json()["id"]
+
+    pending = await client.get(f"/api/workspaces/{workspace_id}/review-queue", headers=auth_headers)
+    item = next(i for i in pending.json()["data"] if i["id"] == query.id)
+    assert item["golden_entry_id"] == entry_id
+    assert item["golden_status"] == "pending"
+
+    assert (await client.post(f"/api/admin/golden/{entry_id}/approve", headers=admin_headers)).status_code == 200
+
+    after = await client.get(f"/api/workspaces/{workspace_id}/review-queue", headers=auth_headers)
+    item = next(i for i in after.json()["data"] if i["id"] == query.id)
+    assert item["golden_status"] == "approved"

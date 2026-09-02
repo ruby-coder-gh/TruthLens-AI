@@ -834,6 +834,9 @@ class TestEvaluateIncludesPromotedEntries:
                 expected_grounding=True,
                 category="answerable",
                 difficulty=1,
+                # SEC-1: a promotion is `pending` until an admin approves it,
+                # and only approved rows are scored by an eval run.
+                status="approved",
             )
         )
         await db.commit()
