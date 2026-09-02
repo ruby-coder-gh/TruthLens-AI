@@ -217,6 +217,13 @@ export interface ReviewQueueItem {
   /** Non-null once this answer has been promoted into the golden set (F7b). */
   golden_entry_id?: string | null;
   /**
+   * SEC-2. The golden entry's approval status — `'pending'` when an editor's
+   * promotion is awaiting admin sign-off, `'approved'` once cleared (or when
+   * an admin promoted it directly). Null/undefined on rows predating the
+   * approval workflow or when `golden_entry_id` is null.
+   */
+  golden_status?: GoldenApprovalStatus | null;
+  /**
    * F7c. The live queue no longer lists abstentions, but a promote flow reached
    * from query history / chat detail can hand one here — and the backend then
    * rejects any auto-filled reference answer with 422.
@@ -634,6 +641,13 @@ export interface GoldenPromoteRequest {
   notes?: string;
 }
 
+/**
+ * SEC-2 — an editor-promoted entry gates admin prompt promotion, so it lands
+ * `pending` until an admin approves it. Admin-initiated promotions are
+ * auto-`approved`. Built-in entries are always `approved`.
+ */
+export type GoldenApprovalStatus = 'pending' | 'approved';
+
 export interface GoldenEntryResponse {
   id: string;
   question: string;
@@ -648,6 +662,9 @@ export interface GoldenEntryResponse {
   workspace_id?: string | null;
   created_by?: string | null;
   created_at?: string | null;
+  status: GoldenApprovalStatus;
+  approved_by?: string | null;
+  approved_at?: string | null;
 }
 
 export interface GoldenListResponse {

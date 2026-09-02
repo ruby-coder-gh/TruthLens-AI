@@ -413,7 +413,9 @@ export default function ReviewQueuePage() {
       try {
         const entry = await reviewQueueApi.promoteGolden(workspaceId, target.id, payload);
         setItems((current) =>
-          current.map((item) => (item.id === target.id ? { ...item, golden_entry_id: entry.id } : item)),
+          current.map((item) => (item.id === target.id
+            ? { ...item, golden_entry_id: entry.id, golden_status: entry.status }
+            : item)),
         );
         setPromoteTarget(null);
         addToast('Promoted to the golden set.', 'success');
@@ -508,7 +510,13 @@ export default function ReviewQueuePage() {
                       <div className="flex items-center gap-2">
                         <ClipboardCheck size={16} className="text-orange" aria-hidden="true" />
                         <p className="font-medium text-text">{item.query_text}</p>
-                        {item.golden_entry_id ? <Badge color="green">Golden ✓</Badge> : null}
+                        {item.golden_entry_id ? (
+                          item.golden_status === 'pending' ? (
+                            <Badge color="orange">Golden · pending approval</Badge>
+                          ) : (
+                            <Badge color="green">Golden ✓</Badge>
+                          )
+                        ) : null}
                         <span
                           className={`ml-auto rounded-full px-2 py-0.5 text-xs ${
                             getTrustBadgeColor(item.trust_score ?? 0) === 'red'
