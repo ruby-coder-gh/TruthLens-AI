@@ -21,6 +21,7 @@ class DocumentResponse(BaseModel):
     status: str
     error_message: str | None = None
     uploaded_by: str | None = None
+    quarantined_chunk_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -47,6 +48,7 @@ class DocumentDetailResponse(BaseModel):
     page_count: int | None = None
     chunk_count: int
     status: str
+    quarantined_chunk_count: int = 0
     created_at: datetime
     updated_at: datetime
     chunks: list[ChunkInfo] = []

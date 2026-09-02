@@ -168,6 +168,7 @@ async def upload_document(
         status=doc.status,
         error_message=doc.error_message,
         uploaded_by=doc.uploaded_by,
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -215,6 +216,7 @@ async def list_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -253,6 +255,7 @@ async def get_document(
         page_count=doc.page_count,
         chunk_count=doc.chunk_count,
         status=doc.status,
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         chunks=[
@@ -402,6 +405,7 @@ async def list_all_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                quarantined_chunk_count=d.quarantined_chunk_count,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -485,6 +489,7 @@ async def process_document_background(
     """Background task: process document through ingestion pipeline."""
     from app.database import async_session_factory
     from app.graph.ingestion_graph import run_ingestion_pipeline
+    from app.models.chunk_quarantine import ChunkQuarantine
 
     logger.info("background_ingestion_start", document_id=document_id)
 
@@ -513,6 +518,33 @@ async def process_document_background(
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+
+                quarantined_items = ingest_result.get("quarantined") or []
+                if quarantined_items:
+                    for item in quarantined_items:
+                        session.add(ChunkQuarantine(
+                            document_id=document_id,
+                            workspace_id=workspace_id,
+                            chunk_index=item["index"],
+                            content=item["content"],
+                            pattern=item.get("pattern"),
+                            severity=item.get("severity"),
+                            status="quarantined",
+                        ))
+                    doc.quarantined_chunk_count = (doc.quarantined_chunk_count or 0) + len(quarantined_items)
+                    session.add(AuditLog(
+                        user_id=doc.uploaded_by,
+                        action="document.quarantine",
+                        resource_type="document",
+                        resource_id=document_id,
+                        details=json.dumps({
+                            "count": len(quarantined_items),
+                            "patterns": sorted({
+                                item["pattern"] for item in quarantined_items if item.get("pattern")
+                            }),
+                        }),
+                    ))
+
                 await bump_workspace_document_version(session, workspace_id)
             else:
                 doc.status = "failed"

@@ -30,6 +30,7 @@ class Document(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     )
     collection_id: Mapped[str | None] = mapped_column(ForeignKey("collections.id", ondelete="SET NULL"), nullable=True, index=True)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantined_chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="documents", lazy="selectin")

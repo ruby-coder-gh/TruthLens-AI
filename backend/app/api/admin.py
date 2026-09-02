@@ -20,6 +20,7 @@ from app.core.refresh_tokens import revoke_all_refresh_tokens
 from app.core.deps import get_current_admin, get_db
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
+from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.document import Document
 from app.models.eval_run import EvalRun
 from app.models.feedback import Feedback
@@ -37,6 +38,7 @@ from app.schemas.analytics import (
     UserActivityResponse,
 )
 from app.schemas.common import AdminStatsResponse, AuditLogResponse, EvaluationResponse, PaginatedResponse
+from app.schemas.quarantine import QuarantineChunkResponse, to_quarantine_response
 from app.schemas.user import UserResponse
 from app.utils.logger import logger
 
@@ -194,6 +196,40 @@ async def get_audit_logs(
             )
             for log in logs
         ],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@router.get("/quarantine", response_model=PaginatedResponse[QuarantineChunkResponse])
+async def list_all_quarantined_chunks(
+    page: int = 1,
+    page_size: int = 50,
+    status: str | None = None,
+    workspace_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cross-workspace list of ingest-time quarantined chunks (admin only)."""
+    page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
+
+    filters = []
+    if status:
+        filters.append(ChunkQuarantine.status == status)
+    if workspace_id:
+        filters.append(ChunkQuarantine.workspace_id == workspace_id)
+
+    count_query = select(func.count(ChunkQuarantine.id))
+    query = select(ChunkQuarantine)
+    if filters:
+        count_query = count_query.where(*filters)
+        query = query.where(*filters)
+
+    total = (await db.execute(count_query)).scalar() or 0
+    records = (await db.execute(
+        query.order_by(ChunkQuarantine.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    )).scalars().all()
+
+    return PaginatedResponse(
+        data=[to_quarantine_response(record) for record in records],
         meta={"page": page, "page_size": page_size, "total": total},
     )
 
