@@ -800,29 +800,43 @@ async def get_user_activity(
 # ─── Analytics ──────────────────────────────────────────────────────
 
 
+# Rows that count as a genuinely low-quality answer. `edge_case IS NOT NULL`
+# marks a deliberate refusal (e.g. the sufficiency gate abstaining), which
+# scores 0.0 without any generation having happened — correct behaviour that
+# must never be aggregated as a low-trust answer.
+_ANSWERED_ONLY = Query.edge_case.is_(None)
+
+_LOW_TRUST_FILTERS = (
+    Query.trust_score.isnot(None),
+    Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
+    _ANSWERED_ONLY,
+)
+
+
 @router.get("/analytics/flagged-answers", response_model=PaginatedResponse[FlaggedAnswerResponse])
 async def get_flagged_answers(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return queries with low trust scores (admin only)."""
+    """Return queries with low trust scores (admin only).
+
+    Excludes edge-case rows: a sufficiency-gated abstention scores 0.0 *by
+    construction* (no LLM ran, so there is nothing to ground), but refusing
+    was the correct outcome — not a low-quality answer. Counting them here
+    flags correct behaviour as a defect and drowns the real ones. Mirrors
+    `review_queue._eligible_filters`, which already excludes them.
+    """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
-    count_query = select(func.count(Query.id)).where(
-        Query.trust_score.isnot(None),
-        Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
-    )
+    count_query = select(func.count(Query.id)).where(*_LOW_TRUST_FILTERS)
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
     offset = (page - 1) * page_size
     result = await db.execute(
         select(Query)
-        .where(
-            Query.trust_score.isnot(None),
-            Query.trust_score < TRUST_SCORE_LOW_THRESHOLD,
-        )
+        .where(*_LOW_TRUST_FILTERS)
         .order_by(Query.trust_score.asc())
         .offset(offset)
         .limit(page_size)
@@ -881,7 +895,12 @@ async def get_queries_over_time(
 async def get_trust_score_distribution(
     db: AsyncSession = Depends(get_db),
 ):
-    """Return count of queries in trust score buckets (admin only)."""
+    """Return count of queries in trust score buckets (admin only).
+
+    Abstentions are excluded for the same reason as in `get_flagged_answers`:
+    they pile into the 0-25 bucket at 0.0 and misreport correct refusals as
+    the workspace's "low-trust share".
+    """
     # Single aggregation pass — all four buckets counted in one query via
     # conditional CASE expressions, returning exactly one row.
     result = await db.execute(
@@ -890,7 +909,7 @@ async def get_trust_score_distribution(
             func.count(case((Query.trust_score.between(0.26, 0.50), 1))).label("bucket_26_50"),
             func.count(case((Query.trust_score.between(0.51, 0.75), 1))).label("bucket_51_75"),
             func.count(case((Query.trust_score.between(0.76, 1.0), 1))).label("bucket_76_100"),
-        ).where(Query.trust_score.isnot(None))
+        ).where(Query.trust_score.isnot(None), _ANSWERED_ONLY)
     )
     row = result.one()
 
