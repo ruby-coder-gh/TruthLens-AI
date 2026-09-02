@@ -202,12 +202,26 @@ describe('ReviewQueuePage', () => {
 
   it('shows a Golden badge and no promote action for already-promoted items', async () => {
     mockList.mockResolvedValue({
-      data: [makeItem({ golden_entry_id: 'ge-9' })],
+      data: [makeItem({ golden_entry_id: 'ge-9', golden_status: 'approved' })],
       meta: { page: 1, page_size: 20, total: 1, enabled: true },
     });
     renderPage();
 
     expect(await screen.findByText(/golden ✓/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /promote to golden set/i })).not.toBeInTheDocument();
+  });
+
+  // SEC-2: an editor's promotion is not yet approved — the badge must read
+  // that back so a reviewer doesn't assume it already gates prompt promotion.
+  it('shows a pending-approval badge for a promotion awaiting admin sign-off', async () => {
+    mockList.mockResolvedValue({
+      data: [makeItem({ golden_entry_id: 'ge-9', golden_status: 'pending' })],
+      meta: { page: 1, page_size: 20, total: 1, enabled: true },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/golden · pending approval/i)).toBeInTheDocument();
+    expect(screen.queryByText(/golden ✓/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /promote to golden set/i })).not.toBeInTheDocument();
   });
 

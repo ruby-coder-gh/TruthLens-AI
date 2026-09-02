@@ -532,6 +532,21 @@ const adminPromptsApi = {
     request(`/admin/prompts/${id}/diff${buildQuery({ against })}`),
 };
 
+// ─── SEC-2 — golden-entry approval workflow ─────────────────────────────────
+// Declared above `adminApi` for the same reason as `adminPromptsApi`: the
+// object literal below assigns it eagerly (`golden: adminGoldenApi`), which
+// needs the binding initialized first.
+const adminGoldenApi = {
+  list: (params?: { source?: 'builtin' | 'promoted' | 'all'; status?: 'pending' | 'approved'; page?: number; page_size?: number }): Promise<GoldenListResponse> =>
+    request(`/admin/golden${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  approve: (entryId: string): Promise<GoldenEntryResponse> =>
+    request(`/admin/golden/${entryId}/approve`, { method: 'POST' }),
+
+  remove: (entryId: string): Promise<void> =>
+    request(`/admin/golden/${entryId}`, { method: 'DELETE' }),
+};
+
 // ─── Admin API ──────────────────────────────────────────────────────────────
 export const adminApi = {
   prompts: adminPromptsApi,
@@ -600,12 +615,14 @@ export const adminApi = {
   getQuarantine: (params?: { status?: QuarantineStatus; workspace_id?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<QuarantinedChunk>> =>
     request(`/admin/quarantine${buildQuery(params as Record<string, unknown> | undefined)}`),
 
-  // ── F7b — golden-set inventory ───────────────────────────────────────────
-  getGolden: (params?: { source?: 'builtin' | 'promoted' | 'all'; page?: number; page_size?: number }): Promise<GoldenListResponse> =>
-    request(`/admin/golden${buildQuery(params as Record<string, unknown> | undefined)}`),
+  // ── F7b/SEC-2 — golden-set inventory + approval ──────────────────────────
+  golden: adminGoldenApi,
 
-  deleteGolden: (entryId: string): Promise<void> =>
-    request(`/admin/golden/${entryId}`, { method: 'DELETE' }),
+  // Legacy flat accessors — kept for existing call sites (AdminAnalyticsPage);
+  // prefer `golden.list` / `golden.remove` in new code. Same implementation,
+  // not a duplicate.
+  getGolden: adminGoldenApi.list,
+  deleteGolden: adminGoldenApi.remove,
 
   // ── Usage & cost reporting ───────────────────────────────────────────────
   getUsage: (params?: UsageQueryParams): Promise<UsageReportResponse> =>
