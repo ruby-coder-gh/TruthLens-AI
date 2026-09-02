@@ -105,7 +105,11 @@ class Settings(BaseSettings):
     # ─── Query Rewriting ──────────────────────
     REWRITE_ENABLED: bool = True
     REWRITE_TEMPERATURE: float = 0.2
-    REWRITE_MAX_TOKENS: int = 256
+    REWRITE_MAX_TOKENS: int = 1024
+    # Reasoning models (qwen3) can burn the whole budget inside a <think> block and
+    # return nothing usable. Bound the wait so a rewrite miss costs a few seconds,
+    # not a minute, and the pipeline falls back to the original query.
+    REWRITE_TIMEOUT_SECONDS: int = 12
 
     # ─── Query Cache ─────────────────────────
     QUERY_CACHE_ENABLED: bool = True

@@ -53,6 +53,7 @@ async def rewrite(
         llm = get_chat_llm(
             temperature=settings.REWRITE_TEMPERATURE,
             max_tokens=settings.REWRITE_MAX_TOKENS,
+            timeout=settings.REWRITE_TIMEOUT_SECONDS,
         )
 
         system_prompt = (
@@ -78,7 +79,16 @@ async def rewrite(
         # Reasoning models can return an empty string once <think> blocks are
         # stripped. Never hand an empty query downstream — fall back to the original.
         if not rewritten:
-            logger.info("query_rewrite_empty_fallback", original_length=len(query))
+            # A reasoning model that never closed its <think> block returns empty
+            # content with done_reason="length". Log loudly: a silent fallback on
+            # every query looks identical to a working rewriter.
+            metadata = getattr(response, "response_metadata", {}) or {}
+            logger.warning(
+                "query_rewrite_empty_fallback",
+                original_length=len(query),
+                done_reason=metadata.get("done_reason"),
+                eval_count=metadata.get("eval_count"),
+            )
             return query
 
         logger.info(

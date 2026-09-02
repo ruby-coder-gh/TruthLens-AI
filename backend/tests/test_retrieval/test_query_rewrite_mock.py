@@ -151,3 +151,52 @@ async def test_expand_limits_variations(mock_ollama):
     result = await expand("Original", n_variations=2)
     assert len(result) == 3
     assert result[0] == "Original"
+
+
+class TestRewriteEmptyContentFallback:
+    """A reasoning model that never closes its ``<think>`` block returns empty
+    content with ``done_reason="length"``. The rewriter must fall back to the
+    original query and say so loudly — a silent fallback on every query is
+    indistinguishable from a working rewriter (QA: 100% fallback rate).
+    """
+
+    async def test_empty_content_falls_back_and_warns(self, monkeypatch):
+        from app.retrieval import query_rewrite
+
+        class _Response:
+            content = ""
+            response_metadata = {"done_reason": "length", "eval_count": 1024}
+
+        class _LLM:
+            def invoke(self, messages):
+                return _Response()
+
+        warnings: list[tuple[str, dict]] = []
+        monkeypatch.setattr("app.generation.provider.get_chat_llm", lambda **kw: _LLM())
+        monkeypatch.setattr(
+            query_rewrite.logger,
+            "warning",
+            lambda event, **kw: warnings.append((event, kw)),
+        )
+
+        result = await query_rewrite.rewrite("what is the notice period?")
+
+        assert result == "what is the notice period?"
+        assert warnings and warnings[0][0] == "query_rewrite_empty_fallback"
+        assert warnings[0][1]["done_reason"] == "length"
+
+    async def test_reasoning_wrapped_answer_is_used(self, monkeypatch):
+        """A closed ``<think>`` block is stripped and the real answer survives."""
+        from app.retrieval import query_rewrite
+
+        class _Response:
+            content = "<think>The user means the MSA contract.</think>What is the termination notice period in the Master Services Agreement?"
+            response_metadata = {"done_reason": "stop"}
+
+        class _LLM:
+            def invoke(self, messages):
+                return _Response()
+
+        monkeypatch.setattr("app.generation.provider.get_chat_llm", lambda **kw: _LLM())
+        result = await query_rewrite.rewrite("what is the termination notice period in the MSA?")
+        assert result == "What is the termination notice period in the Master Services Agreement?"
