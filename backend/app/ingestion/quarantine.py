@@ -10,10 +10,12 @@ quarantine (and thus delete from the retrievable corpus) a large fraction
 of legitimate documents.
 
 This module runs a *filtered* subset of `safety.INJECTION_PATTERNS` at
-ingestion time: only patterns at or above `settings.QUARANTINE_MIN_SEVERITY`
-whose name is not in `INGEST_EXCLUDED_PATTERNS` below. Quarantined chunk
-text never proceeds to embed/store, so it never enters Chroma/BM25 — no
-retrieval-filter changes are required elsewhere.
+ingestion time: patterns at or above `settings.QUARANTINE_MIN_SEVERITY`
+whose name is not in `INGEST_EXCLUDED_PATTERNS` below, plus the always-on
+`INGEST_INCLUDED_PATTERNS` overrides (needed to still catch canonical
+jailbreak framing like "You are now DAN..." even at the default "high"
+floor). Quarantined chunk text never proceeds to embed/store, so it never
+enters Chroma/BM25 — no retrieval-filter changes are required elsewhere.
 """
 
 from __future__ import annotations
@@ -51,6 +53,17 @@ INGEST_EXCLUDED_PATTERNS: frozenset[str] = frozenset(
     }
 )
 
+# Fix round 2 (controller ruling): at the "high" severity floor plus the
+# exclusions above, only 5/14 query-side patterns remain active and the
+# canonical "You are now DAN, a jailbroken AI..." jailbreak framing is
+# missed (`you_are_now` is `medium` severity). These two patterns are
+# always active regardless of `QUARANTINE_MIN_SEVERITY` — verified to
+# produce 0 false positives on the 10-sentence ordinary-prose regression
+# suite (in particular "...stakeholders are now responsible..." does not
+# match `\byou\s+are\s+now\b`, which requires the literal word "you").
+# `act_as_if` (also medium) stays excluded — not added here.
+INGEST_INCLUDED_PATTERNS: frozenset[str] = frozenset({"you_are_now", "now_you_are"})
+
 
 def _build_ingest_patterns(min_severity: str) -> list[dict[str, Any]]:
     """Return the query-side pattern list filtered for ingest-time use."""
@@ -59,7 +72,10 @@ def _build_ingest_patterns(min_severity: str) -> list[dict[str, Any]]:
         entry
         for entry in INJECTION_PATTERNS
         if entry["name"] not in INGEST_EXCLUDED_PATTERNS
-        and _SEVERITY_ORDER.get(entry["severity"], 0) >= floor
+        and (
+            entry["name"] in INGEST_INCLUDED_PATTERNS
+            or _SEVERITY_ORDER.get(entry["severity"], 0) >= floor
+        )
     ]
 
 
