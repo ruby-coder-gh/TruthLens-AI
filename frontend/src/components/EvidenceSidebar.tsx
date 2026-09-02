@@ -61,6 +61,8 @@ interface EvidenceSidebarProps {
   isStreaming?: boolean;
   /** The message this evidence belongs to failed — render an error state, never "verified". */
   hasError?: boolean;
+  /** F7c — the evidence-sufficiency gate abstained before generation. */
+  abstained?: boolean;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   pipelinePhase?: string | null;
@@ -161,8 +163,12 @@ function fileTypeIcon(mime?: string) {
 }
 
 /** Overall status badge at top — a wax-seal stamp once a real trust score exists. */
-function StatusBadge({ trustScore, isLoading, hasError }: { trustScore: number | null; isLoading: boolean; hasError?: boolean }) {
+function StatusBadge({ trustScore, isLoading, hasError, abstained }: { trustScore: number | null; isLoading: boolean; hasError?: boolean; abstained?: boolean }) {
   if (hasError) return <Badge color="red"><XCircle size={10} className="mr-1" /> GENERATION FAILED</Badge>;
+  // F7c — an abstention is a correct refusal persisted at trust 0.0. Falling
+  // through to the wax-seal stamp would brand it "Flagged 0%", i.e. a bad
+  // answer, when in fact no answer was generated at all.
+  if (abstained) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> ABSTAINED</Badge>;
   if (isLoading) return <Badge color="gray"><Loader2 size={10} className="animate-spin mr-1" /> ANALYZING</Badge>;
   if (trustScore === null) return <Badge color="orange"><AlertTriangle size={10} className="mr-1" /> NO EVIDENCE</Badge>;
 
@@ -485,6 +491,7 @@ function AIReasoningTab({
   isStreaming,
   pipelinePhase,
   hasError,
+  abstained,
 }: {
   guardrail: GuardrailResult | null;
   trustScore: number | null;
@@ -493,15 +500,27 @@ function AIReasoningTab({
   isStreaming?: boolean;
   pipelinePhase: string | null;
   hasError?: boolean;
+  abstained?: boolean;
 }) {
+  // F7c — the sufficiency gate fired: retrieval ran, generation never did. The
+  // final phase is `abstain`, so the timeline ends on an "Abstained" step
+  // instead of claiming an answer was generated and verified.
+  const isAbstained = abstained || pipelinePhase === 'abstain';
   // Pipeline done once we hit guardrail phase (last phase)
   // Doesn't wait for stream complete — guardrail phase fires before final tokens
-  const pipelineDone = pipelinePhase === 'guardrail' || (!isStreaming && !!guardrail && !!trustScore);
+  const pipelineDone = isAbstained || pipelinePhase === 'guardrail' || (!isStreaming && !!guardrail && !!trustScore);
   // Map backend phases → pipeline steps
   const phaseOrder = ['retrieval', 'generation', 'guardrail'];
   const currentIdx = pipelineDone ? 99 : pipelinePhase ? phaseOrder.indexOf(pipelinePhase) : -1;
 
-  const steps = [
+  const steps = isAbstained
+    ? [
+        { id: 'query',  label: 'Query Analysis',   icon: Search,        done: true },
+        { id: 'search', label: 'Document Search',  icon: FileText,      done: true },
+        { id: 'rank',   label: 'Chunk Ranking',    icon: Layers,        done: true },
+        { id: 'abstain', label: 'Abstained',       icon: AlertTriangle, done: true },
+      ]
+    : [
     { id: 'query', label: 'Query Analysis',       icon: Search,        done: pipelineDone || currentIdx >= 0 },
     { id: 'search', label: 'Document Search',      icon: FileText,      done: pipelineDone || currentIdx >= 0 },
     { id: 'rank',   label: 'Chunk Ranking',         icon: Layers,        done: pipelineDone || currentIdx >= 0 },
@@ -556,6 +575,8 @@ function AIReasoningTab({
 
           <div className="space-y-0">
             {steps.map((step, i) => {
+              // The abstain terminus is a deliberate stop, not a success — amber, not green.
+              const isAbstainStep = step.id === 'abstain';
               return (
                 <motion.div
                   key={step.id}
@@ -567,11 +588,15 @@ function AIReasoningTab({
                   {/* Circle */}
                   <div className={clsx(
                     'relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-500',
-                    step.done
-                      ? 'border-green-500/60 bg-green-500/20'
-                      : 'border-white/10 bg-white/5',
+                    isAbstainStep
+                      ? 'border-orange/60 bg-orange/20'
+                      : step.done
+                        ? 'border-green-500/60 bg-green-500/20'
+                        : 'border-white/10 bg-white/5',
                   )}>
-                    {step.done ? (
+                    {isAbstainStep ? (
+                      <AlertTriangle size={14} className="text-orange" />
+                    ) : step.done ? (
                       <CheckCircle2 size={14} className="text-green" />
                     ) : (
                       <Loader2 size={12} className="text-text-dim animate-spin" />
@@ -587,10 +612,15 @@ function AIReasoningTab({
                       )}>
                         {step.label}
                       </p>
-                      {step.done && (
+                      {step.done && !isAbstainStep && (
                         <span className="text-[10px] text-green font-medium">✓</span>
                       )}
                     </div>
+                    {isAbstainStep && (
+                      <p className="mt-0.5 text-xs text-text-dim">
+                        Evidence fell below the sufficiency floor — no answer was generated.
+                      </p>
+                    )}
                     {step.id === 'verify' && guardrail && (
                       <div className="mt-1 flex items-center gap-2">
                         <Badge color={guardrail.passed ? 'green' : 'red'}>
@@ -957,6 +987,7 @@ export default function EvidenceSidebar({
   isLoading,
   isStreaming,
   hasError,
+  abstained,
   sidebarOpen,
   onToggleSidebar,
   pipelinePhase,
@@ -1002,7 +1033,7 @@ export default function EvidenceSidebar({
                   <h3 className="text-xs font-semibold text-text">
                     Evidence
                   </h3>
-                  <StatusBadge trustScore={trustScore} isLoading={isLoading} hasError={hasError} />
+                  <StatusBadge trustScore={trustScore} isLoading={isLoading} hasError={hasError} abstained={abstained} />
                 </div>
                 <motion.button
                   type="button"
@@ -1077,6 +1108,7 @@ export default function EvidenceSidebar({
                   trustScore={trustScore}
                   trustComponents={trustComponents}
                   isLoading={isLoading && !pipelinePhase}
+                  abstained={abstained}
                   isStreaming={isStreaming ?? isLoading}
                   pipelinePhase={pipelinePhase ?? null}
                   hasError={hasError}

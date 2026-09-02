@@ -38,6 +38,12 @@ import type {
   Annotation,
   BulkDocumentAction,
   BulkDocumentResponse,
+  QuarantinedChunk,
+  QuarantineStatus,
+  QuarantineActionResponse,
+  GoldenPromoteRequest,
+  GoldenEntryResponse,
+  GoldenListResponse,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -385,6 +391,20 @@ export const reviewQueueApi = {
     request(`/workspaces/${workspaceId}/review-queue/${queryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   settings: (workspaceId: string, reviewQueueEnabled: boolean): Promise<{ review_queue_enabled: boolean }> =>
     request(`/workspaces/${workspaceId}/review-queue/settings`, { method: 'PATCH', body: JSON.stringify({ review_queue_enabled: reviewQueueEnabled }) }),
+
+  // ─── F7b — promote a reviewed answer into the golden set ─────────────────
+  promoteGolden: (workspaceId: string, queryId: string, data: GoldenPromoteRequest): Promise<GoldenEntryResponse> =>
+    request(`/workspaces/${workspaceId}/review-queue/${queryId}/promote-golden`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // ─── F7a — ingest-time injection quarantine ──────────────────────────────
+  quarantine: {
+    list: (workspaceId: string, params?: { status?: QuarantineStatus; page?: number; page_size?: number }): Promise<PaginatedResponse<QuarantinedChunk>> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine${buildQuery(params as Record<string, unknown> | undefined)}`),
+    release: (workspaceId: string, quarantineId: string): Promise<QuarantineActionResponse> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine/${quarantineId}/release`, { method: 'POST' }),
+    dismiss: (workspaceId: string, quarantineId: string): Promise<QuarantineActionResponse> =>
+      request(`/workspaces/${workspaceId}/review-queue/quarantine/${quarantineId}/dismiss`, { method: 'POST' }),
+  },
 };
 
 // ─── Collaborative Annotations API ──────────────────────────────────────────
@@ -495,6 +515,17 @@ export const adminApi = {
 
   updateSettings: (data: Record<string, unknown>): Promise<Record<string, unknown>> =>
     request('/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // ── F7a — cross-workspace quarantine list ────────────────────────────────
+  getQuarantine: (params?: { status?: QuarantineStatus; workspace_id?: string; page?: number; page_size?: number }): Promise<PaginatedResponse<QuarantinedChunk>> =>
+    request(`/admin/quarantine${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  // ── F7b — golden-set inventory ───────────────────────────────────────────
+  getGolden: (params?: { source?: 'builtin' | 'promoted' | 'all'; page?: number; page_size?: number }): Promise<GoldenListResponse> =>
+    request(`/admin/golden${buildQuery(params as Record<string, unknown> | undefined)}`),
+
+  deleteGolden: (entryId: string): Promise<void> =>
+    request(`/admin/golden/${entryId}`, { method: 'DELETE' }),
 };
 
 // ─── Collection API ─────────────────────────────────────────────────────────

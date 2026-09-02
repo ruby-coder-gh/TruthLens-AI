@@ -36,7 +36,9 @@ import { PageShell } from '../components/PageWrappers';
 import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket, WS_RECONNECT_MAX } from '../api/websocket';
-import type { Source } from '../api/types';
+import type { QueryCompleteResult } from '../api/websocket';
+import type { QueryEdgeCase, Source, SufficiencyVerdict } from '../api/types';
+import AbstentionCard from '../components/AbstentionCard';
 import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
 
@@ -94,6 +96,10 @@ interface ChatMessage {
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
   /** 1-based reconnect attempt currently in flight, or null when connected. */
   reconnectAttempt: number | null;
+  // F7c — set from the `complete` frame when the sufficiency gate abstained.
+  // `sufficiency` is absent on the cache-replay path (see AbstentionCard).
+  edgeCase?: QueryEdgeCase | null;
+  sufficiency?: SufficiencyVerdict | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -304,7 +310,7 @@ export default function ChatPage() {
           );
         },
 
-        onComplete: (result: { query_id: string; latency_ms: number; model_used: string; token_count: number; from_cache: boolean }) => {
+        onComplete: (result: QueryCompleteResult) => {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
@@ -319,6 +325,8 @@ export default function ChatPage() {
                     modelUsed: result.model_used,
                     tokenCount: result.token_count,
                     servedFromCache: result.from_cache,
+                    edgeCase: result.edge_case ?? null,
+                    sufficiency: result.sufficiency ?? null,
                   }
                 : m,
             ),
@@ -600,6 +608,9 @@ export default function ChatPage() {
     );
 
   const lastAssistantHasError = lastAssistantMessage?.status === 'error';
+  // F7c — an abstention has no generated answer to verify; the evidence panel
+  // must show the "Abstained" terminus instead of a green verified pipeline.
+  const lastAssistantAbstained = lastAssistantMessage?.edgeCase === 'insufficient_evidence';
 
   const latestSources = lastAssistantMessage?.sources ?? [];
   // An errored generation never has real verification/trust data — even if a
@@ -747,6 +758,8 @@ export default function ChatPage() {
                       }}
                       onRetry={() => handleRetry(msg.id)}
                       onRegenerate={() => handleRegenerate(msg.id)}
+                      onRephrase={handleRephrase}
+                      workspaceId={workspaceId}
                       onSourceClick={(source, _e, msgId, index) => {
                         const markerId = `cite-${msgId}-${index}`;
                         const targetId = `source-${source.chunk_id}`;
@@ -862,6 +875,7 @@ export default function ChatPage() {
           isLoading={isStreaming && !pipelinePhase}
           isStreaming={isStreaming}
           hasError={lastAssistantHasError}
+          abstained={lastAssistantAbstained}
           sidebarOpen={effectiveSidebarOpen}
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
           pipelinePhase={pipelinePhase}
@@ -1122,6 +1136,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onRetry,
   onRegenerate,
   onSourceClick,
+  onRephrase,
+  workspaceId,
 }: {
   message: ChatMessage;
   onCopy: (text: string) => void;
@@ -1130,10 +1146,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   onRetry: () => void;
   onRegenerate: () => void;
   onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void;
+  /** F7c — "Rephrase" chip on the abstention card (the textarea ref lives on the page). */
+  onRephrase?: () => void;
+  workspaceId?: string;
 }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
-  const isComplete = message.status === 'complete';
+  // F7c — the sufficiency gate abstained: nothing was generated, so the normal
+  // complete-card (citations, trust ring, feedback thumbs) must not render.
+  const isAbstained = message.edgeCase === 'insufficient_evidence';
+  const isComplete = message.status === 'complete' && !isAbstained;
   const isError = message.status === 'error';
   const isCancelled = message.status === 'cancelled';
   const isMessageStreaming = message.status === 'pending' || message.status === 'streaming';
@@ -1237,6 +1259,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   <RetryButton onClick={onRetry} />
                 </div>
               </>
+            )}
+
+            {/* Abstained — evidence-sufficiency gate refused before generation (F7c) */}
+            {isAbstained && message.status === 'complete' && (
+              <AbstentionCard
+                answer={message.content}
+                sufficiency={message.sufficiency}
+                workspaceId={workspaceId}
+                onRephrase={onRephrase}
+              />
             )}
 
             {/* Complete content — full card */}
