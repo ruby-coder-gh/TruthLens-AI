@@ -53,7 +53,6 @@ async def rewrite(
         llm = get_chat_llm(
             temperature=settings.REWRITE_TEMPERATURE,
             max_tokens=settings.REWRITE_MAX_TOKENS,
-            timeout=settings.REWRITE_TIMEOUT_SECONDS,
         )
 
         system_prompt = (
@@ -73,7 +72,13 @@ async def rewrite(
 
         messages.append(("human", query))
 
-        response = await asyncio.to_thread(llm.invoke, messages)
+        # ChatOllama has no `timeout` field (langchain-ollama 1.1.0), so a
+        # provider-level timeout is silently dropped — bound the wait here or a
+        # reasoning model can stall the whole query for half a minute.
+        response = await asyncio.wait_for(
+            asyncio.to_thread(llm.invoke, messages),
+            timeout=settings.REWRITE_TIMEOUT_SECONDS,
+        )
         rewritten = _strip_reasoning(response.content).strip('"').strip("'").strip()
 
         # Reasoning models can return an empty string once <think> blocks are
@@ -97,6 +102,14 @@ async def rewrite(
             rewritten_length=len(rewritten),
         )
         return rewritten
+
+    except TimeoutError:
+        logger.warning(
+            "query_rewrite_timeout",
+            timeout_seconds=settings.REWRITE_TIMEOUT_SECONDS,
+            original_length=len(query),
+        )
+        return query
 
     except Exception as e:
         logger.warning("query_rewrite_failed", error=str(e), query=query[:100])

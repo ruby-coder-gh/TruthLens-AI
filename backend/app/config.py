@@ -103,7 +103,11 @@ class Settings(BaseSettings):
     QUARANTINE_MIN_SEVERITY: str = "high"
 
     # ─── Query Rewriting ──────────────────────
-    REWRITE_ENABLED: bool = True
+    # Off by default: measured against the shipped qwen3 model the rewriter
+    # returned empty content on 6/6 queries (the <think> block never closes
+    # within the budget, so langchain-ollama yields nothing) while costing
+    # 7-30s each. Enable it only with a non-reasoning model.
+    REWRITE_ENABLED: bool = False
     REWRITE_TEMPERATURE: float = 0.2
     REWRITE_MAX_TOKENS: int = 1024
     # Reasoning models (qwen3) can burn the whole budget inside a <think> block and
