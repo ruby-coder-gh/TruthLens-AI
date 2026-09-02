@@ -443,32 +443,41 @@ async def release_quarantined_chunk(
     chunk_index_value = record.chunk_index
     workspace_id_value = workspace.id
 
-    record.status = "released"
-    record.reviewed_by = current_user.id
-    record.reviewed_at = datetime.now(timezone.utc)
-    document.quarantined_chunk_count = max((document.quarantined_chunk_count or 0) - 1, 0)
-    if not already_stored:
-        document.chunk_count = (document.chunk_count or 0) + 1
-    await bump_workspace_document_version(db, workspace.id)
-
-    db.add(AuditLog(
-        user_id=current_user.id,
-        action="chunk.release",
-        resource_type="chunk_quarantine",
-        resource_id=record.id,
-        details=json.dumps({
-            "workspace_id": workspace.id,
-            "document_id": record.document_id,
-            "chunk_index": record.chunk_index,
-            "pattern": record.pattern,
-            "already_stored": already_stored,
-        }),
-    ))
     # `store()` raises only after having already undone its own ChromaDB/BM25
     # writes; a failure in the commit below happens with the vectors live, so
     # that path compensates explicitly.
+    #
+    # Everything that touches the session lives inside this `try`, including
+    # the status flip and the version bump. They used to sit above it, so a DB
+    # failure before the vector write (a locked SQLite file surfacing through
+    # SQLAlchemy's autoflush) escaped the handler entirely and the caller got a
+    # raw 500 + traceback instead of the documented 502. `vectors_written`
+    # stays False until `store()` returns, so a failure on that earlier stretch
+    # correctly skips compensation — nothing has been written to compensate.
     vectors_written = False
     try:
+        record.status = "released"
+        record.reviewed_by = current_user.id
+        record.reviewed_at = datetime.now(timezone.utc)
+        document.quarantined_chunk_count = max((document.quarantined_chunk_count or 0) - 1, 0)
+        if not already_stored:
+            document.chunk_count = (document.chunk_count or 0) + 1
+        await bump_workspace_document_version(db, workspace.id)
+
+        db.add(AuditLog(
+            user_id=current_user.id,
+            action="chunk.release",
+            resource_type="chunk_quarantine",
+            resource_id=record.id,
+            details=json.dumps({
+                "workspace_id": workspace.id,
+                "document_id": record.document_id,
+                "chunk_index": record.chunk_index,
+                "pattern": record.pattern,
+                "already_stored": already_stored,
+            }),
+        ))
+
         if not already_stored:
             chunk_result = ChunkResult(
                 id=str(uuid.uuid4()),
