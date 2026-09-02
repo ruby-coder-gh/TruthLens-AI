@@ -555,6 +555,72 @@ class TestReleaseAtomicity:
         assert retry.status_code == 200
         assert retry.json()["status"] == "released"
 
+    async def test_release_returns_502_when_the_db_fails_before_the_vector_write(
+        self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch
+    ):
+        """BUG-13: a pre-vector DB failure must be the documented 502, not a raw 500.
+
+        The status flip, the count updates and `bump_workspace_document_version`
+        used to run outside the endpoint's `try:`. A locked database therefore
+        raised out of SQLAlchemy's autoflush before the handler could see it,
+        so the caller got `500 INTERNAL_ERROR` plus a traceback instead of
+        `502 RELEASE_STORE_FAILED`. Nothing has been written to ChromaDB or
+        BM25 at that point, so there is also nothing to compensate.
+        """
+        from sqlalchemy.exc import OperationalError
+
+        workspace_id, doc = await _make_workspace_and_document(client, auth_headers, test_db)
+        record = await _seed_quarantine_row(test_db, workspace_id, doc.id)
+        version_before = (await test_db.get(Workspace, workspace_id)).document_version
+
+        embedded: list[object] = []
+        removed: list[object] = []
+
+        async def failing_bump(session, ws_id):
+            raise OperationalError("UPDATE documents SET chunk_count=?", {}, Exception("database is locked"))
+
+        async def fake_embed(chunks, document_name=""):
+            embedded.append(chunks)
+            return []
+
+        async def fake_remove(workspace_id, document_id, chunk_indexes):
+            removed.append((workspace_id, document_id, list(chunk_indexes)))
+
+        monkeypatch.setattr("app.api.review_queue.bump_workspace_document_version", failing_bump)
+        monkeypatch.setattr("app.api.review_queue.embed", fake_embed)
+        monkeypatch.setattr("app.api.review_queue.remove_chunk_vectors", fake_remove)
+
+        resp = await client.post(
+            f"/api/workspaces/{workspace_id}/review-queue/quarantine/{record.id}/release",
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 502
+        assert resp.json()["error"]["code"] == "RELEASE_STORE_FAILED"
+
+        # The failure is before the vector write: nothing embedded, nothing to undo.
+        assert embedded == []
+        assert removed == []
+
+        monkeypatch.undo()
+
+        await test_db.refresh(record)
+        assert record.status == "quarantined"
+        assert record.reviewed_at is None
+        assert record.reviewed_by is None
+
+        await test_db.refresh(doc)
+        assert doc.quarantined_chunk_count == 1
+
+        workspace = await test_db.get(Workspace, workspace_id)
+        await test_db.refresh(workspace)
+        assert workspace.document_version == version_before
+
+        audit = (await test_db.execute(
+            select(AuditLog).where(AuditLog.action == "chunk.release", AuditLog.resource_id == record.id)
+        )).scalars().all()
+        assert audit == []
+
 
 def _count_from_chunks(captured_sql: list[str]) -> int:
     """Count statements whose SQL text references the `chunks` table.

@@ -190,13 +190,24 @@ async def vector_search(
     if not results["ids"] or not results["ids"][0]:
         return retrieval_results
 
-    for i, chunk_id in enumerate(results["ids"][0]):
+    for i, chroma_id in enumerate(results["ids"][0]):
         raw_metadata = results["metadatas"][0][i] if results["metadatas"] and results["metadatas"][0] else {}
         metadata: dict[str, Any] = dict(raw_metadata) if raw_metadata else {}
         content = results["documents"][0][i] if results["documents"] and results["documents"][0] else ""
         distance = results["distances"][0][i] if results["distances"] and results["distances"][0] else 0.0
         # Convert cosine distance to similarity score
         similarity = 1.0 - distance
+
+        # Chroma addresses each record by `f"{document_id}:{index}"`
+        # (`ingestion.indexer`), but every other consumer — BM25's sidecar
+        # metadata, `parent_retrieval`'s `Chunk.id` lookup, the cited spans
+        # persisted on a query — identifies a chunk by its `Chunk` UUID.
+        # Carrying Chroma's id here put the two retrievers in disjoint key
+        # spaces, so reciprocal-rank fusion could never collapse a chunk that
+        # both of them found. Prefer the UUID the embedder writes into the
+        # metadata, and fall back to Chroma's id for records indexed before
+        # that metadata existed.
+        chunk_id = str(metadata.get("chunk_id") or chroma_id)
 
         retrieval_results.append(RetrievalResult(
             chunk_id=chunk_id,
