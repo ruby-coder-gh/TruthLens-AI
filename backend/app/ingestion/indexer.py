@@ -7,6 +7,8 @@ import json
 from typing import Any
 
 from rank_bm25 import BM25Okapi
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chroma_client import get_workspace_collection
 from app.database import async_session_factory
@@ -156,6 +158,23 @@ async def delete_document(workspace_id: str, document_id: str) -> None:
         logger.info("bm25_delete_complete", document_id=document_id)
     except Exception as e:
         logger.error("bm25_delete_failed", error=str(e), document_id=document_id)
+
+
+async def purge_document_index(
+    session: AsyncSession, workspace_id: str, document_id: str
+) -> None:
+    """Clear a document's vector index + `chunks` rows so it can be re-ingested.
+
+    `run_ingestion_pipeline`/`store()` only INSERT — they don't upsert by
+    document — so re-running ingestion without this first crashes on
+    `uq_document_index` for every previously-stored chunk index and leaves
+    stale Chroma/BM25 entries beyond the new chunk count.
+
+    The caller owns the transaction: the `chunks` delete is staged on
+    ``session`` and must be committed before the re-ingest task runs.
+    """
+    await delete_document(workspace_id, document_id)
+    await session.execute(delete(Chunk).where(Chunk.document_id == document_id))
 
 
 async def delete_documents(workspace_id: str, document_ids: list[str]) -> dict[str, str | None]:

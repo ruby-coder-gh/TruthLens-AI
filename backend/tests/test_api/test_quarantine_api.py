@@ -713,8 +713,6 @@ class TestReindexQuarantineAccounting:
     async def test_reindex_endpoint_clears_existing_chunk_rows_and_vector_index(
         self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch
     ):
-        import sys
-        import types
         from unittest.mock import AsyncMock, patch
 
         from app.config import settings
@@ -733,14 +731,16 @@ class TestReindexQuarantineAccounting:
         # Don't let the real pipeline run in the background for this test.
         monkeypatch.setattr("app.api.documents.process_document_background", AsyncMock())
 
-        fake_indexer = types.ModuleType("app.ingestion.indexer")
-        fake_indexer.delete_document = AsyncMock()
-        with patch.dict(sys.modules, {"app.ingestion.indexer": fake_indexer}):
+        # Stub only the Chroma/BM25 call so the real `purge_document_index`
+        # helper (shared with the bulk reindex path) still runs the `chunks`
+        # delete under test.
+        fake_delete_document = AsyncMock()
+        with patch("app.ingestion.indexer.delete_document", fake_delete_document):
             resp = await client.post(
                 f"/api/workspaces/{workspace_id}/documents/{doc.id}/reindex", headers=auth_headers
             )
         assert resp.status_code == 202
-        fake_indexer.delete_document.assert_awaited_once_with(workspace_id, doc.id)
+        fake_delete_document.assert_awaited_once_with(workspace_id, doc.id)
 
         remaining_chunks = (await test_db.execute(
             select(Chunk).where(Chunk.document_id == doc.id)

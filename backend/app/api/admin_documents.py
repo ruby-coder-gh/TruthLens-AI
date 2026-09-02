@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import delete, select
@@ -13,8 +14,10 @@ from sqlalchemy.orm import noload
 
 from app.config import settings
 from app.core.deps import get_current_admin, get_db
+from app.ingestion.indexer import purge_document_index
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
+from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.comparison import ComparisonResult
 from app.models.document import Document
 from app.models.user import User
@@ -57,6 +60,49 @@ def _track(task: asyncio.Task[None]) -> None:
     task.add_done_callback(_background_tasks.discard)
 
 
+# Serializes the read-modify-write of a bulk audit row's `details` JSON.
+# Reindex jobs run concurrently, so without this two failing documents could
+# each read the same pre-image and one correction would be lost.
+_audit_correction_lock = asyncio.Lock()
+
+
+async def _record_reindex_failure(audit_log_id: str, document_id: str, error: str) -> None:
+    """Correct the bulk audit row after a reindex job failed.
+
+    The audit row is written synchronously while the jobs are still only
+    *accepted*, so without this an outright failure left the log claiming
+    success for a document that ended up `failed`. Moving the id from
+    `accepted_ids` to `failed_ids` (and recording the error) makes the audit
+    trail self-correcting.
+    """
+    from app.database import async_session_factory
+
+    async with _audit_correction_lock:
+        async with async_session_factory() as session:
+            row = await session.get(AuditLog, audit_log_id)
+            if row is None:
+                return
+            details = json.loads(row.details) if row.details else {}
+
+            accepted = [i for i in details.get("accepted_ids", []) if i != document_id]
+            failed = list(details.get("failed_ids", []))
+            if document_id not in failed:
+                failed.append(document_id)
+
+            details["accepted_ids"] = accepted
+            details["failed_ids"] = failed
+            summary = dict(details.get("summary") or {})
+            summary["accepted"] = len(accepted)
+            summary["failed"] = len(failed)
+            details["summary"] = summary
+            errors = dict(details.get("errors") or {})
+            errors[document_id] = error
+            details["errors"] = errors
+
+            row.details = json.dumps(details)
+            await session.commit()
+
+
 async def _reindex_one(
     *,
     document_id: str,
@@ -65,18 +111,46 @@ async def _reindex_one(
     mime_type: str,
     original_filename: str,
     semaphore: asyncio.Semaphore,
+    audit_log_id: str | None = None,
 ) -> None:
     """Run one document through the ingestion pipeline, bounded by ``semaphore``."""
     from app.api.documents import process_document_background
 
     async with semaphore:
-        await process_document_background(
-            document_id=document_id,
-            workspace_id=workspace_id,
-            file_path=file_path,
-            mime_type=mime_type,
-            original_filename=original_filename,
-        )
+        try:
+            await process_document_background(
+                document_id=document_id,
+                workspace_id=workspace_id,
+                file_path=file_path,
+                mime_type=mime_type,
+                original_filename=original_filename,
+            )
+        except Exception as e:
+            logger.error("bulk_reindex_failed", document_id=document_id, error=str(e))
+            if audit_log_id:
+                await _record_reindex_failure(audit_log_id, document_id, str(e))
+            return
+
+        # `process_document_background` swallows pipeline errors and records
+        # them on the document instead of raising, so a clean return does not
+        # mean success — read the outcome back.
+        if audit_log_id:
+            error = await _reindex_error_message(document_id)
+            if error is not None:
+                await _record_reindex_failure(audit_log_id, document_id, error)
+
+
+async def _reindex_error_message(document_id: str) -> str | None:
+    """Return the document's error message if the reindex left it `failed`."""
+    from app.database import async_session_factory
+
+    async with async_session_factory() as session:
+        row = (await session.execute(
+            select(Document.status, Document.error_message).where(Document.id == document_id)
+        )).one_or_none()
+    if row is None or row.status != "failed":
+        return None
+    return row.error_message or "reindex failed"
 
 
 async def _bulk_delete(
@@ -127,6 +201,12 @@ async def _bulk_delete(
         # rows. Delete children explicitly, then the parent.
         await db.execute(delete(Chunk).where(Chunk.document_id.in_(to_delete_ids)))
         await db.execute(delete(ComparisonResult).where(ComparisonResult.document_id.in_(to_delete_ids)))
+        # ChunkQuarantine is a child of Document with the same unenforced
+        # ondelete="CASCADE". Omitting it left rows pointing at deleted
+        # documents: the review queue counted them in its tab badge but could
+        # not resolve them to a filename to render, and copies of the deleted
+        # document's text survived the delete.
+        await db.execute(delete(ChunkQuarantine).where(ChunkQuarantine.document_id.in_(to_delete_ids)))
         await db.execute(delete(Document).where(Document.id.in_(to_delete_ids)))
         await bump_workspace_document_version(db, workspace_id)
 
@@ -137,33 +217,43 @@ async def _bulk_reindex(
     docs: list[Document],
     results: dict[str, BulkDocumentResult],
     semaphore: asyncio.Semaphore,
-) -> None:
-    """Mark one workspace's documents pending, bump its version once, fan out reindex jobs."""
-    if not docs:
-        return
+) -> list[dict[str, Any]]:
+    """Purge + mark pending one workspace's documents and bump its version once.
 
+    Returns the reindex jobs to launch. Launching is deferred to the caller so
+    the jobs start only after the audit row exists (they need its id to record
+    their outcome) and after this request's purge has been committed — the
+    re-ingest runs in its own session and would otherwise race the delete.
+    """
+    if not docs:
+        return []
+
+    jobs: list[dict[str, Any]] = []
     for doc in docs:
         doc.status = "pending"
         doc.error_message = None
-    await bump_workspace_document_version(db, workspace_id)
 
-    for doc in docs:
         file_path = settings.upload_path / doc.filename
         if file_path.exists():
-            task = asyncio.create_task(
-                _reindex_one(
-                    document_id=doc.id,
-                    workspace_id=workspace_id,
-                    file_path=file_path,
-                    mime_type=doc.mime_type,
-                    original_filename=doc.original_filename,
-                    semaphore=semaphore,
-                )
-            )
-            _track(task)
+            # Same purge as the single-document reindex path: re-ingest only
+            # INSERTs, so without clearing the vector index and `chunks` rows
+            # first every document that already had chunks collided on
+            # `uq_document_index` and ended `failed`.
+            await purge_document_index(db, workspace_id, doc.id)
+            jobs.append({
+                "document_id": doc.id,
+                "workspace_id": workspace_id,
+                "file_path": file_path,
+                "mime_type": doc.mime_type,
+                "original_filename": doc.original_filename,
+                "semaphore": semaphore,
+            })
         else:
             logger.warning("bulk_reindex_missing_file", document_id=doc.id, filename=doc.filename)
         results[doc.id] = BulkDocumentResult(id=doc.id, status="accepted")
+
+    await bump_workspace_document_version(db, workspace_id)
+    return jobs
 
 
 def _bulk_tag(docs: list[Document], tags: list[str], results: dict[str, BulkDocumentResult]) -> None:
@@ -208,13 +298,14 @@ async def bulk_document_action(
     for doc in found_docs.values():
         by_workspace.setdefault(doc.workspace_id, []).append(doc)
 
+    reindex_jobs: list[dict[str, Any]] = []
     if body.action == "delete":
         for workspace_id, docs in by_workspace.items():
             await _bulk_delete(db, workspace_id, docs, results)
     elif body.action == "reindex":
         semaphore = asyncio.Semaphore(settings.BULK_REINDEX_CONCURRENCY)
         for workspace_id, docs in by_workspace.items():
-            await _bulk_reindex(db, workspace_id, docs, results, semaphore)
+            reindex_jobs += await _bulk_reindex(db, workspace_id, docs, results, semaphore)
     elif body.action == "tag":
         for docs in by_workspace.values():
             _bulk_tag(docs, body.tags or [], results)
@@ -238,23 +329,31 @@ async def bulk_document_action(
             summary.failed += 1
             failed_ids.append(item.id)
 
-    db.add(
-        AuditLog(
-            user_id=current_user.id,
-            action=f"document.bulk_{body.action}",
-            resource_type="document",
-            details=json.dumps(
-                {
-                    "count": len(doc_ids),
-                    "tags": body.tags,
-                    "summary": summary.model_dump(),
-                    "document_ids": doc_ids,
-                    "ok_ids": ok_ids,
-                    "accepted_ids": accepted_ids,
-                    "failed_ids": failed_ids,
-                }
-            ),
-        )
+    audit = AuditLog(
+        user_id=current_user.id,
+        action=f"document.bulk_{body.action}",
+        resource_type="document",
+        details=json.dumps(
+            {
+                "count": len(doc_ids),
+                "tags": body.tags,
+                "summary": summary.model_dump(),
+                "document_ids": doc_ids,
+                "ok_ids": ok_ids,
+                "accepted_ids": accepted_ids,
+                "failed_ids": failed_ids,
+            }
+        ),
     )
+    db.add(audit)
+
+    if reindex_jobs:
+        # Commit the purge + pending flip + audit row before any job starts:
+        # each job re-ingests in its own session, so it must not observe (or
+        # deadlock against) this request's uncommitted write. `get_db`'s
+        # trailing commit then becomes a no-op.
+        await db.commit()
+        for job in reindex_jobs:
+            _track(asyncio.create_task(_reindex_one(audit_log_id=audit.id, **job)))
 
     return BulkDocumentResponse(results=ordered_results, summary=summary)

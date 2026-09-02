@@ -485,15 +485,10 @@ async def reindex_document(
     file_path = settings.upload_path / doc.filename
     if file_path.exists():
         # Clear the existing vector index (Chroma/BM25) and `chunks` rows
-        # before re-ingesting. `run_ingestion_pipeline`/`store()` only
-        # INSERT — they don't upsert-by-document — so re-running ingestion
-        # without this first would crash on `uq_document_index` for every
-        # previously-stored chunk index (including released quarantine
-        # chunks) and leave stale Chroma/BM25 entries beyond the new chunk
-        # count.
-        from app.ingestion.indexer import delete_document as delete_index
-        await delete_index(workspace_id, doc.id)
-        await db.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+        # before re-ingesting — see `purge_document_index`. The bulk reindex
+        # path shares this helper so both stay in lockstep.
+        from app.ingestion.indexer import purge_document_index
+        await purge_document_index(db, workspace_id, doc.id)
 
         asyncio.create_task(
             process_document_background(
