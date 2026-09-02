@@ -278,6 +278,67 @@ describe('AdminPromptsPage', () => {
     expect(within(row).getByText(/context precision/i)).toHaveTextContent(/not scored/i);
   });
 
+  // The gate's verdict is authoritative: a metric it recorded as failed must
+  // read "fail" even when the payload carries no threshold to show beside it.
+  it('marks a gate-failed metric as fail when its threshold is missing', async () => {
+    list.mockResolvedValue({
+      data: [makeVersion({
+        id: 'p-nothresh',
+        version: 5,
+        status: 'draft',
+        content_hash: 'iii999jjj000',
+        eval: {
+          ...STAGED_EVAL,
+          status: 'failed',
+          context_precision: 0.42,
+          verdict: {
+            passed: false,
+            failed_metrics: ['context_precision'],
+            thresholds: { ...THRESHOLDS, min_context_precision: null },
+          },
+        },
+      })],
+    });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    const row = await screen.findByRole('row', { name: /answer v5/i });
+    const chip = within(row).getByText(/context precision/i);
+    expect(chip).toHaveTextContent('0.42');
+    expect(chip).toHaveTextContent('min —');
+    expect(chip).toHaveTextContent(/fail/i);
+    expect(chip).toHaveClass('text-red');
+    expect(chip).not.toHaveTextContent(/no threshold/i);
+  });
+
+  // The backend scores a null refusal_accuracy as a gate failure, so "no
+  // number" must not downgrade a recorded failure to a neutral chip either.
+  it('marks a gate-failed metric as fail when it has no score', async () => {
+    list.mockResolvedValue({
+      data: [makeVersion({
+        id: 'p-noscore',
+        version: 6,
+        status: 'draft',
+        content_hash: 'kkk111lll222',
+        eval: {
+          ...STAGED_EVAL,
+          status: 'failed',
+          refusal_accuracy: null,
+          verdict: { passed: false, failed_metrics: ['refusal_accuracy'], thresholds: THRESHOLDS },
+        },
+      })],
+    });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    const row = await screen.findByRole('row', { name: /answer v6/i });
+    const chip = within(row).getByText(/refusal accuracy/i);
+    expect(chip).toHaveTextContent(/fail/i);
+    expect(chip).toHaveTextContent('0.70');
+    expect(chip).toHaveClass('text-red');
+    expect(chip).not.toHaveTextContent(/not scored/i);
+  });
+
   it('refetches the list when Refresh is clicked', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });

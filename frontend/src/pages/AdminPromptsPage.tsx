@@ -75,6 +75,9 @@ const METRICS: MetricSpec[] = [
   { key: 'refusal_accuracy', label: 'refusal accuracy', threshold: 'refusal_accuracy_min' },
 ];
 
+const NEUTRAL_CHIP =
+  'inline-flex items-center rounded-full border border-border bg-card-2 px-2 py-0.5 text-[11px] text-text-dim';
+
 const GATE_REASON_TEXT: Record<string, string> = {
   thresholds_not_met: 'Scores below threshold — the golden-set eval did not clear the gate.',
   no_eval_run: 'No eval run yet — run a golden-set eval before promoting this version.',
@@ -185,23 +188,26 @@ function MetricChip({ evalSummary, spec }: { evalSummary: PromptEvalSummary; spe
   const verdict = evalSummary.verdict;
   const threshold = verdict?.thresholds?.[spec.threshold];
 
-  // A metric reads pass/fail only when the run scored it *and* we know the
-  // threshold it was judged against. An eval row with no verdict (or with a
-  // threshold missing for this metric) gets a neutral chip: rendering green
-  // "pass — min —" would assert an approval that nothing ever computed.
-  if (score === null || !verdict || typeof threshold !== 'number') {
+  // The gate's own verdict outranks everything else: a metric it recorded as
+  // failed reads "fail" even when the threshold — or the score itself — is
+  // absent from the payload. A missing number must never soften a recorded
+  // failure into something quieter.
+  const failed = verdict?.failed_metrics.includes(spec.key) ?? false;
+
+  // Nothing to judge: the run never scored it and the gate did not fail it.
+  if (!failed && score === null) {
     return (
-      <span className="inline-flex items-center rounded-full border border-border bg-card-2 px-2 py-0.5 text-[11px] text-text-dim">
-        {score === null
-          ? `${spec.label} not scored`
-          : `${spec.label} ${formatScore(score)} · no threshold`}
-      </span>
+      <span className={NEUTRAL_CHIP}>{spec.label} not scored</span>
     );
   }
 
-  // The backend's verdict is authoritative — it is the same computation that
-  // gates promotion, so the chip must never disagree with the gate.
-  const failed = verdict.failed_metrics.includes(spec.key);
+  // Scored, but with no threshold it was judged against — a green
+  // "pass / min —" would assert an approval that nothing ever computed.
+  if (!failed && (!verdict || typeof threshold !== 'number')) {
+    return (
+      <span className={NEUTRAL_CHIP}>{`${spec.label} ${formatScore(score)} · no threshold`}</span>
+    );
+  }
 
   return (
     <span
@@ -211,7 +217,7 @@ function MetricChip({ evalSummary, spec }: { evalSummary: PromptEvalSummary; spe
       )}
     >
       {failed ? <XCircle size={11} aria-hidden="true" /> : <CheckCircle2 size={11} aria-hidden="true" />}
-      {spec.label} {formatScore(score)} / min {formatScore(threshold)} — {failed ? 'fail' : 'pass'}
+      {spec.label} {formatScore(score)} / min {formatScore(threshold)} · {failed ? 'fail' : 'pass'}
     </span>
   );
 }
@@ -512,7 +518,7 @@ export default function AdminPromptsPage() {
             onClick={() => void promptsQuery.refetch()}
             loading={promptsQuery.isFetching}
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} aria-hidden="true" />
             Refresh
           </Button>
         </motion.div>
