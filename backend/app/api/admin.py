@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, field_serializer, field_validator
+from pydantic import BaseModel, BeforeValidator, field_serializer, field_validator
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +71,37 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is not None:
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt
+
+
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _end_of_day_if_date_only(value: Any) -> Any:
+    """Widen a bare `date_to=YYYY-MM-DD` query value to the end of that day.
+
+    A bare date has no time component, so the default `datetime` parsing
+    used for query params anchors it at midnight -- which makes
+    `date_to=2026-08-31` exclude the entire day instead of including it, and
+    is the root cause of "last day missing" bugs in the usage report and
+    audit-log exports. This normalises a date-only value to
+    `23:59:59.999999` of that day (naive, later converted to UTC by
+    `_to_naive_utc`) so the whole day is included.
+
+    A value that already carries a time component -- including the
+    frontend's own `...T23:59:59.999` end-of-day marker, or an explicit
+    `...T00:00:00` -- is left untouched; only date-only strings are
+    ambiguous enough to need widening. This is idempotent: re-applying it to
+    an already-widened value (which has a time component) is a no-op.
+    """
+    if isinstance(value, str) and _DATE_ONLY_RE.match(value.strip()):
+        return f"{value.strip()}T23:59:59.999999"
+    return value
+
+
+# Shared annotated type for every `date_to` query param (usage report/export,
+# audit-log list/export) so the end-of-day widening above is applied
+# uniformly by FastAPI's parameter parsing, before any handler code runs.
+DateToQuery = Annotated[datetime | None, BeforeValidator(_end_of_day_if_date_only)]
 
 
 def _export_timestamp() -> str:
@@ -218,7 +250,7 @@ async def get_audit_logs(
     user_id: str | None = None,
     resource_type: str | None = None,
     date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_to: DateToQuery = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Get audit log entries (admin only).
@@ -226,7 +258,12 @@ async def get_audit_logs(
     `q` performs a case-insensitive substring match across the meaningful
     text columns (action, resource_type, resource_id, details, ip_address).
     `user_id`/`resource_type` are exact matches; `date_from`/`date_to` (ISO
-    8601) bound `created_at` inclusively.
+    8601) bound `created_at` inclusively. A bare date (no time component)
+    given for `date_from` anchors at the start of that day (00:00:00); a
+    bare date given for `date_to` is widened to the end of that day
+    (23:59:59.999999) so the whole day is included. Either bound with an
+    explicit time component (e.g. `...T00:00:00` or the frontend's
+    `...T23:59:59.999`) is used exactly as given.
     """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
@@ -274,7 +311,7 @@ async def export_audit_logs(
     user_id: str | None = None,
     resource_type: str | None = None,
     date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_to: DateToQuery = None,
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -282,7 +319,9 @@ async def export_audit_logs(
 
     Bypasses the list endpoint's page-size clamp but hard-caps the result at
     `AUDIT_EXPORT_MAX_ROWS`, ordered newest-first. The export itself is
-    audited (mirrors `investigations.py` audit-bundle export).
+    audited (mirrors `investigations.py` audit-bundle export). See
+    `get_audit_logs` for `date_from`/`date_to` bare-date-vs-explicit-time
+    semantics.
     """
     stmt = _apply_audit_log_filters(
         select(AuditLog),
@@ -973,7 +1012,7 @@ async def _usage_rollup(
 async def get_usage_report(
     group_by: UsageGroupBy = "model",
     date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_to: DateToQuery = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Usage & estimated cost rolled up by user/workspace/model (admin only).
@@ -982,6 +1021,13 @@ async def get_usage_report(
     `generator.py`) rather than true provider tokens, and only models present
     in `MODEL_PRICING_JSON` are priced — everything else (e.g. local Ollama
     models) costs $0.
+
+    `date_from`/`date_to` bound `created_at` inclusively. A bare date (no
+    time component) given for `date_from` anchors at the start of that day
+    (00:00:00); a bare date given for `date_to` is widened to the end of
+    that day (23:59:59.999999) so the whole day is included. Either bound
+    with an explicit time component (e.g. `...T00:00:00` or the frontend's
+    `...T23:59:59.999`) is used exactly as given.
     """
     rows, totals, pricing = await _usage_rollup(db, group_by, date_from, date_to)
     return UsageReportResponse(
@@ -1003,11 +1049,15 @@ async def export_usage_report(
     format: Literal["csv"] = "csv",
     group_by: UsageGroupBy = "model",
     date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_to: DateToQuery = None,
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Export the usage & cost rollup as CSV (admin only). Audited."""
+    """Export the usage & cost rollup as CSV (admin only). Audited.
+
+    See `get_usage_report` for `date_from`/`date_to` bare-date-vs-explicit-
+    time semantics.
+    """
     rows, _totals, _pricing = await _usage_rollup(db, group_by, date_from, date_to)
 
     headers = ["key", "label", "queries", "output_tokens", "prompt_tokens", "avg_latency_ms", "cache_hits", "est_cost_usd"]

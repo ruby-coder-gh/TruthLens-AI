@@ -111,6 +111,75 @@ async def test_logs_filter_by_date_range_excludes_old(
     assert resp_all.json()["meta"]["total"] == 4
 
 
+async def _seed_evening_log(test_db: AsyncSession, day: datetime) -> None:
+    """One audit log created at 18:00 UTC on `day` (midnight), used to test
+    the inclusive/exclusive edges of `date_to`."""
+    test_db.add(AuditLog(
+        user_id="user-eod",
+        action="document.upload",
+        resource_type="document",
+        resource_id="doc-eod",
+        details="{}",
+        ip_address="10.0.0.9",
+        created_at=day.replace(hour=18),
+    ))
+    await test_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_logs_date_to_bare_date_includes_full_day(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """A bare `date_to=YYYY-MM-DD` must include the whole day (a row created
+    at 18:00 that day), not just its first instant (midnight)."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_log(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/logs",
+        params={"date_from": day.isoformat(), "date_to": day.date().isoformat()},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_logs_date_to_explicit_midnight_excludes_same_day_evening_row(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """An explicit `T00:00:00` date_to is NOT widened -- it still means
+    midnight, unlike a bare date."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_log(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/logs",
+        params={"date_from": day.isoformat(), "date_to": f"{day.date().isoformat()}T00:00:00"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_logs_date_to_frontend_end_of_day_still_works(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """The frontend's explicit `...T23:59:59.999` end-of-day marker keeps
+    working unchanged."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    await _seed_evening_log(test_db, day)
+
+    resp = await client.get(
+        "/api/admin/logs",
+        params={"date_from": day.isoformat(), "date_to": f"{day.date().isoformat()}T23:59:59.999"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["total"] == 1
+
+
 @pytest.mark.asyncio
 async def test_logs_export_csv_header_and_count(
     client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
