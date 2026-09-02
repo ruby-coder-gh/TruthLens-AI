@@ -534,3 +534,17 @@ export interface EvalRunNotes {
   thresholds?: EvalThresholds;
   [key: string]: unknown;
 }
+
+// ─── Audit log filters & export ──────────────────────────────────────────────
+export interface AuditLogFilters {
+  page?: number;
+  page_size?: number;
+  action?: string;
+  q?: string;
+  user_id?: string;
+  resource_type?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export type AuditLogExportFormat = 'csv' | 'json';

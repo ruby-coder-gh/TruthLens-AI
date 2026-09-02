@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock,
+  ClipboardList, Search, Filter, RefreshCw, ChevronDown, ChevronUp, Shield, Clock, Download,
 } from 'lucide-react';
 import { Button, Badge, Input, EmptyState } from '../components/ui';
 import { pageTransition, staggerContainer, staggerItem } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
+import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
+import { downloadBlob } from '../utils/download';
+import type { AuditLogExportFormat, AuditLogFilters } from '../api/types';
 
 // Backend audit-log actions are exact-match dotted strings like `user.login`,
 // `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
@@ -35,6 +38,20 @@ const ACTION_FILTERS = [
   { value: 'collection.delete', label: 'Collection delete' },
 ];
 
+const RESOURCE_TYPE_FILTERS = [
+  { value: '', label: 'All resource types' },
+  { value: 'user', label: 'User' },
+  { value: 'workspace', label: 'Workspace' },
+  { value: 'workspace_member', label: 'Workspace member' },
+  { value: 'document', label: 'Document' },
+  { value: 'collection', label: 'Collection' },
+  { value: 'query', label: 'Query' },
+  { value: 'investigation', label: 'Investigation' },
+  { value: 'annotation', label: 'Annotation' },
+  { value: 'audit_log', label: 'Audit log' },
+  { value: 'usage_report', label: 'Usage report' },
+];
+
 const PAGE_SIZE = 10;
 
 function formatTimestamp(iso: string): string {
@@ -55,17 +72,30 @@ function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' |
 export default function AdminAuditLogPage() {
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [userIdFilter, setUserIdFilter] = useState('');
+  const [resourceTypeFilter, setResourceTypeFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<AuditLogExportFormat | null>(null);
+
+  const { addToast } = useToast();
+
+  // Same filters power both the paginated list and the (unpaginated) export —
+  // kept in one place so "Export CSV/JSON" always reflects what's on screen.
+  const activeFilters: AuditLogFilters = useMemo(() => ({
+    ...(actionFilter ? { action: actionFilter } : {}),
+    ...(search ? { q: search } : {}),
+    ...(userIdFilter ? { user_id: userIdFilter } : {}),
+    ...(resourceTypeFilter ? { resource_type: resourceTypeFilter } : {}),
+    ...(dateFrom ? { date_from: dateFrom } : {}),
+    ...(dateTo ? { date_to: dateTo } : {}),
+  }), [actionFilter, search, userIdFilter, resourceTypeFilter, dateFrom, dateTo]);
 
   const logsQuery = useQuery({
-    queryKey: ['admin', 'logs', page, actionFilter, search],
-    queryFn: () => adminApi.logs({
-      page,
-      page_size: PAGE_SIZE,
-      ...(actionFilter ? { action: actionFilter } : {}),
-      ...(search ? { q: search } : {}),
-    }),
+    queryKey: ['admin', 'logs', page, activeFilters],
+    queryFn: () => adminApi.logs({ page, page_size: PAGE_SIZE, ...activeFilters }),
     placeholderData: (prev) => prev,
   });
 
@@ -90,6 +120,39 @@ export default function AdminAuditLogPage() {
     setActionFilter(value);
     setPage(1);
   }
+
+  function handleUserIdFilterChange(value: string) {
+    setUserIdFilter(value);
+    setPage(1);
+  }
+
+  function handleResourceTypeFilterChange(value: string) {
+    setResourceTypeFilter(value);
+    setPage(1);
+  }
+
+  function handleDateFromChange(value: string) {
+    setDateFrom(value);
+    setPage(1);
+  }
+
+  function handleDateToChange(value: string) {
+    setDateTo(value);
+    setPage(1);
+  }
+
+  const handleExport = useCallback(async (format: AuditLogExportFormat) => {
+    setExportingFormat(format);
+    try {
+      const { blob, filename } = await adminApi.exportLogs(format, activeFilters);
+      downloadBlob(blob, filename);
+      addToast(`Audit log exported as ${format.toUpperCase()}.`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to export audit log.', 'error');
+    } finally {
+      setExportingFormat(null);
+    }
+  }, [activeFilters, addToast]);
 
   return (
     <motion.div variants={pageTransition} initial="initial" animate="animate">
@@ -134,6 +197,77 @@ export default function AdminAuditLogPage() {
             <RefreshCw size={14} className="animate-spin text-primary" />
           </div>
         )}
+      </motion.div>
+
+      {/* Advanced filters + export */}
+      <motion.div
+        className="flex flex-wrap items-end gap-3"
+        variants={{ initial: { opacity: 0.99, y: 6 }, animate: { opacity: 1, y: 0, transition: { duration: 0.3, delay: 0.08 } } }}
+      >
+        <div className="w-44">
+          <Input
+            placeholder="Filter by user ID"
+            value={userIdFilter}
+            onChange={(e) => handleUserIdFilterChange(e.target.value)}
+          />
+        </div>
+        <div className="relative">
+          <select
+            value={resourceTypeFilter}
+            onChange={(e) => handleResourceTypeFilterChange(e.target.value)}
+            className="w-44 appearance-none rounded-lg border border-border bg-bg-soft/80 backdrop-blur-sm px-3 py-2.5 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            aria-label="Filter by resource type"
+          >
+            {RESOURCE_TYPE_FILTERS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-dim" />
+        </div>
+        <label htmlFor="audit-log-date-from" className="flex items-center gap-1.5 text-xs text-text-muted">
+          From
+          <input
+            id="audit-log-date-from"
+            type="date"
+            value={dateFrom}
+            max={dateTo || undefined}
+            onChange={(e) => handleDateFromChange(e.target.value)}
+            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+          />
+        </label>
+        <label htmlFor="audit-log-date-to" className="flex items-center gap-1.5 text-xs text-text-muted">
+          To
+          <input
+            id="audit-log-date-to"
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => handleDateToChange(e.target.value)}
+            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+          />
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void handleExport('csv'); }}
+            loading={exportingFormat === 'csv'}
+            disabled={exportingFormat !== null}
+          >
+            <Download size={14} />
+            Export CSV
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void handleExport('json'); }}
+            loading={exportingFormat === 'json'}
+            disabled={exportingFormat !== null}
+          >
+            <Download size={14} />
+            Export JSON
+          </Button>
+        </div>
       </motion.div>
 
       {/* Table */}
