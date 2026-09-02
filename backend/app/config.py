@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     # ─── Audit Export ──────────────────────────
     AUDIT_EXPORT_MAX_ROWS: int = 50000
 
+    # ─── Bulk Document Operations ─────────────
+    BULK_REINDEX_CONCURRENCY: int = 3
+
     # ─── Evaluation ───────────────────────────
     EVAL_MIN_FAITHFULNESS: float = 0.6
     EVAL_MIN_TRUST: float = 0.5

@@ -15,9 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Filled in by the owning sprint lane (see plan: migration slots).
-    pass
+    op.add_column(
+        "documents",
+        sa.Column("tags", sa.JSON(), nullable=False, server_default="[]"),
+    )
 
 
 def downgrade() -> None:
-    pass
+    with op.batch_alter_table("documents") as batch_op:
+        batch_op.drop_column("tags")
