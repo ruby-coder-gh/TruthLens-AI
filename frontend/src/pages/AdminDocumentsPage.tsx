@@ -120,10 +120,14 @@ export default function AdminDocumentsPage() {
     onSuccess: (response, variables) => {
       const { ok, accepted, failed } = response.summary;
       const allFailed = failed > 0 && ok === 0 && accepted === 0;
+      // Non-fatal per-item note from the server; surfaced inline because the
+      // toast API takes a plain string. Absent on most responses.
+      const warning = response.results.find((r) => r.warning)?.warning;
       addToast(
-        allFailed
+        (allFailed
           ? `All ${failed} failed — selection kept`
-          : `${ACTION_LABELS[variables.action]}: ${ok} ok, ${accepted} accepted, ${failed} failed`,
+          : `${ACTION_LABELS[variables.action]}: ${ok} ok, ${accepted} accepted, ${failed} failed`)
+        + (warning ? ` — ${warning}` : ''),
         failed > 0 ? 'error' : 'success',
       );
       queryClient.invalidateQueries({ queryKey: ['admin', 'documents'] });

@@ -578,6 +578,9 @@ export interface BulkDocumentResult {
   id: string;
   status: 'ok' | 'accepted' | 'failed';
   error?: string | null;
+  /** Non-fatal server-side note about an item that still succeeded (e.g. a
+   *  reindex that skipped an unreadable page). Absent on most results. */
+  warning?: string | null;
 }
 
 export interface BulkDocumentResponse {
