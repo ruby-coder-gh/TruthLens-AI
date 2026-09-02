@@ -173,7 +173,7 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
             "from_cache": True,
             # A gated abstention is cacheable (response_text is not NULL), so the
             # replay has to keep saying it was an abstention.
-            "edge_case": query.edge_case,
+            "edge_case": getattr(query, "edge_case", None),
         },
     )
 
@@ -271,7 +271,9 @@ async def _run_query_pipeline(
         abstention = maybe_abstain(query_id, reranked, elapsed_ms=int((time.time() - start_time) * 1000))
         if abstention is not None:
             for frame in abstention.frames:
-                await send_json(frame)
+                # Already {type, payload} (sufficiency._abstention_frames), so the
+                # sink can stamp `seq` and buffer each one for resume.
+                await sink.send(frame)
             await _save_query(
                 query_id=query_id, workspace_id=workspace_id, user_id=user_id,
                 query_text=sanitized_query, rewritten_query=rewritten,

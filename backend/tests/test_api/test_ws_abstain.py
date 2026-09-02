@@ -1,13 +1,12 @@
 """WebSocket pipeline abstains on thin evidence instead of calling the model.
 
-Drives `_run_query_pipeline` with monkeypatched steps, following the pattern in
-tests/test_api/test_ws.py.
+Drives `_run_query_pipeline` through a `StreamSink`, reusing the `Recorder` and
+module-stub helpers from `tests/test_api/test_ws_resume.py` so the abstain path
+is exercised on exactly the same harness as every other pipeline frame.
 """
 
 from __future__ import annotations
 
-import sys
-import types
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +18,11 @@ from app.config import settings
 from app.models.query import Query
 from app.models.user import User
 from app.models.workspace import Workspace
+from tests.test_api.test_ws_resume import Recorder, _install_module
+
+# Index of the first frame the sufficiency gate emits: ack, progress(0.1),
+# progress(0.3) precede it.
+FIRST_ABSTAIN_FRAME = 3
 
 
 def _hit(score: float, chunk_id: str = "chunk-1", document_id: str = "doc-1"):
@@ -33,13 +37,21 @@ def _hit(score: float, chunk_id: str = "chunk-1", document_id: str = "doc-1"):
     )
 
 
+def _sink(recorder: Recorder, query_id: str = "query-1"):
+    from app.api.stream_registry import StreamBuffer, StreamSink
+
+    buffer = StreamBuffer(query_id=query_id, user_id="user-1", workspace_id="ws-1")
+    return StreamSink(buffer, recorder)
+
+
 @pytest_asyncio.fixture
 async def pipeline(monkeypatch):
     """Wire every pipeline dependency to a fake and record what happened."""
     from app.api import ws as ws_api
 
     state: dict[str, object] = {"stream_called": False, "saved": None, "rerank_scores": [0.02, 0.01]}
-    sent: list[dict] = []
+    recorder = Recorder()
+    sink = _sink(recorder)
 
     async def fake_rewrite(query: str) -> str:
         return query
@@ -74,20 +86,12 @@ async def pipeline(monkeypatch):
     async def fake_cache_lookup(*args, **kwargs):
         return None
 
-    async def send_json(message: dict) -> None:
-        sent.append(message)
-
-    for module_name, attribute, value in (
-        ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
-        ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
-        ("app.retrieval.reranker", "rerank", fake_rerank),
-        ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
-        ("app.generation.guardrail", "check", fake_guardrail_check),
-        ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
-    ):
-        stub = types.ModuleType(module_name)
-        setattr(stub, attribute, value)
-        monkeypatch.setitem(sys.modules, module_name, stub)
+    _install_module(monkeypatch, "app.retrieval.query_rewrite", rewrite=fake_rewrite)
+    _install_module(monkeypatch, "app.retrieval.hybrid_search", hybrid_search=fake_hybrid_search)
+    _install_module(monkeypatch, "app.retrieval.reranker", rerank=fake_rerank)
+    _install_module(monkeypatch, "app.generation.streamer", stream_tokens=fake_stream_tokens)
+    _install_module(monkeypatch, "app.generation.guardrail", check=fake_guardrail_check)
+    _install_module(monkeypatch, "app.evaluation.trust_score", compute_trust=fake_compute_trust)
 
     monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
     monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
@@ -101,11 +105,11 @@ async def pipeline(monkeypatch):
             query_id="query-1",
             top_k=5,
             filters=None,
-            send_json=send_json,
+            sink=sink,
             **overrides,
         )
 
-    return SimpleNamespace(run=run, sent=sent, state=state)
+    return SimpleNamespace(run=run, sent=recorder.frames, recorder=recorder, sink=sink, state=state)
 
 
 @pytest.mark.asyncio
@@ -117,14 +121,37 @@ async def test_thin_evidence_abstains_without_calling_the_model(pipeline):
     types_sent = [message["type"] for message in pipeline.sent]
     assert types_sent == ["ack", "progress", "progress", "progress", "token", "guardrail", "trust_score", "complete"]
     assert "sources" not in types_sent
-    assert pipeline.sent[3]["payload"]["phase"] == "abstain"
+    assert pipeline.sent[FIRST_ABSTAIN_FRAME]["payload"]["phase"] == "abstain"
+
+
+@pytest.mark.asyncio
+async def test_abstention_frames_carry_increasing_seq_through_the_sink(pipeline):
+    """Abstention frames go through the sink, so they are seq-stamped and resumable."""
+    await pipeline.run()
+
+    seqs = pipeline.recorder.seqs
+    assert seqs == list(range(1, len(pipeline.sent) + 1)), "every frame needs a gapless top-level seq"
+
+    abstain_frames = pipeline.sent[FIRST_ABSTAIN_FRAME:]
+    assert [frame["type"] for frame in abstain_frames] == [
+        "progress",
+        "token",
+        "guardrail",
+        "trust_score",
+        "complete",
+    ]
+    abstain_seqs = [frame["seq"] for frame in abstain_frames]
+    assert abstain_seqs == sorted(abstain_seqs)
+    assert len(set(abstain_seqs)) == len(abstain_seqs)
+    # Buffered means a client that dropped mid-abstention can resume it.
+    assert pipeline.sink.buffer.frames == pipeline.sent
 
 
 @pytest.mark.asyncio
 async def test_abstention_answer_is_the_recognised_refusal_string(pipeline):
     await pipeline.run()
 
-    token = pipeline.sent[4]["payload"]
+    token = pipeline.sent[FIRST_ABSTAIN_FRAME + 1]["payload"]
     assert token["content"].startswith("I cannot find this information in your documents.")
     assert "best evidence score 0.02" in token["content"]
     assert token["index"] == 0
@@ -232,11 +259,7 @@ async def test_cached_replay_of_an_abstention_still_reports_the_edge_case():
     replay path must not present it as a normal answer."""
     from app.api import ws as ws_api
 
-    sent: list[dict] = []
-
-    async def send_json(message: dict) -> None:
-        sent.append(message)
-
+    recorder = Recorder()
     cached = Query(
         id="cached-abstain",
         workspace_id="ws-1",
@@ -251,22 +274,19 @@ async def test_cached_replay_of_an_abstention_still_reports_the_edge_case():
         edge_case="insufficient_evidence",
     )
 
-    await ws_api._send_cached_query(cached, send_json, 3)
+    await ws_api._send_cached_query(cached, _sink(recorder, "cached-abstain"), 3)
 
-    complete = sent[-1]["payload"]
+    complete = recorder.frames[-1]["payload"]
     assert complete["from_cache"] is True
     assert complete["edge_case"] == "insufficient_evidence"
+    assert recorder.seqs == list(range(1, len(recorder.frames) + 1))
 
 
 @pytest.mark.asyncio
 async def test_cached_replay_of_a_normal_answer_has_no_edge_case():
     from app.api import ws as ws_api
 
-    sent: list[dict] = []
-
-    async def send_json(message: dict) -> None:
-        sent.append(message)
-
+    recorder = Recorder()
     cached = Query(
         id="cached-normal",
         workspace_id="ws-1",
@@ -278,9 +298,9 @@ async def test_cached_replay_of_a_normal_answer_has_no_edge_case():
         token_count=4,
     )
 
-    await ws_api._send_cached_query(cached, send_json, 3)
+    await ws_api._send_cached_query(cached, _sink(recorder, "cached-normal"), 3)
 
-    assert sent[-1]["payload"]["edge_case"] is None
+    assert recorder.frames[-1]["payload"]["edge_case"] is None
 
 
 @pytest.mark.asyncio
