@@ -33,7 +33,7 @@ function plural(count: number, noun: string): string {
 }
 
 const chipClass =
-  'inline-flex items-center gap-1.5 rounded-full border border-orange/30 bg-orange/10 px-3 py-1.5 text-xs font-medium text-orange transition-colors hover:bg-orange/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'inline-flex items-center gap-1.5 rounded-full border border-orange/35 bg-orange/12 px-3 py-1.5 text-xs font-semibold text-orange transition-colors hover:bg-orange/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 export const AbstentionCard = memo(function AbstentionCard({
   answer,
@@ -45,7 +45,9 @@ export const AbstentionCard = memo(function AbstentionCard({
 
   return (
     <div
-      className="rounded-xl border border-orange/30 bg-orange/10 p-4"
+      // The 3px amber rail is a second, non-colour signal: the card still
+      // reads as a distinct stop even with the hue desaturated away.
+      className="rounded-card border border-orange/35 bg-orange/12 p-4 shadow-[inset_3px_0_0_var(--color-trust-mid)]"
       role="status"
       data-testid="abstention-card"
     >

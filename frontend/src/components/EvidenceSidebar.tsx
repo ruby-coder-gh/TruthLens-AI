@@ -78,6 +78,21 @@ interface EvidenceSidebarProps {
   onExpandScope?: () => void;
 }
 
+/**
+ * Meter fills for the three trust bands.
+ *
+ * `relevance.colors.bar` / `.glow` still carry Tailwind's stock palette
+ * (`from-green-400 to-emerald-500`), which is a fixed dark-theme value: on the
+ * light ground `green-400` is 1.7:1 against its own track, i.e. an invisible
+ * meter. These map to the `--color-trust-*` fill hues instead, so the bars
+ * follow the theme. `.text` is already token-driven, so it passes through.
+ */
+const TRUST_BAR: Record<'high' | 'medium' | 'low', { bar: string; glow: string }> = {
+  high: { bar: 'bg-trust-high', glow: 'bg-trust-high/50' },
+  medium: { bar: 'bg-trust-mid', glow: 'bg-trust-mid/50' },
+  low: { bar: 'bg-trust-low', glow: 'bg-trust-low/50' },
+};
+
 function getRelevanceLevel(score: number) {
   const relevance = getRelevanceMeta(score);
 
@@ -85,8 +100,8 @@ function getRelevanceLevel(score: number) {
     level: relevance.tier,
     label: relevance.label,
     color: {
-      bar: relevance.colors.bar,
-      glow: relevance.colors.glow,
+      bar: TRUST_BAR[relevance.tier].bar,
+      glow: TRUST_BAR[relevance.tier].glow,
       text: relevance.colors.text,
     },
   };
@@ -106,19 +121,35 @@ function getEvidenceBadge(score: number): { label: string; icon: React.ReactNode
   return { label: relevance.evidenceLabel, icon: <XCircle size={12} />, color: relevance.badgeColor };
 }
 
-function trustScoreColor(score: number | undefined): 'green' | 'orange' | 'red' | 'gray' {
-  if (score === undefined) return 'gray';
+function trustScoreColor(score: number | null | undefined): 'green' | 'orange' | 'red' | 'gray' {
+  if (score === undefined || score === null) return 'gray';
   if (score >= 0.75) return 'green';
   if (score >= 0.5) return 'orange';
   return 'red';
 }
 
+/** SVG stroke for the trust arc, keyed by the same verdict `trustScoreColor`
+ *  returns. The arc used to be a flat indigo gradient over a `rgba(255,…,.05)`
+ *  track — invisible on the light ground and identical for every verdict. The
+ *  numeric score sits inside the arc, so hue is never the only signal. */
+const TRUST_ARC_STROKE: Record<'green' | 'orange' | 'red' | 'gray', string> = {
+  green: 'var(--color-trust-high)',
+  orange: 'var(--color-trust-mid)',
+  red: 'var(--color-trust-low)',
+  gray: 'var(--color-text-dim)',
+};
+
 // Trust verdict → wax-seal stamp thresholds. Mirrors ChatPage's per-message
 // stamp (0.7 / 0.4) so the verdict reads identically in the bubble and here.
 function trustStampMeta(score: number): { label: string; colorClass: string } {
-  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-accent' };
-  if (score >= 0.4) return { label: 'Review', colorClass: 'text-primary' };
-  return { label: 'Flagged', colorClass: 'text-accent-2' };
+  // The stamp used to run accent → primary → accent-2. Under the Grounded
+  // Glass token set those three all resolve to the same indigo, so all three
+  // verdicts painted identically. They now carry the trust inks; `.wax-seal`
+  // derives its tint and edge from `currentColor`, and the label word next to
+  // the hue keeps colour from being the only signal.
+  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-green' };
+  if (score >= 0.4) return { label: 'Review', colorClass: 'text-orange' };
+  return { label: 'Flagged', colorClass: 'text-red' };
 }
 
 function formatDate(iso: string): string {
@@ -186,32 +217,35 @@ function StatusBadge({ trustScore, isLoading, hasError, abstained }: { trustScor
 
 function SourceCardSkeleton() {
   return (
-    <div className="rounded-2xl bg-card/60 border border-border/40 p-4 space-y-3 animate-pulse">
+    <div className="rounded-card bg-card border border-border p-4 space-y-3 animate-pulse">
       <div className="flex items-center gap-3">
-        <div className="h-8 w-8 rounded-lg bg-white/5" />
+        <div className="h-8 w-8 rounded-control bg-card-2" />
         <div className="flex-1 space-y-1.5">
-          <div className="h-3.5 w-3/4 rounded bg-white/5" />
-          <div className="h-3 w-1/4 rounded bg-white/5" />
+          <div className="h-3.5 w-3/4 rounded bg-card-2" />
+          <div className="h-3 w-1/4 rounded bg-card-2" />
         </div>
       </div>
-      <div className="h-2 w-full rounded-full bg-white/5" />
+      <div className="h-2 w-full rounded-full bg-card-2" />
       <div className="flex gap-2">
-        <div className="h-5 w-20 rounded-full bg-white/5" />
-        <div className="h-5 w-16 rounded-full bg-white/5" />
-        <div className="h-5 w-24 rounded-full bg-white/5" />
+        <div className="h-5 w-20 rounded-full bg-card-2" />
+        <div className="h-5 w-16 rounded-full bg-card-2" />
+        <div className="h-5 w-24 rounded-full bg-card-2" />
       </div>
       <div className="space-y-1.5">
-        <div className="h-3 w-full rounded bg-white/5" />
-        <div className="h-3 w-5/6 rounded bg-white/5" />
+        <div className="h-3 w-full rounded bg-card-2" />
+        <div className="h-3 w-5/6 rounded bg-card-2" />
       </div>
     </div>
   );
 }
 
 function ShimmerBar({ width = '100%', delay = 0 }: { width?: string; delay?: number }) {
+  // `.shimmer` paints its own token-derived gradient; the stock
+  // `via-white/10` utilities it used to carry never applied (the unlayered
+  // rule wins) and read as a dark-theme literal regardless.
   return (
     <div
-      className="h-2 rounded-full bg-gradient-to-r from-transparent via-white/10 to-transparent shimmer"
+      className="h-2 rounded-full shimmer"
       style={{ width, animationDelay: `${delay}s` }}
     />
   );
@@ -268,10 +302,10 @@ const SourceCard = memo(function SourceCard({
       layout
       variants={staggerItem}
       className={clsx(
-        'group relative rounded-2xl border transition-all duration-300 cursor-pointer overflow-hidden',
+        'group relative rounded-card border transition-all duration-300 cursor-pointer overflow-hidden',
         isHighlighted
-          ? 'border-primary/60 shadow-[0_0_24px_rgba(99,102,241,0.2)] bg-primary/5'
-          : 'border-border/40 bg-card/60 hover:border-primary/30 hover:bg-card-hover',
+          ? 'border-primary/60 bg-primary/10 shadow-e2'
+          : 'border-border bg-card shadow-e1 hover:border-primary/40 hover:bg-card-hover hover:shadow-e2',
       )}
       whileHover={{ y: -2, scale: 1.01 }}
       whileTap={{ scale: 0.99 }}
@@ -292,20 +326,17 @@ const SourceCard = memo(function SourceCard({
       <div className="p-4 space-y-3">
         {/* Row 1: Icon + Exhibit tag + Name + Type */}
         <div className="flex items-start gap-3">
-          <div className={clsx(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl',
-            'bg-gradient-to-br from-primary/20 to-primary-dark/20 border border-primary/20',
-          )}>
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
             {fileTypeIcon(source.file_type)}
           </div>
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center gap-1.5">
-              <span className="inline-flex items-center rounded-[3px] bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-bg">
+              <span className="inline-flex items-center rounded-chip bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-on-primary">
                 Exhibit {String(index + 1).padStart(2, '0')}
               </span>
               <Badge color="gray" className="shrink-0 text-[10px]">{fileExt}</Badge>
             </div>
-            <p className="truncate font-mono text-sm font-medium text-primary">
+            <p className="truncate font-mono text-sm font-medium text-primary-soft">
               {docName}
               {source.page_number ? <span className="font-sans font-normal text-text-dim"> · p.{source.page_number}</span> : null}
             </p>
@@ -330,7 +361,7 @@ const SourceCard = memo(function SourceCard({
               {relevancePct}%
             </span>
           </div>
-          <div className="relative h-2 rounded-full bg-white/5 overflow-hidden">
+          <div className="relative h-2 rounded-full bg-card-2 overflow-hidden">
             <motion.div
               className={clsx('absolute inset-y-0 left-0 rounded-full', relevance.color.bar)}
               initial={{ width: 0 }}
@@ -345,16 +376,16 @@ const SourceCard = memo(function SourceCard({
 
         {/* Row 3: Metadata chips */}
         <div className="flex flex-wrap gap-1.5 font-mono tabular-nums">
-          <div className="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-text-dim">
+          <div className="inline-flex items-center gap-1 rounded-control border border-border-light bg-card-2 px-2 py-1 text-[11px] text-text-dim">
             <Shield size={10} /> {confidencePct}%
           </div>
           {source.matched_chunks && (
-            <div className="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-text-dim">
+            <div className="inline-flex items-center gap-1 rounded-control border border-border-light bg-card-2 px-2 py-1 text-[11px] text-text-dim">
               <Layers size={10} /> {source.matched_chunks} chunk{source.matched_chunks !== 1 ? 's' : ''}
             </div>
           )}
           {source.page_number && (
-            <div className="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1 text-[11px] text-text-dim">
+            <div className="inline-flex items-center gap-1 rounded-control border border-border-light bg-card-2 px-2 py-1 text-[11px] text-text-dim">
               <FileText size={10} /> p. {source.page_number}
             </div>
           )}
@@ -375,9 +406,11 @@ const SourceCard = memo(function SourceCard({
         </div>
 
         {/* Row 5: Excerpt (always visible, truncated) */}
+        {/* A quoted source excerpt: opaque surface (never body text on a blur),
+            and the one place Newsreader is allowed. */}
         <div
           className={clsx(
-            'rounded-xl bg-black/20 p-3 text-xs leading-relaxed text-text-muted',
+            'font-quote rounded-control border border-border bg-solid p-3 text-[13px] leading-relaxed text-text',
             isExpanded ? '' : 'line-clamp-2',
           )}
         >
@@ -390,7 +423,7 @@ const SourceCard = memo(function SourceCard({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="rounded-xl bg-primary/5 border border-primary/10 p-3"
+            className="rounded-control border border-primary/25 bg-primary/10 p-3"
           >
             <div className="flex items-start gap-2">
               <Brain size={14} className="shrink-0 mt-0.5 text-primary-soft" />
@@ -411,15 +444,15 @@ const SourceCard = memo(function SourceCard({
             className="space-y-2 pt-1"
           >
             {/* Full excerpt */}
-            <div className="rounded-xl bg-black/20 p-3">
+            <div className="rounded-control border border-border bg-solid p-3">
               <p className="text-[11px] font-medium text-text-dim mb-1.5">Matched Content</p>
-              <p className="text-xs text-text-muted leading-relaxed">{source.excerpt}</p>
+              <p className="font-quote text-[13px] leading-relaxed text-text">{source.excerpt}</p>
             </div>
 
             {/* Similarity scores */}
             <div className="grid grid-cols-2 gap-2">
               {source.relevance_score !== undefined && (
-                <div className="rounded-lg bg-white/5 px-3 py-2">
+                <div className="rounded-control border border-border-light bg-card-2 px-3 py-2">
                   <p className="text-[10px] text-text-dim">Vector Similarity</p>
                   <p className="font-mono text-sm font-semibold text-text tabular-nums">
                     {relevancePercent(source.relevance_score)}%
@@ -427,7 +460,7 @@ const SourceCard = memo(function SourceCard({
                 </div>
               )}
               {source.rerank_score !== undefined && (
-                <div className="rounded-lg bg-white/5 px-3 py-2">
+                <div className="rounded-control border border-border-light bg-card-2 px-3 py-2">
                   <p className="text-[10px] text-text-dim">Rerank Score</p>
                   <p className="font-mono text-sm font-semibold text-text tabular-nums">
                     {(source.rerank_score * 100).toFixed(1)}%
@@ -438,16 +471,16 @@ const SourceCard = memo(function SourceCard({
 
             {/* Chunk confidence */}
             {source.confidence !== undefined && (
-              <div className="rounded-lg bg-white/5 px-3 py-2">
+              <div className="rounded-control border border-border-light bg-card-2 px-3 py-2">
                 <div className="flex items-center justify-between text-xs mb-1">
                   <span className="text-text-dim">Chunk Confidence</span>
                   <span className="font-mono font-medium text-text tabular-nums">
                     {chunkConfidencePct}%
                   </span>
                 </div>
-                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-1.5 rounded-full bg-card-2 overflow-hidden">
                   <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-primary-soft to-primary"
+                    className="h-full rounded-full bg-primary"
                     initial={{ width: 0 }}
                     animate={{ width: `${chunkConfidencePct}%` }}
                     transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
@@ -571,7 +604,7 @@ function AIReasoningTab({
         </h4>
         <div className="relative">
           {/* Vertical line */}
-          <div className="absolute left-[15px] top-2 bottom-2 w-px bg-gradient-to-b from-primary/40 via-accent/40 to-green-400/40" />
+          <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
 
           <div className="space-y-0">
             {steps.map((step, i) => {
@@ -589,10 +622,10 @@ function AIReasoningTab({
                   <div className={clsx(
                     'relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-500',
                     isAbstainStep
-                      ? 'border-orange/60 bg-orange/20'
+                      ? 'border-orange/50 bg-orange/15'
                       : step.done
-                        ? 'border-green-500/60 bg-green-500/20'
-                        : 'border-white/10 bg-white/5',
+                        ? 'border-green/50 bg-green/15'
+                        : 'border-border bg-card-2',
                   )}>
                     {isAbstainStep ? (
                       <AlertTriangle size={14} className="text-orange" />
@@ -663,13 +696,13 @@ function AIReasoningTab({
                     {(val * 100).toFixed(0)}%
                   </span>
                 </div>
-                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-1.5 rounded-full bg-card-2 overflow-hidden">
                   <motion.div
                     className={clsx(
                       'h-full rounded-full',
-                      val >= 0.75 ? 'bg-gradient-to-r from-green-400 to-emerald-500' :
-                      val >= 0.5 ? 'bg-gradient-to-r from-orange-400 to-amber-500' :
-                      'bg-gradient-to-r from-red-400 to-rose-500',
+                      val >= 0.75 ? 'bg-trust-high' :
+                      val >= 0.5 ? 'bg-trust-mid' :
+                      'bg-trust-low',
                     )}
                     initial={{ width: 0 }}
                     animate={{ width: `${(val * 100).toFixed(0)}%` }}
@@ -689,10 +722,10 @@ function AIReasoningTab({
               >
                 <div className="relative flex h-20 w-20 items-center justify-center">
                   <svg className="absolute inset-0" viewBox="0 0 80 80">
-                    <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="4" />
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="var(--color-border)" strokeWidth="4" />
                     <motion.circle
                       cx="40" cy="40" r="34" fill="none"
-                      stroke="url(#trustGradient)"
+                      stroke={TRUST_ARC_STROKE[trustScoreColor(trustScore)]}
                       strokeWidth="4"
                       strokeLinecap="round"
                       strokeDasharray={`${trustScore * 213.6} 213.6`}
@@ -701,12 +734,6 @@ function AIReasoningTab({
                       animate={{ strokeDasharray: `${trustScore * 213.6} 213.6` }}
                       transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] }}
                     />
-                    <defs>
-                      <linearGradient id="trustGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="var(--color-primary)" />
-                        <stop offset="100%" stopColor="var(--color-accent)" />
-                      </linearGradient>
-                    </defs>
                   </svg>
                   <div className="text-center">
                     <p className="text-lg font-bold text-text tabular-nums">{(trustScore * 100).toFixed(0)}</p>
@@ -740,6 +767,19 @@ function ConstellationCanvas() {
 
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const dpr = window.devicePixelRatio || 1;
+
+    // The two node/edge hues used to be Midnight literals baked into the draw
+    // loop, so the constellation stayed dark-theme indigo on the light ground.
+    // Read them off the token layer once, and again whenever <html data-theme>
+    // flips — cheaper than a getComputedStyle per frame, and always correct.
+    let accent = 'var(--color-primary)';
+    let corroborate = 'var(--color-trust-high)';
+    const readTokens = () => {
+      const styles = getComputedStyle(document.documentElement);
+      accent = styles.getPropertyValue('--color-primary').trim() || '#4F46E5';
+      corroborate = styles.getPropertyValue('--color-trust-high').trim() || '#15803D';
+    };
+    readTokens();
     let W = 0;
     let H = 0;
 
@@ -780,7 +820,8 @@ function ConstellationCanvas() {
       for (let i = 0; i < N; i++) {
         const n = nodes[i];
         const d = Math.hypot(n.x - cx, n.y - cy);
-        ctx.strokeStyle = `rgba( 99, 102, 241,${Math.max(0, 0.28 - d / 900)})`;
+        ctx.globalAlpha = Math.max(0, 0.4 - d / 640);
+        ctx.strokeStyle = accent;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx, cy);
@@ -790,7 +831,8 @@ function ConstellationCanvas() {
           const m = nodes[j];
           const dd = Math.hypot(n.x - m.x, n.y - m.y);
           if (dd < 58) {
-            ctx.strokeStyle = `rgba( 52, 211, 153,${0.16 * (1 - dd / 58)})`;
+            ctx.globalAlpha = 0.24 * (1 - dd / 58);
+            ctx.strokeStyle = corroborate;
             ctx.beginPath();
             ctx.moveTo(n.x, n.y);
             ctx.lineTo(m.x, m.y);
@@ -801,7 +843,8 @@ function ConstellationCanvas() {
       for (let k = 0; k < N; k++) {
         const p = nodes[k];
         ctx.beginPath();
-        ctx.fillStyle = k % 3 === 0 ? 'rgba(52,211,153,0.9)' : 'rgba(99,102,241,0.85)';
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = k % 3 === 0 ? corroborate : accent;
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
         if (!reduce) {
@@ -814,12 +857,22 @@ function ConstellationCanvas() {
           }
         }
       }
+      ctx.globalAlpha = 1;
       if (!reduce) raf = requestAnimationFrame(draw);
     };
     draw();
 
+    // Under reduced motion `draw` runs once, so a theme flip needs an explicit
+    // repaint; while animating the next frame picks the new hues up anyway.
+    const themeObserver = new MutationObserver(() => {
+      readTokens();
+      if (reduce) draw();
+    });
+    themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+
     return () => {
       window.removeEventListener('resize', resize);
+      themeObserver.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
@@ -855,8 +908,8 @@ function EvidenceEmptyState({
         className="relative mb-4 w-full"
       >
         <ConstellationCanvas />
-        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br from-accent to-primary shadow-[0_0_28px_rgba(52,211,153,0.4)]">
-          <Sparkles size={18} className="text-bg" />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-primary shadow-e2">
+          <Sparkles size={18} className="text-on-primary" />
         </div>
       </motion.div>
 
@@ -875,7 +928,7 @@ function EvidenceEmptyState({
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.15 + i * 0.08 }}
             whileTap={{ scale: 0.98 }}
-            className="group flex w-full items-center gap-2.5 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5 text-left text-xs font-medium text-text-muted transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-primary/[0.07] hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="group flex w-full items-center gap-2.5 rounded-control border border-border bg-card-2 px-3 py-2.5 text-left text-xs font-medium text-text-muted transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-primary/10 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <span className="text-primary-soft">{a.icon}</span>
             {a.text}
@@ -944,7 +997,7 @@ function SourcesPanel({
       initial="initial"
       animate="animate"
     >
-      <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3 rounded-control border border-border bg-card-2 px-3 py-2.5">
         <div><p className="text-xs font-semibold text-text">Evidence package</p><p className="mt-0.5 text-[11px] text-text-dim">Select and export cited passages.</p></div>
         <Button size="sm" variant="ghost" onClick={onBuildReport}><Download size={12} /> Build report</Button>
       </div>
@@ -1019,7 +1072,9 @@ export default function EvidenceSidebar({
           )}
         >
           {/* Docked glass panel — slides in from the right */}
-          <div className="flex h-full flex-col overflow-hidden border-l border-white/[0.08] bg-bg/92 backdrop-blur-2xl shadow-2xl shadow-primary/10">
+          {/* L1 glass panel — the sidebar's own blur is the only one on this
+              column; the cards inside are flat tints, never a second stack. */}
+          <div className="flex h-full flex-col overflow-hidden border-l border-border bg-bg-soft/85 backdrop-blur-xl shadow-e3">
             {/* ─── Drag Handle / Header ──────────────────────────────────── */}
             <div className="shrink-0 px-4 py-3">
               <div className="flex items-center justify-between">
@@ -1049,7 +1104,7 @@ export default function EvidenceSidebar({
               </div>
 
               {/* ─── Tab bar ─────────────────────────────────────────────── */}
-              <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-white/[0.05] bg-white/[0.03] p-1" role="tablist">
+              <div className="mt-3 grid grid-cols-2 gap-1 rounded-control border border-border-light bg-card-2 p-1" role="tablist">
                 {SIDEBAR_TABS.map((tab) => {
                   const isActive = tab.id === currentTab;
                   return (
@@ -1060,15 +1115,15 @@ export default function EvidenceSidebar({
                       aria-selected={isActive}
                       onClick={() => onTabChange?.(tab.id)}
                       className={clsx(
-                        'relative flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                        isActive ? 'text-primary-soft' : 'text-text-dim hover:bg-white/[0.03] hover:text-text',
+                        'relative flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                        isActive ? 'text-primary-soft' : 'text-text-dim hover:bg-card-hover hover:text-text',
                       )}
                       whileTap={{ scale: 0.97 }}
                     >
                       {isActive && (
                         <motion.div
                           layoutId="sidebarActiveTab"
-                          className="absolute inset-0 rounded-lg border border-primary/25 bg-primary/10 shadow-[0_1px_10px_rgba(99,102,241,0.18)]"
+                          className="absolute inset-0 rounded-lg border border-primary/30 bg-primary/12 shadow-e1"
                           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                         />
                       )}
