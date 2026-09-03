@@ -5,6 +5,7 @@ import { clsx } from 'clsx';
 import { diffLines } from 'diff';
 import {
   CheckCircle2,
+  ChevronDown,
   FileDiff,
   GitBranch,
   Plus,
@@ -76,7 +77,7 @@ const METRICS: MetricSpec[] = [
 ];
 
 const NEUTRAL_CHIP =
-  'inline-flex items-center rounded-full border border-border bg-card-2 px-2 py-0.5 text-[11px] text-text-dim';
+  'inline-flex items-center rounded-chip border border-border bg-card-2 px-2 py-0.5 text-[11px] text-text-dim';
 
 const GATE_REASON_TEXT: Record<string, string> = {
   thresholds_not_met: 'Scores below threshold — the golden-set eval did not clear the gate.',
@@ -179,11 +180,11 @@ function DiffView({ lines }: { lines: DiffLine[] }) {
     return <p className="text-sm text-text-dim">The two prompts are identical.</p>;
   }
   return (
-    <ul className="max-h-80 overflow-y-auto rounded-xl border border-border bg-bg-soft p-3 font-mono text-xs leading-relaxed">
+    <ul className="max-h-80 overflow-y-auto rounded-control border border-border bg-card-2 p-3 font-mono text-xs leading-relaxed">
       {lines.map((line) => (
         <li
           key={line.key}
-          className={clsx('flex gap-2 whitespace-pre-wrap break-words rounded px-1', DIFF_LINE_CLASS[line.kind])}
+          className={clsx('flex gap-2 whitespace-pre-wrap break-words rounded-chip px-1', DIFF_LINE_CLASS[line.kind])}
         >
           <span aria-hidden="true" className="select-none opacity-60">{DIFF_SIGN[line.kind]}</span>
           {DIFF_LABEL[line.kind] ? <span className="sr-only">{DIFF_LABEL[line.kind]}</span> : null}
@@ -223,8 +224,8 @@ function MetricChip({ evalSummary, spec }: { evalSummary: PromptEvalSummary; spe
   return (
     <span
       className={clsx(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tabular-nums',
-        failed ? 'border-red/30 bg-red/10 text-red' : 'border-green/30 bg-green/10 text-green',
+        'inline-flex items-center gap-1 rounded-chip border px-2 py-0.5 text-[11px] font-medium tabular-nums',
+        failed ? 'border-red/30 bg-red/10 text-red' : 'border-green/30 bg-green/12 text-green',
       )}
     >
       {failed ? <XCircle size={11} aria-hidden="true" /> : <CheckCircle2 size={11} aria-hidden="true" />}
@@ -493,7 +494,7 @@ export default function AdminPromptsPage() {
           <motion.div variants={staggerItem}>
             <Card className="p-4">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-soft">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
                   <ShieldCheck size={16} />
                 </span>
                 <div className="min-w-0">
@@ -553,18 +554,18 @@ export default function AdminPromptsPage() {
             action={<Button size="sm" onClick={openDraft}><Plus size={14} />New draft</Button>}
           />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-border glass">
+          <div className="overflow-x-auto rounded-card border border-border bg-solid shadow-e1">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-card-2/80">
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Name</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Version</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Status</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Hash</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Model</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Eval vs thresholds</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Promoted</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium text-text-muted">Actions</th>
+                <tr className="border-b border-border bg-card-2">
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Version</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Hash</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Model</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Eval vs thresholds</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Promoted</th>
+                  <th scope="col" className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Actions</th>
                 </tr>
               </thead>
               <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
@@ -586,7 +587,12 @@ export default function AdminPromptsPage() {
                     <motion.tr
                       key={version.id}
                       variants={staggerItem}
-                      className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
+                      className={clsx(
+                        'border-b border-border-light transition-colors last:border-b-0',
+                        version.status === 'active'
+                          ? 'bg-primary/8 shadow-[inset_3px_0_0_var(--color-primary)]'
+                          : 'hover:bg-card-2',
+                      )}
                     >
                       <td className="px-4 py-3 text-text">{version.name}</td>
                       <td className="px-4 py-3 tabular-nums text-text-muted">v{version.version}</td>
@@ -607,18 +613,29 @@ export default function AdminPromptsPage() {
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
                           {canEvaluate ? (
                             <>
-                              <select
-                                aria-label={`Eval subset for ${label}`}
-                                value={subset}
-                                onChange={(event) => setSubsetById((prev) => ({
-                                  ...prev,
-                                  [version.id]: event.target.value as EvalSubset,
-                                }))}
-                                className="glass-input rounded-lg px-2 py-1.5 text-xs text-text focus:outline-none"
-                              >
-                                <option value="smoke">smoke</option>
-                                <option value="full">full</option>
-                              </select>
+                              {/* appearance-none so the themed surface paints:
+                                  a native select widget ignores it and stays
+                                  light in dark mode. Chevron restores the
+                                  affordance, same as the Select in ui.tsx. */}
+                              <div className="relative inline-flex">
+                                <select
+                                  aria-label={`Eval subset for ${label}`}
+                                  value={subset}
+                                  onChange={(event) => setSubsetById((prev) => ({
+                                    ...prev,
+                                    [version.id]: event.target.value as EvalSubset,
+                                  }))}
+                                  className="glass-input appearance-none rounded-control py-1.5 pl-2 pr-7 text-xs text-text focus:outline-none"
+                                >
+                                  <option value="smoke">smoke</option>
+                                  <option value="full">full</option>
+                                </select>
+                                <ChevronDown
+                                  size={12}
+                                  aria-hidden="true"
+                                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-dim"
+                                />
+                              </div>
                               <Button
                                 size="sm"
                                 variant="secondary"
@@ -742,13 +759,13 @@ export default function AdminPromptsPage() {
               </p>
 
               {(gate.failure.failed_metrics ?? []).length > 0 ? (
-                <div className="overflow-x-auto rounded-xl border border-border">
+                <div className="overflow-x-auto rounded-control border border-border bg-solid">
                   <table className="w-full text-left text-sm">
                     <thead>
-                      <tr className="border-b border-border bg-card-2/80">
-                        <th scope="col" className="px-3 py-2 font-medium text-text-muted">Metric</th>
-                        <th scope="col" className="px-3 py-2 font-medium text-text-muted">Score</th>
-                        <th scope="col" className="px-3 py-2 font-medium text-text-muted">Threshold</th>
+                      <tr className="border-b border-border bg-card-2">
+                        <th scope="col" className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Metric</th>
+                        <th scope="col" className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Score</th>
+                        <th scope="col" className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Threshold</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -756,7 +773,7 @@ export default function AdminPromptsPage() {
                         const spec = specFor(metric);
                         const threshold = spec ? gate.failure.thresholds?.[spec.threshold] : undefined;
                         return (
-                          <tr key={metric} className="border-b border-border last:border-b-0">
+                          <tr key={metric} className="border-b border-border-light last:border-b-0">
                             <td className="px-3 py-2 text-text">{spec?.label ?? metric}</td>
                             <td className="px-3 py-2 font-medium tabular-nums text-red">
                               {formatScore(gate.failure.scores?.[metric])}
@@ -771,7 +788,7 @@ export default function AdminPromptsPage() {
               ) : null}
 
               {gateConfirming ? (
-                <div className="space-y-3 rounded-xl border border-red/30 bg-red/10 p-3">
+                <div className="space-y-3 rounded-card border border-red/30 bg-red/10 p-3">
                   <p className="text-sm text-red">
                     Force-promoting ships a prompt that failed the gate to every user. The override is audited.
                   </p>
@@ -817,7 +834,7 @@ export default function AdminPromptsPage() {
               ) : diffQuery.isError ? (
                 <StateBlock tone="danger" role="alert">{errorMessage(diffQuery.error)}</StateBlock>
               ) : diffQuery.data ? (
-                <pre className="max-h-80 overflow-auto rounded-xl border border-border bg-bg-soft p-3 font-mono text-xs text-text-muted">
+                <pre className="max-h-80 overflow-auto rounded-control border border-border bg-card-2 p-3 font-mono text-xs text-text-muted">
                   {diffQuery.data.diff}
                 </pre>
               ) : (

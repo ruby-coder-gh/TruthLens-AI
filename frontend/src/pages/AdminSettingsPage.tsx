@@ -179,7 +179,7 @@ export default function AdminSettingsPage() {
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-              <Bot size={16} className="text-accent" />
+              <Bot size={16} className="text-primary-soft" />
               Model Configuration
             </h2>
             <div className="space-y-4">
@@ -210,7 +210,7 @@ export default function AdminSettingsPage() {
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-              <Database size={16} className="text-accent-2" />
+              <Database size={16} className="text-primary-soft" />
               Retrieval Settings
             </h2>
             <div className="space-y-4">
@@ -246,23 +246,24 @@ export default function AdminSettingsPage() {
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
-              <Sliders size={16} className="text-gold" />
+              <Sliders size={16} className="text-primary-soft" />
               Trust Score Thresholds
             </h2>
             <div className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-medium text-text-muted">High Trust (green)</label>
+                  <label htmlFor="trust-high" className="text-[12.5px] font-medium text-text-muted">High Trust (green)</label>
                   <span className="text-sm font-bold text-green tabular-nums">{trustHigh.toFixed(2)}</span>
                 </div>
                 <input
+                  id="trust-high"
                   type="range"
                   min={0.5}
                   max={1}
                   step={0.01}
                   value={trustHigh}
                   onChange={(e) => setTrustHigh(Number(e.target.value))}
-                  className="w-full h-2 rounded-full appearance-none cursor-pointer bg-card-2 accent-primary"
+                  className="w-full h-2 cursor-pointer appearance-none rounded-full bg-card-2 ring-1 ring-inset ring-border accent-primary"
                   aria-label="High trust threshold"
                 />
                 <p className="text-xs text-text-dim mt-1">Scores above this are considered high trust.</p>
@@ -270,23 +271,24 @@ export default function AdminSettingsPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-medium text-text-muted">Medium Trust (orange)</label>
+                  <label htmlFor="trust-medium" className="text-[12.5px] font-medium text-text-muted">Medium Trust (orange)</label>
                   <span className="text-sm font-bold text-orange tabular-nums">{trustMed.toFixed(2)}</span>
                 </div>
                 <input
+                  id="trust-medium"
                   type="range"
                   min={0.2}
                   max={0.7}
                   step={0.01}
                   value={trustMed}
                   onChange={(e) => setTrustMed(Number(e.target.value))}
-                  className="w-full h-2 rounded-full appearance-none cursor-pointer bg-card-2 accent-primary"
+                  className="w-full h-2 cursor-pointer appearance-none rounded-full bg-card-2 ring-1 ring-inset ring-border accent-primary"
                   aria-label="Medium trust threshold"
                 />
                 <p className="text-xs text-text-dim mt-1">Scores below this are considered low trust (red).</p>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-text-dim p-3 rounded-lg glass">
+              <div className="flex items-center gap-2 rounded-control border border-border bg-card-2 p-3 text-xs text-text-dim">
                 <BarChart3 size={14} />
                 Current ranges: Low (0–{trustMed.toFixed(2)}), Medium ({trustMed.toFixed(2)}–{trustHigh.toFixed(2)}), High ({trustHigh.toFixed(2)}–1.0)
               </div>

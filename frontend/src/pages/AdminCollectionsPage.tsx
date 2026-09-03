@@ -176,7 +176,7 @@ export default function AdminCollectionsPage() {
           </div>
         ) : collections.length === 0 ? (
           <div className="col-span-full flex flex-col items-center justify-center py-16 text-center">
-            <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass text-text-dim">
+            <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-panel border border-border bg-card-2 text-text-dim">
               <FolderOpen size={28} />
             </div>
             <h3 className="text-xl font-semibold text-text">No collections</h3>
@@ -187,7 +187,7 @@ export default function AdminCollectionsPage() {
             <motion.div key={col.id} variants={staggerItem}>
               <Card hover className="p-5">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
                     <FolderOpen size={20} />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -224,13 +224,13 @@ export default function AdminCollectionsPage() {
             required
           />
           <div className="space-y-1.5">
-            <label htmlFor="col-desc" className="block text-sm font-medium text-text-muted">Description (optional)</label>
+            <label htmlFor="col-desc" className="block text-[12.5px] font-medium text-text-muted">Description (optional)</label>
             <textarea
               id="col-desc"
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
               placeholder="Brief description of this collection"
-              className="glass-input w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all focus:outline-none resize-y min-h-[60px]"
+              className="glass-input w-full rounded-control px-3 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none resize-y min-h-[60px]"
             />
           </div>
           <div className="flex gap-3">
