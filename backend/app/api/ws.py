@@ -164,23 +164,29 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
             "trust_score",
             {"query_id": query.id, "score": query.trust_score, "components": {}},
         )
-    await sink.emit(
-        "complete",
-        {
-            "query_id": query.id,
-            "latency_ms": elapsed_ms,
-            "model_used": query.model_used or "cached",
-            "token_count": query.token_count or 0,
-            "from_cache": True,
-            # A cache hit is keyed on the active prompt hash, so this is always
-            # the prompt currently in force; echoing it saves the client a
-            # `GET /admin/prompts/active`. NULL on rows written before pinning.
-            "prompt_version": getattr(query, "prompt_version", None),
-            # A gated abstention is cacheable (response_text is not NULL), so the
-            # replay has to keep saying it was an abstention.
-            "edge_case": getattr(query, "edge_case", None),
-        },
-    )
+    complete: dict[str, Any] = {
+        "query_id": query.id,
+        "latency_ms": elapsed_ms,
+        "model_used": query.model_used or "cached",
+        "token_count": query.token_count or 0,
+        "from_cache": True,
+        # A cache hit is keyed on the active prompt hash, so this is always
+        # the prompt currently in force; echoing it saves the client a
+        # `GET /admin/prompts/active`. NULL on rows written before pinning.
+        "prompt_version": getattr(query, "prompt_version", None),
+        # A gated abstention is cacheable (response_text is not NULL), so the
+        # replay has to keep saying it was an abstention.
+        "edge_case": getattr(query, "edge_case", None),
+    }
+    # The abstention card renders "Searched N chunks across M documents · best
+    # evidence score X" from this verdict. Replaying `edge_case` without it
+    # dropped that line on every cache hit (BUG-7). Only set on abstention
+    # rows, so the key stays absent for a generated answer — exactly as the
+    # fresh non-abstained `complete` frame omits it.
+    persisted_sufficiency = getattr(query, "sufficiency", None)
+    if persisted_sufficiency:
+        complete["sufficiency"] = persisted_sufficiency
+    await sink.emit("complete", complete)
 
 
 async def _run_query_pipeline(
@@ -468,6 +474,7 @@ async def _save_query(
     normalized_query: str,
     document_version: int,
     edge_case: str | None = None,
+    sufficiency: dict[str, Any] | None = None,
     prompt_tokens: int | None = None,
     prompt_version: str | None = None,
 ) -> None:
@@ -493,6 +500,7 @@ async def _save_query(
             latency_ms=latency_ms,
             token_count=token_count,
             edge_case=edge_case,
+            sufficiency=sufficiency,
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
         )

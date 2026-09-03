@@ -252,5 +252,10 @@ def maybe_abstain(
             "latency_ms": elapsed_ms,
             "token_count": 0,
             "edge_case": EDGE_CASE_INSUFFICIENT_EVIDENCE,
+            # Same payload the `complete` frame carries. Persisted because the
+            # abstention is cacheable: without it the replay path has no way to
+            # rebuild the evidence-count line and the card loses its
+            # explanation (BUG-7).
+            "sufficiency": verdict.as_payload(),
         },
     )

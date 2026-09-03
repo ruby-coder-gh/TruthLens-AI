@@ -56,6 +56,12 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     # answer; "insufficient_evidence" = the evidence-sufficiency gate abstained
     # before any LLM call.
     edge_case: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # The sufficiency verdict that produced an abstention
+    # (`app.retrieval.sufficiency.SufficiencyVerdict.as_payload`). Persisted so
+    # a cache hit can replay the "searched N chunks across M documents · best
+    # evidence score X" line the fresh stream sent; NULL for every generated
+    # answer, which never had a verdict.
+    sufficiency: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="queries", lazy="selectin")
