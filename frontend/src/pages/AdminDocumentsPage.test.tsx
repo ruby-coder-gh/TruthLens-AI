@@ -258,3 +258,82 @@ describe('AdminDocumentsPage — Fix round 1', () => {
     expect(screen.getByLabelText('Select Report.pdf')).toBeChecked();
   });
 });
+
+describe('AdminDocumentsPage — BUG-9 fully quarantined document is legible', () => {
+  beforeEach(() => {
+    mockListAll.mockReset();
+    mockBulk.mockReset();
+  });
+
+  it('a ready-but-unsearchable document shows an "Unsearchable" badge, not a bare "ready"', async () => {
+    mockListAll.mockResolvedValue({
+      data: [{
+        ...baseDoc,
+        id: 'doc-quarantined',
+        original_filename: 'Poisoned.pdf',
+        tags: [],
+        status: 'ready',
+        chunk_count: 0,
+        quarantined_chunk_count: 3,
+        is_searchable: false,
+      }],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderWithProviders(<AdminDocumentsPage />);
+
+    await screen.findByText('Poisoned.pdf');
+    expect(screen.getByText('Unsearchable')).toBeInTheDocument();
+    expect(screen.getByText('Unsearchable').closest('span[title]')).toHaveAttribute(
+      'title',
+      expect.stringContaining('quarantine'),
+    );
+    // The status pill still reads "ready" — the warning badge is additive,
+    // not a replacement — but it must not be the only signal shown.
+    expect(screen.getByText('ready')).toBeInTheDocument();
+  });
+
+  it('a normal ready+searchable document is unchanged: no "Unsearchable" badge', async () => {
+    mockListAll.mockResolvedValue({
+      data: [{
+        ...baseDoc,
+        id: 'doc-healthy',
+        original_filename: 'Healthy.pdf',
+        tags: [],
+        status: 'ready',
+        chunk_count: 5,
+        quarantined_chunk_count: 0,
+        is_searchable: true,
+      }],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderWithProviders(<AdminDocumentsPage />);
+
+    await screen.findByText('Healthy.pdf');
+    expect(screen.getByText('ready')).toBeInTheDocument();
+    expect(screen.queryByText('Unsearchable')).not.toBeInTheDocument();
+  });
+
+  it.each(['processing', 'failed'])(
+    'a %s document is unchanged: no "Unsearchable" badge even if is_searchable is false',
+    async (status) => {
+      mockListAll.mockResolvedValue({
+        data: [{
+          ...baseDoc,
+          id: `doc-${status}`,
+          original_filename: `${status}.pdf`,
+          tags: [],
+          status,
+          chunk_count: 0,
+          quarantined_chunk_count: 0,
+          is_searchable: false,
+        }],
+        meta: { page: 1, page_size: 20, total: 1 },
+      });
+      renderWithProviders(<AdminDocumentsPage />);
+
+      await screen.findByText(`${status}.pdf`);
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.queryByText('Unsearchable')).not.toBeInTheDocument();
+    },
+  );
+});
