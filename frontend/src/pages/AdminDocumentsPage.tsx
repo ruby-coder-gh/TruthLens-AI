@@ -8,7 +8,7 @@ import { useToast } from '../components/toast-context';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
-import type { BulkDocumentAction, BulkDocumentResponse } from '../api/types';
+import type { BulkDocumentAction, BulkDocumentResponse, Document } from '../api/types';
 
 const ACTION_LABELS: Record<BulkDocumentAction, string> = {
   delete: 'Delete',
@@ -44,6 +44,20 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
     default: return 'gray';
   }
 }
+
+/**
+ * BUG-9. `status === 'ready'` only means processing finished without a crash
+ * — a document whose every chunk was quarantined at ingest ends up "ready"
+ * with `chunk_count === 0` and is invisible to search. `is_searchable` is
+ * derived server-side from the live chunk counts, so it self-heals once a
+ * chunk is released; absent on rows predating the fix, hence the `=== false`.
+ */
+function isUnsearchableReady(doc: Document): boolean {
+  return doc.is_searchable === false && doc.status === 'ready' && (doc.quarantined_chunk_count ?? 0) > 0;
+}
+
+const UNSEARCHABLE_TOOLTIP =
+  'Every chunk of this document is held in quarantine — it returns no search results until a chunk is released.';
 
 export default function AdminDocumentsPage() {
   const navigate = useNavigate();
@@ -359,7 +373,14 @@ export default function AdminDocumentsPage() {
                   </td>
                   <td className="px-4 py-3 text-text-muted">{getFileType(doc.mime_type)}</td>
                   <td className="px-4 py-3">
-                    <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
+                      {isUnsearchableReady(doc) && (
+                        <span title={UNSEARCHABLE_TOOLTIP}>
+                          <Badge color="orange">Unsearchable</Badge>
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-text tabular-nums">{doc.chunk_count ?? '—'}</td>
                   <td className="px-4 py-3 text-text-muted tabular-nums">{formatFileSize(doc.file_size)}</td>

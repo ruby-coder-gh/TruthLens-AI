@@ -6,6 +6,20 @@ import { PageHeader, PageShell } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
 import type { DocumentDetail } from '../api/types';
 
+/**
+ * BUG-9. `status === 'ready'` only means processing finished without a crash
+ * — a document whose every chunk was quarantined at ingest ends up "ready"
+ * with `chunk_count === 0` and is invisible to search. `is_searchable` is
+ * derived server-side from the live chunk counts, so it self-heals once a
+ * chunk is released; absent on rows predating the fix, hence the `=== false`.
+ */
+function isUnsearchableReady(doc: DocumentDetail): boolean {
+  return doc.is_searchable === false && doc.status === 'ready' && (doc.quarantined_chunk_count ?? 0) > 0;
+}
+
+const UNSEARCHABLE_TOOLTIP =
+  'Every chunk of this document is held in quarantine — it returns no search results until a chunk is released.';
+
 export default function WorkspaceDocumentDetailPage() {
   const { id: workspaceId, docId } = useParams<{ id: string; docId: string }>();
   const [document, setDocument] = useState<DocumentDetail | null>(null);
@@ -16,5 +30,5 @@ export default function WorkspaceDocumentDetailPage() {
   }, [workspaceId, docId]);
   if (!document && !error) return <LoadingSpinner text="Opening document…" />;
   if (!document) return <PageShell><EmptyState icon={<FileText size={24} />} title="Document unavailable" description={error || 'This document was not found.'} action={<Link to={`/workspaces/${workspaceId}`}><Button size="sm">Back to workspace</Button></Link>} /></PageShell>;
-  return <div className="mx-auto max-w-4xl py-6"><PageShell><PageHeader title={document.original_filename} description={`${document.mime_type} · ${document.chunk_count} indexed chunks`} actions={<div className="flex items-center gap-3">{(document.quarantined_chunk_count ?? 0) > 0 && <Badge color="red">{document.quarantined_chunk_count} chunks quarantined</Badge>}<Link to={`/workspaces/${workspaceId}`} className="inline-flex items-center gap-1 text-sm text-primary-soft"><ArrowLeft size={14} /> Workspace</Link></div>} /><div className="space-y-3">{document.chunks.length === 0 ? <Card className="p-5 text-sm text-text-dim">This document has no indexed passages yet.</Card> : document.chunks.map((chunk) => <Card key={chunk.id} className="p-4"><p className="mb-2 text-xs font-medium text-primary-soft">Passage {chunk.index + 1}</p><p className="whitespace-pre-wrap text-sm leading-relaxed text-text-muted">{chunk.content}</p></Card>)}</div></PageShell></div>;
+  return <div className="mx-auto max-w-4xl py-6"><PageShell><PageHeader title={document.original_filename} description={`${document.mime_type} · ${document.chunk_count} indexed chunks`} actions={<div className="flex items-center gap-3">{isUnsearchableReady(document) && <span title={UNSEARCHABLE_TOOLTIP}><Badge color="orange">Unsearchable</Badge></span>}{(document.quarantined_chunk_count ?? 0) > 0 && <Badge color="red">{document.quarantined_chunk_count} chunks quarantined</Badge>}<Link to={`/workspaces/${workspaceId}`} className="inline-flex items-center gap-1 text-sm text-primary-soft"><ArrowLeft size={14} /> Workspace</Link></div>} /><div className="space-y-3">{document.chunks.length === 0 ? <Card className="p-5 text-sm text-text-dim">This document has no indexed passages yet.</Card> : document.chunks.map((chunk) => <Card key={chunk.id} className="p-4"><p className="mb-2 text-xs font-medium text-primary-soft">Passage {chunk.index + 1}</p><p className="whitespace-pre-wrap text-sm leading-relaxed text-text-muted">{chunk.content}</p></Card>)}</div></PageShell></div>;
 }

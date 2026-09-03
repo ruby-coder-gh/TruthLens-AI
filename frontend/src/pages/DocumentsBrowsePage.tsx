@@ -65,6 +65,20 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
   }
 }
 
+/**
+ * BUG-9. `status === 'ready'` only means processing finished without a crash
+ * — a document whose every chunk was quarantined at ingest ends up "ready"
+ * with `chunk_count === 0` and is invisible to search. `is_searchable` is
+ * derived server-side from the live chunk counts, so it self-heals once a
+ * chunk is released; absent on rows predating the fix, hence the `=== false`.
+ */
+function isUnsearchableReady(doc: Document): boolean {
+  return doc.is_searchable === false && doc.status === 'ready' && (doc.quarantined_chunk_count ?? 0) > 0;
+}
+
+const UNSEARCHABLE_TOOLTIP =
+  'Every chunk of this document is held in quarantine — it returns no search results until a chunk is released.';
+
 function documentRange(meta: PaginatedResponse<Document>['meta'] | null): string {
   if (!meta || meta.total === 0) return 'No documents';
   const start = (meta.page - 1) * meta.page_size + 1;
@@ -223,6 +237,11 @@ export default function DocumentsBrowsePage() {
                       <p className="truncate text-sm font-medium text-text">{document.original_filename}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
                         <Badge color={statusBadgeColor(document.status)}>{document.status === 'ready' ? 'indexed' : document.status}</Badge>
+                        {isUnsearchableReady(document) && (
+                          <span title={UNSEARCHABLE_TOOLTIP}>
+                            <Badge color="orange">Unsearchable</Badge>
+                          </span>
+                        )}
                         <span className="text-xs text-text-dim">{getFileType(document.mime_type, document.original_filename)}</span>
                         <span className="text-xs text-text-dim">{formatFileSize(document.file_size)}</span>
                       </div>

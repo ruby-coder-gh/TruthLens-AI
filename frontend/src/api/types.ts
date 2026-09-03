@@ -77,6 +77,12 @@ export interface Document {
   tags: string[];
   /** Chunks held back by the ingest-time injection scanner (F7a). */
   quarantined_chunk_count?: number;
+  /**
+   * BUG-9. Derived, not stored: `false` when `chunk_count === 0`, even if
+   * `status === 'ready'` — a document whose chunks were all quarantined ends
+   * "ready" with nothing indexed. Absent on rows predating the fix.
+   */
+  is_searchable?: boolean;
 }
 
 export interface DocumentStatus {
@@ -84,6 +90,10 @@ export interface DocumentStatus {
   status: string;
   chunk_count?: number;
   error_message?: string;
+  /** Chunks held back by the ingest-time injection scanner (F7a). */
+  quarantined_chunk_count?: number;
+  /** BUG-9. See `Document.is_searchable`. */
+  is_searchable?: boolean;
 }
 
 export interface DocumentDetail {
@@ -100,6 +110,8 @@ export interface DocumentDetail {
   chunks: Array<{ id: string; index: number; content: string; token_count: number; created_at: string }>;
   /** Chunks held back by the ingest-time injection scanner (F7a). */
   quarantined_chunk_count?: number;
+  /** BUG-9. See `Document.is_searchable`. */
+  is_searchable?: boolean;
 }
 
 // ─── Query ──────────────────────────────────────────────────────────────────
