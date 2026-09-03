@@ -41,8 +41,11 @@ function AuthPanel() {
         </div>
 
         {/* Token display */}
+        {/* `bg-solid` — the opaque code surface — not the old `bg-black/40`,
+            which composited to #989898 under light theme and dropped the
+            `text-text-muted` token to 2.16:1 (QA S2-2). */}
         <div className="relative group">
-          <div className="flex items-center gap-2 rounded-lg bg-black/40 border border-white/[0.06] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg bg-solid border border-border px-3 py-2">
             <Lock size={12} className="text-text-dim shrink-0" />
             <code className="flex-1 text-[11px] font-mono text-text-muted truncate">
               trl_eyJhbGciOiJIUzI1NiIs...
@@ -50,7 +53,7 @@ function AuthPanel() {
             <button
               type="button"
               onClick={copyToken}
-              className="flex items-center justify-center w-6 h-6 rounded-md text-text-dim hover:text-text hover:bg-white/[0.06] transition-all shrink-0"
+              className="flex items-center justify-center w-6 h-6 rounded-md text-text-dim hover:text-text hover:bg-card-2 transition-all shrink-0"
               aria-label="Copy example token"
             >
               {copiedToken ? <Check size={11} className="text-green" /> : <Copy size={11} />}
@@ -85,7 +88,7 @@ function QuickPlayground() {
         <span className="text-xs font-semibold uppercase tracking-wider text-text-dim">Quick Test</span>
       </div>
 
-      <pre className="relative overflow-x-auto rounded-lg bg-black/40 border border-white/[0.06] p-3 text-[11px] font-mono leading-relaxed text-text-muted max-h-[120px] overflow-y-auto">
+      <pre className="relative overflow-x-auto rounded-lg bg-solid border border-border p-3 text-[11px] font-mono leading-relaxed text-text-muted max-h-[120px] overflow-y-auto">
         <code>{code}</code>
       </pre>
 

@@ -181,7 +181,7 @@ function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
   ];
   const idx = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % gradientPairs.length;
   return (
-    <div className={`${sizes[size]} rounded-xl bg-gradient-to-br ${gradientPairs[idx]} flex items-center justify-center font-bold text-white shadow-lg shrink-0`}>
+    <div className={`${sizes[size]} rounded-xl bg-gradient-to-br ${gradientPairs[idx]} flex items-center justify-center font-bold text-on-primary shadow-e1 shrink-0`}>
       {name.charAt(0).toUpperCase()}
     </div>
   );
@@ -239,17 +239,20 @@ function DashboardStats({ workspace }: { workspace: Workspace }) {
         >
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <p className="text-xs font-medium text-text-dim tracking-wide">{stat.label}</p>
+              {/* `text-text-muted`, not `text-text-dim`: these labels sit on a
+                  tinted gradient card, not the plain ground, where dim ink
+                  measured 3.76–3.89:1 (QA S3-1). */}
+              <p className="text-xs font-medium text-text-muted tracking-wide">{stat.label}</p>
               <p className={`text-2xl font-bold ${stat.textColor}`}>
                 {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
               </p>
             </div>
-            <div className={`p-2 rounded-lg bg-white/5 ${stat.textColor}`}>
+            <div className={`p-2 rounded-lg bg-card-2 ${stat.textColor}`}>
               {stat.icon}
             </div>
           </div>
           {/* Subtle shimmer line */}
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
         </motion.div>
       ))}
     </div>
@@ -367,7 +370,7 @@ function WorkspaceHeader({
           tabs={TABS}
           activeTab={activeTab}
           onChange={setActiveTab}
-          className="w-fit border border-border/40 bg-white/[0.03]"
+          className="w-fit border border-border bg-card-2"
         />
       </motion.div>
     </motion.div>
@@ -616,9 +619,9 @@ function ActivityTab({ workspaceId }: { workspaceId: string }) {
       {activities.map((entry: ActivityEntry) => (
         <div
           key={entry.id}
-          className="flex items-start gap-4 rounded-xl px-4 py-3 transition-colors hover:bg-white/[0.03]"
+          className="flex items-start gap-4 rounded-xl px-4 py-3 transition-colors hover:bg-card-2"
         >
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card-2">
             {iconMap[entry.type] || <Clock size={16} className="text-text-dim" />}
           </div>
           <div className="min-w-0 flex-1">
@@ -803,7 +806,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
           className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
             dragOver
               ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
-              : 'border-border/60 hover:border-primary/40 hover:bg-white/[0.02]'
+              : 'border-border hover:border-primary/40 hover:bg-card-2'
           }`}
           whileHover={{ scale: 1.003 }}
           animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
@@ -817,7 +820,11 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
             <UploadCloud size={28} />
           </motion.div>
           <p className="text-sm font-medium text-text">
-            {dragOver ? 'Drop file to upload' : 'Drop files here or click to browse'}
+            {/* Singular: this dropzone uploads one file at a time (the input
+                has no `multiple` and `handleDrop` reads `files[0]`), so the
+                plural copy promised a multi-select that fails (QA S3-6).
+                /admin/documents/upload is the multi-file queue. */}
+            {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
           </p>
           <p className="mt-1 text-xs text-text-muted">
             PDF, DOCX, TXT, MD, CSV up to 50MB
@@ -858,7 +865,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
         className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
           dragOver
             ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
-            : 'border-border/40 hover:border-primary/30 hover:bg-white/[0.01]'
+            : 'border-border hover:border-primary/30 hover:bg-card-2'
         }`}
         whileHover={{ scale: 1.003 }}
         animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
@@ -872,7 +879,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
             <UploadCloud size={20} className="text-primary" />
           </motion.div>
           <p className="text-sm text-text-muted">
-            {dragOver ? 'Drop file to upload' : 'Drop files or click to add more documents'}
+            {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
           </p>
         </div>
         <input
@@ -974,7 +981,7 @@ function DocumentRow({ doc, onDelete }: { doc: Document; onDelete: () => void })
 
   return (
     <motion.div
-      className="group flex items-center gap-4 rounded-xl border border-border/40 bg-white/[0.02] p-3 lg:p-4 transition-all duration-200 hover:bg-white/[0.04] hover:border-border/70 hover:shadow-lg hover:shadow-black/5"
+      className="group flex items-center gap-4 rounded-xl border border-border bg-card-2 p-3 lg:p-4 transition-all duration-200 hover:bg-card-hover hover:border-border hover:shadow-e2"
       whileHover={{ y: -1 }}
       transition={{ duration: 0.2 }}
     >
@@ -1205,13 +1212,13 @@ function MembersTab({
                 exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
               >
-                <div className="group relative overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-white/[0.03] to-transparent p-4 transition-all duration-200 hover:border-border/70 hover:shadow-lg hover:shadow-black/5">
+                <div className="group relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-card-2 to-transparent p-4 transition-all duration-200 hover:border-border hover:shadow-e2">
                   {/* Subtle gradient accent line */}
                   <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
 
                   <div className="flex items-start gap-3.5">
                     {/* Avatar */}
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${memberGradient(member.username)} text-white text-sm font-bold shadow-md`}>
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${memberGradient(member.username)} text-on-primary text-sm font-bold shadow-e1`}>
                       {member.username.charAt(0).toUpperCase()}
                     </div>
 
@@ -1241,7 +1248,7 @@ function MembersTab({
                         <motion.button
                           type="button"
                           onClick={() => setActionMenuOpen(isMenuOpen ? null : member.id)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim opacity-0 group-hover:opacity-100 transition-all hover:bg-white/10 hover:text-text"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-card-hover hover:text-text"
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
                           aria-label="Member actions"
@@ -1262,7 +1269,7 @@ function MembersTab({
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.95, y: -4 }}
                                 transition={{ duration: 0.15 }}
-                                className="absolute right-0 top-10 z-40 min-w-[160px] overflow-hidden rounded-xl border border-border/50 bg-card shadow-2xl shadow-black/30 backdrop-blur-xl"
+                                className="absolute right-0 top-10 z-40 min-w-[160px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
                               >
                                 <div className="py-1">
                                   <button
@@ -1271,7 +1278,7 @@ function MembersTab({
                                       handleCopyUserId(member.user_id);
                                       setActionMenuOpen(null);
                                     }}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-white/5 hover:text-text transition-colors"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
                                   >
                                     {copiedId === member.user_id ? (
                                       <Check size={13} className="text-green" />
@@ -1287,7 +1294,7 @@ function MembersTab({
                                       setActionMenuOpen(null);
                                     }}
                                     disabled={removeMemberMutation.isPending}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red/80 hover:bg-red/10 hover:text-red transition-colors"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
                                   >
                                     <X size={13} />
                                     Remove member
@@ -1495,7 +1502,7 @@ function SettingsTab({
         </motion.h3>
         <motion.form
           onSubmit={handleUpdateSubmit}
-          className="space-y-4 rounded-xl border border-border/40 bg-white/[0.02] p-5"
+          className="space-y-4 rounded-xl border border-border bg-card-2 p-5"
           variants={staggerItem}
         >
           <Input

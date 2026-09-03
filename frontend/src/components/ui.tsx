@@ -36,21 +36,26 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+// `text-on-primary` is the theme-aware ink for text sitting ON the accent
+// fill — white on light's #4F46E5, near-black on dark's #8B85FF. A literal
+// `text-white` here would be 3.04:1 in dark mode.
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-white shadow-[0_12px_30px_rgba(99,102,241,0.24)] hover:bg-primary-dark hover:shadow-[0_16px_34px_rgba(99,102,241,0.32)]',
+    'border border-transparent bg-primary text-on-primary shadow-e1 hover:bg-primary-dark hover:shadow-e2',
   secondary:
-    'bg-card/80 border border-border text-text hover:bg-card-hover hover:border-primary/45',
+    'border border-border bg-card-hover text-text hover:border-primary/40 hover:bg-primary/10 hover:text-primary-soft',
   ghost:
-    'bg-transparent text-text-muted hover:bg-card-2 hover:text-text',
+    'border border-transparent bg-transparent text-text-muted hover:bg-card-2 hover:text-text',
   danger:
-    'bg-red/15 text-red border border-red/30 hover:bg-red/25',
+    'border border-red/30 bg-red/10 text-red hover:bg-red/20',
 };
 
+// Fixed control heights (36 / 28 / 44) rather than padding-derived ones, so a
+// Button always lines up with an Input or Select on the same row.
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5 text-xs gap-1.5',
-  md: 'px-5 py-2.5 text-sm gap-2',
-  lg: 'px-7 py-3.5 text-base gap-2',
+  sm: 'h-7 rounded-lg px-3 text-xs gap-1.5',
+  md: 'h-9 rounded-control px-4 text-[13px] gap-2',
+  lg: 'h-11 rounded-control px-6 text-[15px] gap-2',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -63,9 +68,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         whileHover={{ scale: isDisabled ? 1 : 1.02 }}
         whileTap={{ scale: isDisabled ? 1 : 0.98 }}
         className={clsx(
-          'inline-flex items-center justify-center rounded-xl font-semibold transition-all duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-          'disabled:cursor-not-allowed disabled:opacity-50',
+          'inline-flex items-center justify-center whitespace-nowrap font-semibold',
+          'transition-[background-color,border-color,color,box-shadow] duration-150',
+          // Two-tone ring: `ring-focus-halo` paints the outline-offset gap, so
+          // the outline stays legible on a filled primary button where the ring
+          // and the fill are otherwise the same indigo (QA S3-5).
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
+          'focus-visible:ring-2 focus-visible:ring-focus-halo',
+          'disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
           variantStyles[variant],
           sizeStyles[size],
           className,
@@ -97,7 +107,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-text-muted">{label}</label>
+          <label htmlFor={inputId} className="block text-[12.5px] font-medium text-text-muted">{label}</label>
         )}
         <div className="relative">
           {icon && (
@@ -107,9 +117,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={clsx(
-              'glass-input w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all',
+              'glass-input h-9 w-full rounded-control px-3 text-sm text-text placeholder:text-text-dim',
               'focus:outline-none',
-              error ? 'border-red/50' : '',
+              error ? 'border-red' : '',
               icon && 'pl-10',
               suffix && 'pr-10',
               className,
@@ -126,7 +136,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0.99, y: -4 }}
-              className="flex items-center gap-1 text-xs text-red"
+              className="flex items-center gap-1.5 text-[12px] text-red"
             >
               <AlertCircle size={12} /> {error}
             </motion.p>
@@ -153,15 +163,15 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={textareaId} className="block text-sm font-medium text-text-muted">{label}</label>
+          <label htmlFor={textareaId} className="block text-[12.5px] font-medium text-text-muted">{label}</label>
         )}
         <textarea
           ref={ref}
           id={textareaId}
           className={clsx(
-            'glass-input w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all',
+            'glass-input w-full rounded-control px-3 py-2 text-sm leading-[22px] text-text placeholder:text-text-dim',
             'focus:outline-none resize-y min-h-[80px]',
-            error ? 'border-red/50' : '',
+            error ? 'border-red' : '',
             className,
           )}
           {...props}
@@ -172,7 +182,7 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
               initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0.99, y: -4 }}
-              className="flex items-center gap-1 text-xs text-red"
+              className="flex items-center gap-1.5 text-[12px] text-red"
             >
               <AlertCircle size={12} /> {error}
             </motion.p>
@@ -201,16 +211,16 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="space-y-1.5">
         {label && (
-          <label htmlFor={selectId} className="block text-sm font-medium text-text-muted">{label}</label>
+          <label htmlFor={selectId} className="block text-[12.5px] font-medium text-text-muted">{label}</label>
         )}
         <div className="relative">
           <select
             ref={ref}
             id={selectId}
             className={clsx(
-              'glass-input w-full appearance-none rounded-xl px-3 py-2.5 pr-10 text-sm text-text transition-all',
+              'glass-input h-9 w-full appearance-none rounded-control px-3 pr-10 text-sm text-text',
               'focus:outline-none',
-              error ? 'border-red/50' : '',
+              error ? 'border-red' : '',
               className,
             )}
             {...props}
@@ -228,7 +238,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
               initial={{ opacity: 0.99, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0.99, y: -4 }}
-              className="flex items-center gap-1 text-xs text-red"
+              className="flex items-center gap-1.5 text-[12px] text-red"
             >
               <AlertCircle size={12} /> {error}
             </motion.p>
@@ -259,8 +269,8 @@ export function Card({ children, className, hover = false, onClick }: CardProps)
       whileHover={hover || onClick ? { y: -4, scale: 1.01 } : {}}
       whileTap={onClick ? { scale: 0.98 } : {}}
       className={clsx(
-        'glass rounded-2xl border border-border/60 p-5 shadow-[0_14px_34px_rgba(2,7,18,0.34)] transition-all duration-200 lg:p-6',
-        (hover || onClick) && 'cursor-pointer hover:border-primary/45 hover:shadow-[0_20px_42px_rgba(12,30,64,0.38)]',
+        'glass rounded-card p-5 shadow-e1 transition-[border-color,box-shadow] duration-200 lg:p-6',
+        (hover || onClick) && 'cursor-pointer hover:border-primary/30 hover:shadow-e2',
         onClick && 'w-full text-left',
         className,
       )}
@@ -282,18 +292,22 @@ interface BadgeProps {
   className?: string;
 }
 
+// Colour meanings are fixed and unchanged: green = healthy/ready/approved,
+// orange = pending/attention/abstained, red = failed/blocked/quarantined,
+// purple + blue = neutral accent labels, gray = inert metadata. Colour is never
+// the only signal — call sites pair these with an icon or a word.
 const badgeColors: Record<BadgeColor, string> = {
-  green: 'bg-green/15 text-green border-green/25',
-  orange: 'bg-orange/15 text-orange border-orange/25',
-  red: 'bg-red/15 text-red border-red/25',
-  purple: 'bg-primary/15 text-primary-soft border-primary/25',
-  blue: 'bg-accent-2/15 text-accent-2 border-accent-2/25',
+  green: 'bg-green/12 text-green border-green/28',
+  orange: 'bg-orange/13 text-orange border-orange/32',
+  red: 'bg-red/10 text-red border-red/28',
+  purple: 'bg-primary/11 text-primary-soft border-primary/26',
+  blue: 'bg-accent-2/11 text-accent-2 border-accent-2/26',
   gray: 'bg-card-2 text-text-dim border-border',
 };
 
 export function Badge({ children, color = 'gray', className }: BadgeProps) {
   return (
-    <span className={clsx('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-[0.01em]', badgeColors[color], className)}>
+    <span className={clsx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold leading-5', badgeColors[color], className)}>
       {children}
     </span>
   );
@@ -387,7 +401,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         >
           {/* Overlay */}
           <motion.div
-            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            className="absolute inset-0 bg-black/45 backdrop-blur-[6px]"
             onClick={onClose}
             aria-hidden="true"
             initial={{ opacity: 0.99 }}
@@ -404,8 +418,8 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             className={clsx(
-              'relative z-10 w-full max-w-lg glass rounded-2xl p-6 shadow-2xl shadow-black/40',
-              'border border-glass-border',
+              'relative z-10 w-full max-w-lg rounded-panel bg-solid p-6 shadow-e3',
+              'border border-border',
               'focus:outline-none',
               className,
             )}
@@ -415,11 +429,11 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
           >
             {title && (
               <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-text">{title}</h2>
+                <h2 className="text-[17px] font-semibold tracking-[-0.01em] text-text">{title}</h2>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-all duration-150 hover:scale-110 hover:bg-card-2 hover:text-text active:scale-90"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-colors duration-150 hover:bg-card-2 hover:text-text"
                   aria-label="Close modal"
                 >
                   <X size={18} />
@@ -452,6 +466,7 @@ const toastIcons: Record<ToastType, ReactNode> = {
   info: <Info size={18} className="text-accent-2" />,
 };
 
+// The rail is a second, non-colour signal alongside the icon.
 const toastBorder: Record<ToastType, string> = {
   success: 'border-l-green',
   error: 'border-l-red',
@@ -487,12 +502,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               exit={{ opacity: 0, x: 40 }}
               transition={{ duration: 0.2 }}
               className={clsx(
-                'flex items-start gap-3 glass rounded-xl p-4 shadow-xl border-2 border-transparent',
+                'flex items-start gap-2.5 rounded-xl border border-border bg-solid px-3.5 py-3 shadow-e2',
+                'border-l-[3px]',
                 toastBorder[toast.type],
               )}
             >
               <span className="mt-0.5 shrink-0">{toastIcons[toast.type]}</span>
-              <p className="flex-1 text-sm text-text">{toast.message}</p>
+              <p className="flex-1 text-[13px] text-text">{toast.message}</p>
               <button
                 type="button"
                 onClick={() => removeToast(toast.id)}
@@ -523,15 +539,15 @@ interface EmptyStateProps {
 
 export function EmptyState({ icon, title, description, action, className }: EmptyStateProps) {
   return (
-    <div className={clsx('flex flex-col items-center justify-center py-16 text-center', className)}>
+    <div className={clsx('flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card-2 px-6 py-14 text-center', className)}>
       {icon && (
-        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass text-text-dim animate-fadeInScale">
+        <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-card-hover text-text-dim animate-fadeInScale">
           {icon}
         </div>
       )}
-      <h3 className="text-xl font-semibold text-text">{title}</h3>
-      {description && <p className="mt-2 max-w-sm text-sm text-text-muted">{description}</p>}
-      {action && <div className="mt-6 hover:scale-105 transition-transform duration-150">{action}</div>}
+      <h3 className="text-[17px] font-semibold tracking-[-0.01em] text-text">{title}</h3>
+      {description && <p className="mt-1.5 max-w-[280px] text-[13px] text-text-muted">{description}</p>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -550,7 +566,7 @@ export function LoadingSpinner({ size = 24, text, className }: LoadingSpinnerPro
   return (
     <div className={clsx('flex flex-col items-center justify-center gap-4 py-16', className)}>
       <Loader2 size={size} className="text-primary animate-spin" />
-      {text && <p className="text-sm text-text-muted animate-pulse">{text}</p>}
+      {text && <p className="text-[13px] text-text-muted">{text}</p>}
     </div>
   );
 }
@@ -575,7 +591,7 @@ export function Skeleton({ className, height = 16, width = '100%', count = 1 }: 
           initial={{ opacity: 0.99 }}
           animate={{ opacity: 1 }}
           transition={{ delay: i * 0.05 }}
-          className={clsx('shimmer rounded-xl', className)}
+          className={clsx('shimmer rounded-control', className)}
           style={{
             height: typeof height === 'number' ? `${height}px` : height,
             width: typeof width === 'number' ? `${width}px` : width,
@@ -603,14 +619,14 @@ export function ProgressBar({ value, className, size = 'md', label }: ProgressBa
   return (
     <div className={clsx('space-y-1.5', className)}>
       {label && (
-        <div className="flex items-center justify-between text-xs text-text-muted">
+        <div className="flex items-center justify-between text-[12px] text-text-muted">
           <span>{label}</span>
           <span>{Math.round(clamped)}%</span>
         </div>
       )}
       <div
         className={clsx(
-          'w-full overflow-hidden rounded-full bg-card-2',
+          'w-full overflow-hidden rounded-full bg-card-2 ring-1 ring-inset ring-border',
           size === 'sm' ? 'h-1.5' : 'h-2.5',
         )}
         role="progressbar"
@@ -619,7 +635,7 @@ export function ProgressBar({ value, className, size = 'md', label }: ProgressBa
         aria-valuemax={100}
       >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary via-accent to-accent-2 animate-gradient transition-all duration-700 ease-out"
+          className="h-full rounded-full bg-gradient-to-r from-primary to-accent-2 transition-[width] duration-700 ease-out"
           style={{ width: `${clamped}%` }}
         />
       </div>
@@ -646,7 +662,7 @@ interface TabsProps {
 
 export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   return (
-    <div className={clsx('flex gap-1 rounded-xl glass p-1', className)} role="tablist">
+    <div className={clsx('inline-flex gap-1 rounded-control glass p-1', className)} role="tablist">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
@@ -657,15 +673,14 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             aria-selected={isActive}
             onClick={() => onChange(tab.id)}
             className={clsx(
-              'relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150',
-              'hover:scale-[1.02] active:scale-[0.98]',
-              isActive ? 'text-primary-soft' : 'text-text-muted hover:text-text',
+              'relative flex h-[30px] items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150',
+              isActive ? 'font-semibold text-primary-soft' : 'text-text-muted hover:text-text',
             )}
           >
             {isActive && (
               <motion.div
                 layoutId="activeTab"
-                className="absolute inset-0 rounded-lg bg-primary/10 border border-primary/20"
+                className="absolute inset-0 rounded-lg border border-primary/26 bg-primary/11"
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               />
             )}

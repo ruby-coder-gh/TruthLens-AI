@@ -91,11 +91,11 @@ function MatrixSkeleton({ className }: { className?: string }) {
       </div>
       <div className="overflow-hidden">
         <div className="min-w-[680px]">
-          <div className="grid grid-cols-4 border-b border-border bg-bg-soft/60 p-3">
+          <div className="grid grid-cols-4 border-b border-border bg-bg-soft p-3">
             {[0, 1, 2, 3].map((column) => <Skeleton key={column} height={14} className="mx-2" />)}
           </div>
           {[0, 1, 2, 3].map((row) => (
-            <div key={row} className="grid grid-cols-4 border-b border-border/70 p-3 last:border-b-0">
+            <div key={row} className="grid grid-cols-4 border-b border-border p-3 last:border-b-0">
               <Skeleton height={16} className="mx-2" />
               {[0, 1, 2].map((cell) => <Skeleton key={cell} width={32} height={32} className="mx-auto rounded-lg" />)}
             </div>
@@ -288,16 +288,16 @@ export function ComparisonMatrix({ comparisons, summaries = [], isLoading = fals
       {visibleRows.length === 0 ? (
         <EmptyMatrix filtered onClearFilter={() => setConflictsOnly(false)} className="m-4" />
       ) : (
-        <div id={matrixId} className="max-h-[34rem] overflow-auto" tabIndex={0} aria-label="Scrollable stance matrix">
+        <div id={matrixId} className="max-h-[34rem] overflow-auto bg-solid" tabIndex={0} aria-label="Scrollable stance matrix">
           <table className="w-full min-w-max border-separate border-spacing-0 text-left text-sm">
             <caption className="sr-only">Stances for each question or claim across the selected documents.</caption>
             <thead>
               <tr>
-                <th scope="col" className="sticky left-0 top-0 z-30 min-w-64 border-b border-r border-border bg-card px-4 py-3 text-xs font-semibold uppercase tracking-wider text-text-dim">
+                <th scope="col" className="sticky left-0 top-0 z-30 min-w-64 border-b border-r border-border bg-bg-soft px-4 py-3 text-xs font-semibold uppercase tracking-wider text-text-dim">
                   Question / claim
                 </th>
                 {documents.map((document) => (
-                  <th key={document.id} scope="col" className="sticky top-0 z-20 w-36 min-w-36 border-b border-r border-border bg-card px-3 py-3 text-center text-xs font-semibold text-text-muted last:border-r-0">
+                  <th key={document.id} scope="col" className="sticky top-0 z-20 w-36 min-w-36 border-b border-r border-border bg-bg-soft px-3 py-3 text-center text-xs font-semibold text-text-muted last:border-r-0">
                     <span className="block truncate" title={document.name}>{document.name}</span>
                   </th>
                 ))}
@@ -306,7 +306,7 @@ export function ComparisonMatrix({ comparisons, summaries = [], isLoading = fals
             <tbody>
               {visibleRows.map((row) => (
                 <tr key={row.detail.id} className="group">
-                  <th scope="row" className="sticky left-0 z-10 max-w-80 border-b border-r border-border bg-card px-4 py-3 text-left align-middle group-hover:bg-bg-soft">
+                  <th scope="row" className="sticky left-0 z-10 max-w-80 border-b border-r border-border bg-solid px-4 py-3 text-left align-middle group-hover:bg-bg-soft">
                     <span className="line-clamp-2 text-sm font-medium leading-snug text-text" title={row.question}>{row.question}</span>
                   </th>
                   {documents.map((document) => {
@@ -317,14 +317,14 @@ export function ComparisonMatrix({ comparisons, summaries = [], isLoading = fals
                     const citationCount = result?.sources.length ?? 0;
 
                     return (
-                      <td key={document.id} className="border-b border-r border-border p-2 text-center last:border-r-0 group-hover:bg-bg-soft/30">
+                      <td key={document.id} className="border-b border-r border-border p-2 text-center last:border-r-0 group-hover:bg-bg-soft">
                         <button
                           type="button"
                           onClick={() => setSelectedCell({ document, row, result })}
                           aria-haspopup="dialog"
                           aria-label={`${meta.label}: ${document.name} on ${row.question}. View ${citationCount} cited ${citationCount === 1 ? 'passage' : 'passages'}.`}
                           title={`${meta.label} — ${citationCount} cited ${citationCount === 1 ? 'passage' : 'passages'}. View evidence.`}
-                          className={classes('inline-flex h-9 min-w-9 items-center justify-center rounded-lg border px-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-card', meta.cellClassName)}
+                          className={classes('inline-flex h-9 min-w-9 items-center justify-center rounded-lg border px-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-solid', meta.cellClassName)}
                         >
                           <Icon size={17} strokeWidth={2.75} aria-hidden="true" />
                           <span className="sr-only">{meta.label}</span>

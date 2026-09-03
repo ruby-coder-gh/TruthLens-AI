@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, Skeleton } from './components/ui';
 import Layout from './components/Layout'
 import CursorGlow from './components/CursorGlow'
@@ -135,16 +136,18 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <AppRoutes />
-            <CursorGlow />
-            <div className="noise-overlay" aria-hidden="true" />
-          </AuthProvider>
-        </ToastProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <AppRoutes />
+              <CursorGlow />
+              <div className="noise-overlay" aria-hidden="true" />
+            </AuthProvider>
+          </ToastProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }

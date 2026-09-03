@@ -142,7 +142,7 @@ export default function WebSocketViz() {
           <button
             type="button"
             onClick={() => setIsRunning(!isRunning)}
-            className="flex items-center justify-center w-7 h-7 rounded-lg text-text-dim hover:text-text hover:bg-white/[0.06] transition-all"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-text-dim hover:text-text hover:bg-card-2 transition-all"
             aria-label={isRunning ? 'Pause pipeline' : 'Start pipeline'}
           >
             {isRunning ? <Square size={12} /> : <Play size={12} />}
@@ -163,7 +163,7 @@ export default function WebSocketViz() {
       </div>
 
       {/* Footer */}
-      <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between">
+      <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
         <span className="text-[10px] text-text-dim">
           {pipelineStages.filter((s) => s.status === 'completed').length}/{pipelineStages.length} stages
         </span>

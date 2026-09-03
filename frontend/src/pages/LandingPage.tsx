@@ -75,9 +75,9 @@ const steps = [
 ];
 
 const trustSignals = [
-  { label: 'Faithfulness', value: 96, barColor: 'bg-emerald-400' },
+  { label: 'Faithfulness', value: 96, barColor: 'bg-green' },
   { label: 'Retrieval quality', value: 92, barColor: 'bg-primary' },
-  { label: 'Citation coverage', value: 98, barColor: 'bg-amber-400' },
+  { label: 'Citation coverage', value: 98, barColor: 'bg-orange' },
 ];
 
 const highlights = [
@@ -101,16 +101,15 @@ export default function LandingPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-bg">
-      <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
+      {/* This page lays an opaque bg-bg over <body>, so it has to re-paint the
+          ruled ground itself — otherwise the hero sits on a flat fill. */}
       <div className="bg-grid" />
 
       <motion.nav
         initial={{ opacity: 0.99, y: -14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-        className="sticky top-0 z-30 border-b border-white/[0.05] bg-bg/80 backdrop-blur-xl"
+        className="sticky top-0 z-30 border-b border-border-light bg-glass backdrop-blur-xl"
       >
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
@@ -173,20 +172,20 @@ export default function LandingPage() {
             <button
               type="button"
               onClick={() => { scrollTo('features'); setMobileMenuOpen(false); }}
-              className="rounded-lg px-3 py-2 text-left text-sm text-text-muted transition-colors hover:bg-white/[0.04] hover:text-text"
+              className="rounded-lg px-3 py-2 text-left text-sm text-text-muted transition-colors hover:bg-card-2 hover:text-text"
             >
               Features
             </button>
             <button
               type="button"
               onClick={() => { scrollTo('how-it-works'); setMobileMenuOpen(false); }}
-              className="rounded-lg px-3 py-2 text-left text-sm text-text-muted transition-colors hover:bg-white/[0.04] hover:text-text"
+              className="rounded-lg px-3 py-2 text-left text-sm text-text-muted transition-colors hover:bg-card-2 hover:text-text"
             >
               Workflow
             </button>
             <Link
               to="/login"
-              className="rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-white/[0.04] hover:text-text"
+              className="rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-card-2 hover:text-text"
               onClick={() => setMobileMenuOpen(false)}
             >
               Sign in
@@ -205,12 +204,12 @@ export default function LandingPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/[0.14] bg-white/[0.03] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-              <Sparkles size={12} className="text-accent" />
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/26 bg-primary/11 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-soft">
+              <Sparkles size={12} aria-hidden="true" />
               Evidence-First RAG Platform
             </div>
 
-            <h1 className="max-w-xl text-4xl font-bold leading-[1.08] tracking-tight text-text sm:text-5xl lg:text-6xl">
+            <h1 className="max-w-xl text-pretty text-4xl font-semibold leading-[1.08] tracking-tight text-text sm:text-5xl lg:text-6xl">
               Answers with sources, trust, and auditability.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-relaxed text-text-muted sm:text-lg">
@@ -236,17 +235,17 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-8 grid gap-2 text-sm text-text-muted sm:grid-cols-2">
-              <p className="flex items-center gap-2"><Check size={15} className="text-accent" /> Citations linked to source chunks.</p>
-              <p className="flex items-center gap-2"><Check size={15} className="text-accent" /> Guardrail verification before final answer.</p>
-              <p className="flex items-center gap-2"><Check size={15} className="text-accent" /> API-first backend with workspace ACLs.</p>
-              <p className="flex items-center gap-2"><Check size={15} className="text-accent" /> Streaming trust score in real time.</p>
+              <p className="flex items-center gap-2"><Check size={15} className="shrink-0 text-green" aria-hidden="true" /> Citations linked to source chunks.</p>
+              <p className="flex items-center gap-2"><Check size={15} className="shrink-0 text-green" aria-hidden="true" /> Guardrail verification before final answer.</p>
+              <p className="flex items-center gap-2"><Check size={15} className="shrink-0 text-green" aria-hidden="true" /> API-first backend with workspace ACLs.</p>
+              <p className="flex items-center gap-2"><Check size={15} className="shrink-0 text-green" aria-hidden="true" /> Streaming trust score in real time.</p>
             </div>
 
-            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+            <div className="mt-8 grid gap-5 border-t border-border pt-6 sm:grid-cols-3">
               {highlights.map((item) => (
-                <div key={item.label} className="rounded-2xl border border-white/[0.1] bg-card/70 px-4 py-3">
-                  <p className="text-lg font-semibold text-text">{item.value}</p>
-                  <p className="text-xs text-text-dim">{item.label}</p>
+                <div key={item.label}>
+                  <p className="n text-2xl font-semibold tracking-tight text-text">{item.value}</p>
+                  <p className="mt-0.5 text-xs text-text-muted">{item.label}</p>
                 </div>
               ))}
             </div>
@@ -258,8 +257,9 @@ export default function LandingPage() {
             transition={{ duration: 0.65, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
             className="relative"
           >
-            <div className="pointer-events-none absolute -inset-10 -z-10 rounded-[36px] bg-gradient-to-br from-primary/18 via-accent/12 to-accent-2/18 blur-3xl" />
-            <div className="rounded-3xl border border-white/[0.12] bg-card/85 p-6 shadow-[0_28px_70px_rgba(1,4,12,0.45)] backdrop-blur-2xl sm:p-7">
+            {/* No halo behind the panel — Grounded Glass lifts a surface with
+                elevation, not with a bloom. */}
+            <div className="glass rounded-panel p-6 shadow-e3 sm:p-7">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-text">Live Evidence Trace</p>
@@ -268,8 +268,10 @@ export default function LandingPage() {
                 <Badge color="blue">Trust 0.93</Badge>
               </div>
 
-              <div className="rounded-2xl border border-white/[0.08] bg-bg-soft/70 p-4">
-                <p className="text-xs uppercase tracking-[0.08em] text-text-dim">Question</p>
+              {/* Glass law: quoted content inside an L2 card sits on an opaque
+                  surface, never on a third blur. */}
+              <div className="rounded-control border border-border bg-solid p-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-text-dim">Question</p>
                 <p className="mt-1 text-sm text-text">
                   What policy changed after Q2 findings and which teams approved it?
                 </p>
@@ -277,9 +279,12 @@ export default function LandingPage() {
 
               <div className="mt-4 space-y-2">
                 {['Security Policy v4.2 (p.14)', 'Board Minutes June 28', 'Audit Log /workspace/ops'].map((source) => (
-                  <div key={source} className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-bg-soft/55 px-3 py-2.5">
-                    <p className="text-sm text-text-muted">{source}</p>
-                    <span className="text-xs font-medium text-accent">verified</span>
+                  <div key={source} className="flex items-center justify-between gap-3 rounded-control border border-border bg-card-hover px-3 py-2.5">
+                    <p className="text-sm text-text">{source}</p>
+                    <span className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-green">
+                      <Check size={12} strokeWidth={3} aria-hidden="true" />
+                      verified
+                    </span>
                   </div>
                 ))}
               </div>
@@ -289,9 +294,9 @@ export default function LandingPage() {
                   <div key={metric.label}>
                     <div className="mb-1.5 flex items-center justify-between text-xs text-text-dim">
                       <span>{metric.label}</span>
-                      <span>{metric.value}%</span>
+                      <span className="n font-semibold text-text">{metric.value}%</span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-card-2">
                       <div
                         className={`h-full rounded-full ${metric.barColor}`}
                         style={{ width: `${metric.value}%` }}
@@ -313,7 +318,7 @@ export default function LandingPage() {
           >
             <motion.div variants={staggerItem} className="mb-11 text-center">
               <Badge color="purple" className="mb-3">Capabilities</Badge>
-              <h2 className="text-3xl font-bold tracking-tight text-text sm:text-4xl">
+              <h2 className="text-3xl font-semibold tracking-tight text-text sm:text-4xl">
                 Built for high-stakes document intelligence
               </h2>
               <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-text-muted sm:text-base">
@@ -325,7 +330,7 @@ export default function LandingPage() {
               {features.map((feature) => (
                 <motion.div key={feature.title} variants={staggerItem}>
                   <Card hover className="h-full">
-                    <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.1] bg-bg-soft/80 text-primary-soft">
+                    <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-control border border-primary/26 bg-primary/11 text-primary-soft">
                       {feature.icon}
                     </div>
                     <h3 className="text-base font-semibold text-text">{feature.title}</h3>
@@ -343,18 +348,18 @@ export default function LandingPage() {
             initial="initial"
             whileInView="animate"
             viewport={{ once: true, amount: 0.2 }}
-            className="rounded-3xl border border-white/[0.1] bg-card/65 p-6 sm:p-8 lg:p-10"
+            className="glass rounded-panel p-6 sm:p-8 lg:p-10"
           >
             <motion.div variants={staggerItem} className="mb-8">
               <Badge color="blue" className="mb-3">Workflow</Badge>
-              <h2 className="text-3xl font-bold tracking-tight text-text sm:text-4xl">How TruthLens runs</h2>
+              <h2 className="text-3xl font-semibold tracking-tight text-text sm:text-4xl">How TruthLens runs</h2>
             </motion.div>
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {steps.map((step, index) => (
                 <motion.div key={step.num} variants={staggerItem} className="relative">
-                  <div className="h-full rounded-2xl border border-white/[0.1] bg-bg-soft/70 p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-dim">{step.num}</p>
+                  <div className="h-full rounded-card border border-border bg-solid p-5">
+                    <p className="n text-xs font-bold uppercase tracking-[0.12em] text-primary-soft">{step.num}</p>
                     <h3 className="mt-3 text-base font-semibold text-text">{step.title}</h3>
                     <p className="mt-2 text-sm leading-relaxed text-text-muted">{step.desc}</p>
                   </div>
@@ -376,9 +381,9 @@ export default function LandingPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="overflow-hidden rounded-3xl border border-white/[0.12] bg-gradient-to-br from-card via-bg-soft to-card p-8 text-center sm:p-10"
+            className="glass rounded-panel p-8 text-center shadow-e1 sm:p-10"
           >
-            <h2 className="text-3xl font-bold tracking-tight text-text sm:text-4xl">Ready to run trustworthy AI in your workspace?</h2>
+            <h2 className="text-3xl font-semibold tracking-tight text-text sm:text-4xl">Ready to run trustworthy AI in your workspace?</h2>
             <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-text-muted sm:text-base">
               Move from opaque chatbot answers to source-backed responses with confidence scoring and audit trails.
             </p>
@@ -397,7 +402,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-white/[0.08] px-5 py-8 sm:px-6 lg:px-8">
+      <footer className="relative z-10 border-t border-border-light px-5 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-6xl flex-col items-center justify-between gap-5 text-xs sm:flex-row">
           <div className="flex items-center gap-3">
             <Logo size={16} variant="gradient-bg" />

@@ -65,10 +65,12 @@ function CircularGauge({ score }: { score: number }) {
   const strokeWidth = 5;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const color = getTrustBadgeColor(score) === 'green' ? '#34d399' : getTrustBadgeColor(score) === 'orange' ? '#fb923c' : '#f87171';
+  // Read the theme's trust inks rather than literals, so the gauge follows
+  // `[data-theme]` exactly like every `text-green` / `text-orange` label does.
+  const color = getTrustBadgeColor(score) === 'green' ? 'var(--color-green)' : getTrustBadgeColor(score) === 'orange' ? 'var(--color-orange)' : 'var(--color-red)';
   return (
     <svg width={size} height={size} role="img" aria-label={`Trust score ${(score * 100).toFixed(0)}%`}>
-      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(60,75,110,0.3)" strokeWidth={strokeWidth} />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--color-border)" strokeWidth={strokeWidth} />
       <motion.circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeDasharray={circumference} initial={{ strokeDashoffset: circumference }} animate={{ strokeDashoffset: circumference * (1 - score) }} transition={{ duration: 1.1 }} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
       <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fill={color} fontSize="26" fontWeight={700}>{(score * 100).toFixed(0)}</text>
     </svg>
@@ -202,7 +204,7 @@ export default function InvestigationPage() {
                 <TextArea placeholder="Ask a complex research question..." value={query} onChange={(event) => setQuery(event.target.value)} rows={4} disabled={isLoading} className="min-h-[120px] text-base" />
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <label className="flex items-center gap-2 text-sm text-text-muted">Top sources:
-                    <input type="number" min={1} max={50} value={topK} onChange={(event) => setTopK(Math.max(1, Math.min(50, Number(event.target.value) || DEFAULT_TOP_K)))} disabled={isLoading} className="w-16 rounded-md border border-border bg-bg-soft px-2 py-1.5 text-sm text-text focus:border-primary/50 focus:outline-none" />
+                    <input type="number" min={1} max={50} value={topK} onChange={(event) => setTopK(Math.max(1, Math.min(50, Number(event.target.value) || DEFAULT_TOP_K)))} disabled={isLoading} className="w-16 rounded-md border border-border bg-solid px-2 py-1.5 text-sm text-text focus:border-primary/50 focus:outline-none" />
                   </label>
                   <Button type="submit" size="lg" disabled={!query.trim() || isLoading} loading={isLoading}>{isLoading ? <><Loader2 size={18} className="animate-spin" /> Investigating…</> : <><Search size={18} /> Create case file</>}</Button>
                 </div>
@@ -244,7 +246,7 @@ function FinalReportCard({ report }: { report: string }) {
 }
 
 function ReviewWorkflowCard({ status, note, onStatusChange, onNoteChange, onSave, saving }: { status: InvestigationReviewStatus; note: string; onStatusChange: (status: InvestigationReviewStatus) => void; onNoteChange: (note: string) => void; onSave: () => void; saving: boolean }) {
-  return <Card className="space-y-4 p-4 lg:p-6"><div className="flex items-center gap-2 border-b border-border pb-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent"><ClipboardCheck size={18} /></div><div><h2 className="text-base font-semibold text-text">Review workflow</h2><p className="text-xs text-text-dim">Review decisions and notes are saved to the case and audited.</p></div></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{REVIEW_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => onStatusChange(option.value)} className={clsx('rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', status === option.value ? 'border-primary/50 bg-primary/10' : 'border-border bg-bg-soft hover:border-primary/25')}><p className="text-sm font-medium text-text">{option.label}</p><p className="mt-1 text-[11px] leading-relaxed text-text-dim">{option.description}</p></button>)}</div><TextArea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={3} placeholder="Reviewer note: evidence gaps, approval rationale, or required changes…" /><div className="flex justify-end"><Button onClick={onSave} loading={saving}><ShieldCheck size={15} /> Save review decision</Button></div></Card>;
+  return <Card className="space-y-4 p-4 lg:p-6"><div className="flex items-center gap-2 border-b border-border pb-3"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent"><ClipboardCheck size={18} /></div><div><h2 className="text-base font-semibold text-text">Review workflow</h2><p className="text-xs text-text-dim">Review decisions and notes are saved to the case and audited.</p></div></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{REVIEW_OPTIONS.map((option) => <button key={option.value} type="button" onClick={() => onStatusChange(option.value)} className={clsx('rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', status === option.value ? 'border-primary/50 bg-primary/10' : 'border-border bg-card-2 hover:border-primary/25')}><p className="text-sm font-medium text-text">{option.label}</p><p className="mt-1 text-[11px] leading-relaxed text-text-dim">{option.description}</p></button>)}</div><TextArea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={3} placeholder="Reviewer note: evidence gaps, approval rationale, or required changes…" /><div className="flex justify-end"><Button onClick={onSave} loading={saving}><ShieldCheck size={15} /> Save review decision</Button></div></Card>;
 }
 
 function EvidenceRegister({ citations }: { citations: Array<{ citation: { text: string; chunk_id: string }; subQuestion: InvestigationSubQuestion; subQuestionIndex: number; citationIndex: number }> }) {

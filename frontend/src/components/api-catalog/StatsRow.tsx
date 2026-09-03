@@ -71,7 +71,7 @@ export default function StatsRow() {
             />
           </div>
           {/* Shine line */}
-          <div className="absolute top-0 right-0 w-20 h-full bg-gradient-to-l from-white/[0.03] to-transparent" />
+          <div className="absolute top-0 right-0 w-20 h-full bg-gradient-to-l from-card-2 to-transparent" />
         </motion.div>
       ))}
     </motion.div>

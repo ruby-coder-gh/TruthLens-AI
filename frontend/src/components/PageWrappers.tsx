@@ -4,7 +4,9 @@ import { clsx } from 'clsx'
 type Tone = 'neutral' | 'danger' | 'success'
 
 const stateToneClasses: Record<Tone, string> = {
-  neutral: 'border-border/60 bg-white/[0.02] text-text-muted',
+  // `bg-white/[0.02]` was a dark-theme literal: on the light ground it painted
+  // an invisible near-white film over an almost-invisible `border-border/60`.
+  neutral: 'border-border bg-card-2 text-text-muted',
   danger: 'border-red/30 bg-red/10 text-red',
   success: 'border-green/30 bg-green/10 text-green',
 }

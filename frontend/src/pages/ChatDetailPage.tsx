@@ -139,7 +139,7 @@ export default function ChatDetailPage() {
       <motion.div variants={staggerItem}>
         <Card className="p-5">
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10">
               <MessageSquare size={14} className="text-primary-soft" />
             </div>
             <div className="min-w-0 flex-1">
@@ -166,8 +166,8 @@ export default function ChatDetailPage() {
       <motion.div variants={staggerItem}>
         <Card className="p-5">
           <div className="flex items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-              <Shield size={14} className="text-accent" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10">
+              <Shield size={14} className="text-primary-soft" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-text">TruthLens AI</p>
@@ -236,15 +236,18 @@ export default function ChatDetailPage() {
               <FileText size={14} /> Sources ({sources.length})
             </h3>
             <div className="space-y-2">
+              {/* `bg-surface/50` named a token that has never existed, so this
+                  well painted nothing at all. It holds a quoted source
+                  excerpt, so it takes the opaque field. */}
               {sources.map((s, i) => (
-                <div key={s.chunk_id || i} className="rounded-lg bg-surface/50 p-3 text-sm">
+                <div key={s.chunk_id || i} className="rounded-control border border-border bg-solid p-3 text-sm">
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-xs font-medium text-primary-soft truncate">
                       {s.document_name || `Source ${i + 1}`}
                     </span>
                     <Badge color={getRelevanceMeta(s.relevance_score).badgeColor}>{(s.relevance_score * 100).toFixed(0)}%</Badge>
                   </div>
-                  <p className="text-xs text-text-dim line-clamp-2">{s.excerpt}</p>
+                  <p className="font-quote line-clamp-2 text-[13px] leading-relaxed text-text">{s.excerpt}</p>
                   {s.chunk_id && <AnnotationThread workspaceId={query.workspace_id} queryId={query.id} sourceId={s.chunk_id} label="Source comments" compact />}
                 </div>
               ))}

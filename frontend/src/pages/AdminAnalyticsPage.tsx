@@ -35,6 +35,7 @@ import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import { startOfDayIso, endOfDayIso } from '../utils/dates';
+import { CHART_INITIAL_DIMENSION, toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
 import type {
   EvalRunNotes,
   EvalRunResponse,
@@ -64,17 +65,13 @@ type QueriesOverTimePoint = {
 type TrustDistributionPoint = {
   range: string;
   count: number;
-  fill: string;
 };
 
 type QualityMetric = {
   key: string;
   label: string;
   value: number | null;
-  color: string;
 };
-
-const DISTRIBUTION_COLORS = ['#f87171', '#fb923c', '#fbbf24', '#38bdf8', '#34d399'];
 
 const CATEGORY_LABELS: Record<string, string> = {
   answerable: 'Answerable',
@@ -247,14 +244,20 @@ function isLowTrustBucket(range: string): boolean {
   return Number.isFinite(upper) && upper <= 50;
 }
 
-function getRiskMeta(score: number): { label: string; badgeColor: 'red' | 'orange' | 'gray'; barColor: string } {
+/** `badgeColor` drives the meter fill through `toneColor()`; `inkClass` is the
+ *  text-safe token for the percentage beside it — a mark colour is never text. */
+function getRiskMeta(score: number): {
+  label: string;
+  badgeColor: 'red' | 'orange' | 'gray';
+  inkClass: string;
+} {
   if (score < 0.25) {
-    return { label: 'Critical', badgeColor: 'red', barColor: '#f87171' };
+    return { label: 'Critical', badgeColor: 'red', inkClass: 'text-red' };
   }
   if (score < 0.4) {
-    return { label: 'Elevated', badgeColor: 'orange', barColor: '#fb923c' };
+    return { label: 'Elevated', badgeColor: 'orange', inkClass: 'text-orange' };
   }
-  return { label: 'Review', badgeColor: 'gray', barColor: '#9db0d4' };
+  return { label: 'Review', badgeColor: 'gray', inkClass: 'text-text-muted' };
 }
 
 function getQualityBand(value: number): { label: string; badgeColor: 'green' | 'blue' | 'orange' | 'red' } {
@@ -265,6 +268,11 @@ function getQualityBand(value: number): { label: string; badgeColor: 'green' | '
 }
 
 export default function AdminAnalyticsPage() {
+  // Recharts takes literal colour props, so the design tokens have to be
+  // resolved off <html> at runtime; this re-reads on every theme flip.
+  const chart = useChartPalette();
+  const chartTooltip = useMemo(() => tooltipStyles(chart), [chart]);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -339,7 +347,6 @@ export default function AdminAnalyticsPage() {
       const normalizedTrust = trustRaw.map((item, idx) => ({
         range: String(item.range ?? item.bucket ?? `Bucket ${idx + 1}`),
         count: Math.max(0, toFiniteNumber(item.count, 0)),
-        fill: DISTRIBUTION_COLORS[idx] || DISTRIBUTION_COLORS[DISTRIBUTION_COLORS.length - 1],
       }));
       setTrustScoreDistributionData(normalizedTrust);
 
@@ -356,11 +363,11 @@ export default function AdminAnalyticsPage() {
         // package isn't installed server-side) are preserved as `null` so the
         // UI can render "—" instead of a misleading 0%-filled bar.
         normalizedMetrics = [
-          { key: 'faithfulness', label: 'Faithfulness', value: clampUnitOrNull(latest.faithfulness), color: '#34d399' },
-          { key: 'context_precision', label: 'Context Precision', value: clampUnitOrNull(latest.context_precision), color: '#38bdf8' },
-          { key: 'context_recall', label: 'Context Recall', value: clampUnitOrNull(latest.context_recall), color: '#fb923c' },
-          { key: 'answer_relevance', label: 'Answer Relevance', value: clampUnitOrNull(latest.answer_relevance), color: '#6366f1' },
-          { key: 'refusal_accuracy', label: 'Refusal Accuracy', value: clampUnitOrNull(latest.refusal_accuracy), color: '#4f46e5' },
+          { key: 'faithfulness', label: 'Faithfulness', value: clampUnitOrNull(latest.faithfulness) },
+          { key: 'context_precision', label: 'Context Precision', value: clampUnitOrNull(latest.context_precision) },
+          { key: 'context_recall', label: 'Context Recall', value: clampUnitOrNull(latest.context_recall) },
+          { key: 'answer_relevance', label: 'Answer Relevance', value: clampUnitOrNull(latest.answer_relevance) },
+          { key: 'refusal_accuracy', label: 'Refusal Accuracy', value: clampUnitOrNull(latest.refusal_accuracy) },
         ];
       }
 
@@ -721,7 +728,6 @@ export default function AdminAnalyticsPage() {
           return (
             <motion.div key={card.label} variants={staggerItem}>
               <Card className="relative h-full overflow-hidden p-4">
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.04] to-transparent" />
                 <div className="relative flex items-start gap-3">
                   <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl glass ${card.tone}`}>
                     <Icon size={18} />
@@ -762,36 +768,30 @@ export default function AdminAnalyticsPage() {
               {queriesOverTimeData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-text-dim">No query trend data yet.</div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220} initialDimension={CHART_INITIAL_DIMENSION}>
                   <LineChart data={queriesOverTimeData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="queriesLineGradient" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#4f8dff" />
-                        <stop offset="100%" stopColor="#6366f1" />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(122,136,162,0.24)" />
-                    <XAxis dataKey="label" stroke="#7d8ba3" fontSize={12} tickMargin={8} />
-                    <YAxis stroke="#7d8ba3" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    {/* Solid hairline grid, recessive; the accent carries the one series. */}
+                    <CartesianGrid stroke={chart.grid} vertical={false} />
+                    <XAxis dataKey="label" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} tickMargin={8} />
+                    <YAxis stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} tickMargin={8} allowDecimals={false} />
                     <Tooltip
                       formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
-                      contentStyle={{
-                        backgroundColor: 'rgba(19,26,39,0.96)',
-                        backdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(117,150,207,0.22)',
-                        borderRadius: '12px',
-                        color: '#eaf0ff',
-                      }}
-                      labelStyle={{ color: '#9db0d4' }}
-                      itemStyle={{ color: '#eaf0ff' }}
+                      contentStyle={chartTooltip.contentStyle}
+                      labelStyle={chartTooltip.labelStyle}
+                      itemStyle={chartTooltip.itemStyle}
+                      cursor={{ stroke: chart.axis, strokeWidth: 1 }}
                     />
                     <Line
                       type="monotone"
                       dataKey="queries"
-                      stroke="url(#queriesLineGradient)"
-                      strokeWidth={3}
-                      dot={{ fill: '#6366f1', r: 3.5, strokeWidth: 0 }}
-                      activeDot={{ r: 6 }}
+                      stroke={chart.accent}
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      dot={false}
+                      // 2px surface ring so the hovered marker stays legible
+                      // where it crosses the line.
+                      activeDot={{ r: 4, fill: chart.accent, stroke: chart.surface, strokeWidth: 2 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -816,26 +816,25 @@ export default function AdminAnalyticsPage() {
               {trustScoreDistributionData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-text-dim">No distribution data yet.</div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220} initialDimension={CHART_INITIAL_DIMENSION}>
                   <BarChart data={trustScoreDistributionData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(122,136,162,0.24)" />
-                    <XAxis dataKey="range" stroke="#7d8ba3" fontSize={12} tickMargin={8} />
-                    <YAxis stroke="#7d8ba3" fontSize={12} tickMargin={8} allowDecimals={false} />
+                    <CartesianGrid stroke={chart.grid} vertical={false} />
+                    <XAxis dataKey="range" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} tickMargin={8} />
+                    <YAxis stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} tickMargin={8} allowDecimals={false} />
                     <Tooltip
                       formatter={(value: number | string | readonly (number | string)[] | undefined) => [tooltipNumber(value).toLocaleString(), 'Queries']}
-                      contentStyle={{
-                        backgroundColor: 'rgba(19,26,39,0.96)',
-                        backdropFilter: 'blur(8px)',
-                        border: '1px solid rgba(117,150,207,0.22)',
-                        borderRadius: '12px',
-                        color: '#eaf0ff',
-                      }}
-                      labelStyle={{ color: '#9db0d4' }}
-                      itemStyle={{ color: '#eaf0ff' }}
+                      contentStyle={chartTooltip.contentStyle}
+                      labelStyle={chartTooltip.labelStyle}
+                      itemStyle={chartTooltip.itemStyle}
+                      cursor={{ fill: chart.grid }}
                     />
-                    <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={56}>
+                    {/* Bucket colour is the trust STATUS (red/amber/green at the
+                        same 50/75 thresholds as the badges), and it is purely
+                        redundant: the bars are positionally ordered and the
+                        x-axis names the range. Capped at 24px per the mark spec. */}
+                    <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={24}>
                       {trustScoreDistributionData.map((entry) => (
-                        <Cell key={`${entry.range}-${entry.fill}`} fill={entry.fill} />
+                        <Cell key={entry.range} fill={trustBucketColor(entry.range, chart)} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -891,9 +890,14 @@ export default function AdminAnalyticsPage() {
                       const qualityBand = value === null ? null : getQualityBand(value);
                       const thresholdValue = thresholdForMetric(metric.key, thresholds);
                       const check = value === null ? null : checkThreshold(value, thresholdValue);
+                      // The meter fill carries severity: a failed threshold wins,
+                      // otherwise the quality band. It is never the only signal —
+                      // the Pass / Below-threshold badge keeps its icon + word.
+                      const meterColor = check && !check.pass
+                        ? chart.danger
+                        : toneColor(qualityBand?.badgeColor ?? 'gray', chart);
                       return (
                         <Card key={metric.key} className="relative overflow-hidden p-4">
-                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.035] to-transparent" />
                           <div className="relative mb-3 flex items-center justify-between gap-3">
                             <span className="text-sm font-medium text-text">{metric.label}</span>
                             <div className="flex items-center gap-1.5">
@@ -907,18 +911,22 @@ export default function AdminAnalyticsPage() {
                             </div>
                           </div>
                           <div className="relative mb-2 flex items-baseline justify-between">
-                            <span
-                              className="text-2xl font-bold tabular-nums"
-                              style={{ color: isNull ? undefined : metric.color }}
-                            >
+                            {/* Text wears an ink token, never the mark colour —
+                                the badge beside it carries the status. */}
+                            <span className="text-2xl font-bold tabular-nums text-text">
                               {isNull ? '—' : `${percent}%`}
                             </span>
                             <span className="text-xs text-text-dim">
                               {isNull ? 'n/a' : check ? `threshold: ${Math.round(check.threshold * 100)}%` : 'target: 85%+'}
                             </span>
                           </div>
+                          {/* Opaque inset track, not a translucent tint: on the
+                              light card a card-2 track put the green/amber fills
+                              at 2.97 / 2.87 : 1, under the 3:1 the filled-vs-
+                              unfilled boundary needs. The hairline ring is what
+                              keeps the 100% reference visible. */}
                           <div
-                            className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
+                            className="h-2.5 w-full overflow-hidden rounded-full bg-solid ring-1 ring-inset ring-border-light"
                             role="progressbar"
                             aria-valuenow={isNull ? undefined : percent}
                             aria-valuemin={0}
@@ -928,7 +936,7 @@ export default function AdminAnalyticsPage() {
                             {isNull ? null : (
                               <div
                                 className="h-full rounded-full transition-all duration-700 ease-out"
-                                style={{ width: `${percent}%`, background: `linear-gradient(90deg, ${metric.color}, ${metric.color}88)` }}
+                                style={{ width: `${percent}%`, backgroundColor: meterColor }}
                               />
                             )}
                           </div>
@@ -1144,13 +1152,16 @@ export default function AdminAnalyticsPage() {
                           </div>
                           <p className="mt-2 text-sm leading-relaxed text-text break-words">&ldquo;{item.query}&rdquo;</p>
                           <div className="mt-3 flex items-center gap-2">
-                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-card/70">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-solid ring-1 ring-inset ring-border-light">
                               <div
                                 className="h-full rounded-full"
-                                style={{ width: `${Math.round(item.score * 100)}%`, backgroundColor: risk.barColor }}
+                                style={{
+                                  width: `${Math.round(item.score * 100)}%`,
+                                  backgroundColor: toneColor(risk.badgeColor, chart),
+                                }}
                               />
                             </div>
-                            <span className="text-sm font-semibold tabular-nums" style={{ color: risk.barColor }}>
+                            <span className={`text-sm font-semibold tabular-nums ${risk.inkClass}`}>
                               {Math.round(item.score * 100)}%
                             </span>
                           </div>

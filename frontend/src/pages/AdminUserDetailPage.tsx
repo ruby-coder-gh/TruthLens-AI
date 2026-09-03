@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, User, Calendar, Clock, MessageSquare, FileText, Ban, Trash2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, User, Calendar, ChevronDown, Clock, MessageSquare, FileText, Ban, Trash2, AlertTriangle } from 'lucide-react';
 import { Button, Card, Badge, Modal } from '../components/ui';
 import { pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
@@ -150,7 +150,7 @@ export default function AdminUserDetailPage() {
       <Card className="p-5 lg:p-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full glass text-primary-soft">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-primary/25 bg-primary/10 text-primary-soft">
               <User size={28} />
             </div>
             <div>
@@ -198,6 +198,9 @@ export default function AdminUserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-text-dim">Role</p>
+            {/* appearance-none so the themed surface paints: a native select
+                widget ignores it and stays light in dark mode. */}
+            <div className="relative inline-flex">
             <select
               value={user.role}
               onChange={async (e) => {
@@ -210,11 +213,18 @@ export default function AdminUserDetailPage() {
                   addToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
                 }
               }}
-              className="rounded-lg border border-border bg-bg-soft/60 px-2 py-1 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="appearance-none rounded-chip border border-border bg-solid py-1 pl-2 pr-7 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+              aria-label="Change user role"
             >
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
+            <ChevronDown
+              size={12}
+              aria-hidden="true"
+              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-dim"
+            />
+            </div>
           </div>
         </div>
       </Card>
@@ -223,7 +233,7 @@ export default function AdminUserDetailPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card className="p-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-accent">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
               <MessageSquare size={20} />
             </div>
             <div>
@@ -234,7 +244,7 @@ export default function AdminUserDetailPage() {
         </Card>
         <Card className="p-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
               <FileText size={20} />
             </div>
             <div>
@@ -248,7 +258,7 @@ export default function AdminUserDetailPage() {
       {/* Recent Queries */}
       <Card className="p-5 lg:p-6">
         <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
-          <MessageSquare size={14} className="text-accent" />
+          <MessageSquare size={14} className="text-primary-soft" />
           Recent Queries
         </h2>
         {queries.length === 0 ? (
@@ -256,7 +266,7 @@ export default function AdminUserDetailPage() {
         ) : (
           <div className="space-y-2">
             {queries.map((q) => (
-              <div key={q.id} className="rounded-xl glass p-3 flex items-start justify-between gap-3">
+              <div key={q.id} className="flex items-start justify-between gap-3 rounded-control border border-border bg-card-2 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-text truncate">&ldquo;{q.query_text}&rdquo;</p>
                   <p className="text-xs text-text-dim mt-0.5">{formatDate(q.created_at)}</p>
@@ -277,7 +287,7 @@ export default function AdminUserDetailPage() {
         title={confirmModal?.action === 'delete' ? 'Delete User' : 'Confirm Action'}
       >
         <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-xl bg-red/10 border border-red/20 p-4">
+          <div className="flex items-start gap-3 rounded-card border border-red/30 bg-red/10 p-4">
             <AlertTriangle size={20} className="text-red shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-red">

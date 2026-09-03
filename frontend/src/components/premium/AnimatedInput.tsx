@@ -11,6 +11,14 @@ interface AnimatedInputProps extends InputHTMLAttributes<HTMLInputElement> {
   loading?: boolean;
 }
 
+/**
+ * A small control that sits inside an input.
+ *
+ * It used to run an infinite box-shadow pulse in *both* states — an idle
+ * button quietly breathing indigo light forever. The active state is now
+ * carried by an accent tint and edge, which is a stronger signal, holds up on
+ * a light ground, and stops animating when nothing is happening.
+ */
 export function InputActionButton({
   children,
   onClick,
@@ -33,50 +41,28 @@ export function InputActionButton({
       type="button"
       onClick={handleClick}
       className={clsx(
-        'relative flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-300',
-        'border backdrop-blur-sm overflow-hidden',
+        'relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-chip border',
+        'transition-colors duration-200',
         active
-          ? 'border-primary/40 bg-primary/15 text-primary-soft'
-          : 'border-glass-border bg-[#0b0f17]/60 text-text-dim hover:text-text hover:border-primary/30',
+          ? 'border-primary/40 bg-primary/12 text-primary-soft'
+          : 'border-border bg-card-2 text-text-muted hover:border-primary/30 hover:text-text',
       )}
-      whileHover={{ scale: 1.08 }}
-      whileTap={{ scale: 0.92 }}
-      animate={
-        active
-          ? {
-              boxShadow: [
-                '0 0 4px rgba(99,102,241,0.2)',
-                '0 0 10px rgba(99,102,241,0.4)',
-                '0 0 4px rgba(99,102,241,0.2)',
-              ],
-            }
-          : {
-              boxShadow: [
-                '0 0 0px rgba(99,102,241,0)',
-                '0 0 4px rgba(99,102,241,0.1)',
-                '0 0 0px rgba(99,102,241,0)',
-              ],
-            }
-      }
-      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+      whileHover={{ scale: 1.06 }}
+      whileTap={{ scale: 0.94 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
     >
-      <motion.span
-        className="flex items-center justify-center"
-        whileHover={{ rotate: 5 }}
-        transition={{ duration: 0.2 }}
-      >
-        {children}
-      </motion.span>
+      <span className="relative z-10 flex items-center justify-center">{children}</span>
 
       <AnimatePresence mode="wait">
         {rippleKey > 0 && (
           <motion.span
             key={rippleKey}
-            className="absolute inset-0 rounded-lg bg-white/20"
-            initial={{ scale: 0.3, opacity: 0.6 }}
+            className="absolute inset-0 rounded-chip bg-current"
+            initial={{ scale: 0.3, opacity: 0.22 }}
             animate={{ scale: 2, opacity: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: 'easeOut' }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
+            aria-hidden="true"
           />
         )}
       </AnimatePresence>
@@ -84,6 +70,18 @@ export function InputActionButton({
   );
 }
 
+/**
+ * The auth/settings text field.
+ *
+ * Two decorative layers are gone. The focus "glow" was a blurred
+ * indigo→green gradient bled around the control — a second accent hue that
+ * exists nowhere else in this direction, and a soft halo that on a white page
+ * just looks like a rendering artefact. And the label and icon animated their
+ * colour to a raw `rgba(99,102,241,.9)`, which lands under 4.5:1 on a white
+ * field. Both now resolve to the design system's text-safe accent ink via a
+ * plain CSS transition, and the focused field takes the board's ring:
+ * `border-primary` plus a 3px `primary-glow` halo that flips with the theme.
+ */
 export default function AnimatedInput({
   label,
   error,
@@ -95,96 +93,89 @@ export default function AnimatedInput({
   ...props
 }: AnimatedInputProps) {
   const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+  const errorId = inputId ? `${inputId}-error` : undefined;
   const [focused, setFocused] = useState(false);
 
   return (
     <div className="space-y-1.5">
       {label && (
-        <motion.label
+        <label
           htmlFor={inputId}
-          className="block text-sm font-medium text-text-muted"
-          animate={focused ? { color: 'rgba(99,102,241,0.9)' } : {}}
-          transition={{ duration: 0.2 }}
+          className={clsx(
+            'block text-sm font-medium transition-colors duration-200',
+            focused ? 'text-primary-soft' : 'text-text-muted',
+          )}
         >
           {label}
-        </motion.label>
+        </label>
       )}
       <div className="relative">
-        {/* Focus glow ring */}
-        {focused && (
-          <motion.div
-            className="absolute -inset-0.5 rounded-xl opacity-50 pointer-events-none"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 0.5 }}
-            exit={{ opacity: 0 }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(52,211,153,0.15))',
-              filter: 'blur(4px)',
-            }}
-          />
-        )}
-
         <div className="relative flex items-center">
-          {/* Icon */}
           {icon && (
-            <motion.span
-              className="pointer-events-none absolute left-3 flex items-center justify-center text-text-dim z-10"
-              animate={focused ? { color: 'rgba(99,102,241,0.8)' } : {}}
-              transition={{ duration: 0.2 }}
+            <span
+              className={clsx(
+                'pointer-events-none absolute left-3 z-10 flex items-center justify-center',
+                'transition-colors duration-200',
+                focused ? 'text-primary-soft' : 'text-text-dim',
+              )}
+              aria-hidden="true"
             >
               {icon}
-            </motion.span>
+            </span>
           )}
 
           <input
             id={inputId}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error && errorId ? errorId : undefined}
             className={clsx(
-              'w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all duration-300',
-              'bg-[#0b0f17]/70 backdrop-blur-sm border',
-              focused
-                ? 'border-primary/40 bg-[#0b0f17]/90'
-                : error
-                  ? 'border-red/50'
-                  : 'border-glass-border hover:border-primary/20',
+              // Inputs are always opaque — body text never sits on a blur.
+              'w-full rounded-control border bg-solid px-3 py-2.5 text-sm text-text',
+              'placeholder:text-text-dim transition-[border-color,box-shadow] duration-200',
               'focus:outline-none',
+              focused
+                ? 'border-primary shadow-[0_0_0_3px_var(--color-primary-glow)]'
+                : error
+                  ? 'border-red'
+                  : 'border-border hover:border-primary/40',
               icon && 'pl-10',
-              actionButton && 'pr-11',
-              loading && 'pr-11',
+              (actionButton || loading) && 'pr-11',
               className,
             )}
             {...props}
           />
 
-          {/* Loading spinner */}
           {loading && (
-            <motion.span className="absolute right-3 flex items-center justify-center text-text-dim">
-              <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
+            <span className="absolute right-3 flex items-center justify-center text-text-dim">
+              <motion.span
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+              >
                 <Loader2 size={14} />
               </motion.span>
-            </motion.span>
+            </span>
           )}
 
-          {/* Action button */}
           {actionButton && !loading && (
-            <span className="absolute right-2.5 flex items-center justify-center z-10">
+            <span className="absolute right-2.5 z-10 flex items-center justify-center">
               {actionButton}
             </span>
           )}
         </div>
       </div>
 
-      {/* Error */}
       <AnimatePresence>
         {error && (
           <motion.p
+            id={errorId}
             initial={{ opacity: 0.99, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0.99, y: -4 }}
             className="flex items-center gap-1 text-xs text-red"
           >
-            <AlertCircle size={12} /> {error}
+            <AlertCircle size={12} className="shrink-0" aria-hidden="true" /> {error}
           </motion.p>
         )}
       </AnimatePresence>

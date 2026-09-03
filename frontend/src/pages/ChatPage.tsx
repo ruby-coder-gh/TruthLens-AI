@@ -157,10 +157,26 @@ function parseGuardrailDetails(details: string): string[] {
 // thresholds (0.7 / 0.4) so the same message reads identically whether you're
 // looking at the bubble or the panel.
 function getTrustStampMeta(score: number): { label: string; colorClass: string } {
-  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-accent' };
-  if (score >= 0.4) return { label: 'Review', colorClass: 'text-primary' };
-  return { label: 'Flagged', colorClass: 'text-accent-2' };
+  // accent / primary / accent-2 all resolve to the same indigo under the
+  // Grounded Glass tokens, so every verdict painted identically. The trust
+  // inks restore the distinction; `.wax-seal` builds its tint and edge from
+  // `currentColor`, and the verdict word beside the hue keeps colour from
+  // being the only signal.
+  if (score >= 0.7) return { label: 'Verified', colorClass: 'text-green' };
+  if (score >= 0.4) return { label: 'Review', colorClass: 'text-orange' };
+  return { label: 'Flagged', colorClass: 'text-red' };
 }
+
+/**
+ * Meter fill per trust band. `relevance.colors.bar` still carries Tailwind's
+ * stock `from-green-400 to-emerald-500`, a fixed dark-theme value that is
+ * ~1.7:1 against its own track on the light ground. These follow the theme.
+ */
+const TRUST_BAR_FILL: Record<'high' | 'medium' | 'low', string> = {
+  high: 'bg-trust-high',
+  medium: 'bg-trust-mid',
+  low: 'bg-trust-low',
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  MAIN PAGE COMPONENT
@@ -673,7 +689,8 @@ export default function ChatPage() {
           layout
           className={clsx(
             'flex flex-col flex-1 min-w-0',
-            // The Evidence sidebar renders `position: fixed` (right: 16px, w-72 = 18rem)
+            // The Evidence sidebar renders `position: absolute` against this
+            // shell (right: 0, w-80 = 20rem)
             // so it never participates in this flex layout — at lg+ it visually floats
             // over whatever sits at that screen position. Without reserving matching
             // space here, the sidebar's higher z-index (30 vs this panel's 10)
@@ -686,7 +703,7 @@ export default function ChatPage() {
           )}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-border/60 glass px-4 py-3 lg:px-6 rounded-tl-2xl">
+          <div className="flex items-center justify-between border-b border-border glass px-4 py-3 lg:px-6 rounded-tl-2xl">
             <div className="flex items-center gap-3">
               <motion.button
                 type="button"
@@ -733,7 +750,7 @@ export default function ChatPage() {
                 type="button"
                 onClick={() => setSourcesModalOpen(true)}
                 disabled={latestSources.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 hover:border-primary/30 hover:bg-primary/[0.06] hover:text-primary-soft disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-control border border-border bg-card-2 px-3 py-1.5 text-xs font-medium text-text-muted transition-all duration-150 hover:border-primary/40 hover:bg-primary/10 hover:text-primary-soft disabled:cursor-not-allowed disabled:opacity-40"
                 whileTap={{ scale: 0.97 }}
               >
                 <FileText size={15} />
@@ -802,7 +819,7 @@ export default function ChatPage() {
           </div>
 
           {/* ─── Input Area ──────────────────────────────────────────────── */}
-          <div className="border-t border-border/30 px-4 py-4 lg:px-6 rounded-bl-2xl">
+          <div className="border-t border-border px-4 py-4 lg:px-6 rounded-bl-2xl">
             <motion.form
               onSubmit={handleSubmit}
               className="mx-auto flex max-w-3xl items-start gap-3"
@@ -825,24 +842,16 @@ export default function ChatPage() {
                   placeholder="Ask a question about your documents…"
                   disabled={isStreaming}
                   rows={1}
-                  className="relative w-full resize-none rounded-xl border border-border/40 bg-bg-soft/90 px-4 py-3 pr-12 text-sm text-text placeholder-text-dim backdrop-blur-sm transition-all disabled:cursor-not-allowed disabled:opacity-50 z-10"
+                  className={clsx(
+                    // Glass law: an input is always an opaque field, never body
+                    // text on a blur.
+                    'relative z-10 w-full resize-none rounded-control border bg-solid px-4 py-3 pr-12 text-sm text-text placeholder-text-dim shadow-e1 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+                    // Was a Midnight-era breathing indigo glow built from
+                    // literal rgba(99,102,241,…); a flat accent edge carries the
+                    // same "ready to send" cue and follows the theme.
+                    inputValue.trim() && !isStreaming ? 'border-primary/60' : 'border-border',
+                  )}
                   aria-label="Type your question"
-                />
-                {/* Breathing glow border — idle + has-text only, never while streaming */}
-                <motion.div
-                  className="absolute inset-0 rounded-xl pointer-events-none -z-10"
-                  animate={
-                    inputValue.trim() && !isStreaming
-                      ? {
-                          boxShadow: [
-                            '0 0 10px 2px rgba(99,102,241,0.12), inset 0 0 10px 2px rgba(99,102,241,0.03)',
-                            '0 0 18px 6px rgba(99,102,241,0.22), inset 0 0 14px 4px rgba(99,102,241,0.06)',
-                            '0 0 10px 2px rgba(99,102,241,0.12), inset 0 0 10px 2px rgba(99,102,241,0.03)',
-                          ],
-                        }
-                      : { boxShadow: 'none' }
-                  }
-                  transition={{ duration: 2.5, repeat: inputValue.trim() && !isStreaming ? Infinity : 0, ease: 'easeInOut' }}
                 />
               </div>
               {isStreaming ? (
@@ -851,7 +860,7 @@ export default function ChatPage() {
                   onClick={handleStop}
                   aria-label="Stop generating"
                   title="Stop generating"
-                  className="shrink-0 flex items-center justify-center rounded-xl border border-red/30 bg-white/5 text-text-muted transition-all duration-150 hover:border-red/50 hover:bg-red/15 hover:text-red"
+                  className="shrink-0 flex items-center justify-center rounded-control border border-red/40 bg-card-2 text-text-muted shadow-e1 transition-all duration-150 hover:border-red/60 hover:bg-red/12 hover:text-red"
                   style={{ height: '44px', minWidth: '44px' }}
                   whileHover={{ scale: 1.04 }}
                   whileTap={{ scale: 0.95 }}
@@ -863,25 +872,16 @@ export default function ChatPage() {
                   type="submit"
                   disabled={!inputValue.trim()}
                   aria-label="Send message"
-                  className="shrink-0 flex items-center justify-center rounded-xl border border-primary/30 bg-primary px-4 text-white transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-transparent disabled:bg-white/5"
+                  className={clsx(
+                    'shrink-0 flex items-center justify-center rounded-control border border-primary/40 bg-primary px-4 text-on-primary transition-all duration-150',
+                    'disabled:cursor-not-allowed disabled:opacity-40 disabled:border-border disabled:bg-card-2 disabled:text-text-dim disabled:shadow-none',
+                    // The pulsing indigo halo was a Midnight literal
+                    // (rgba(99,102,241,…)); elevation now carries the emphasis
+                    // and reacts to the theme.
+                    inputValue.trim() ? 'shadow-e2 hover:shadow-e3' : 'shadow-e1',
+                  )}
                   style={{ height: '44px', minWidth: '44px' }}
-                  animate={
-                    inputValue.trim()
-                      ? {
-                          boxShadow: [
-                            '0 0 10px 3px rgba(99,102,241,0.3)',
-                            '0 0 22px 8px rgba(99,102,241,0.45)',
-                            '0 0 10px 3px rgba(99,102,241,0.3)',
-                          ],
-                          borderColor: 'rgba(99,102,241,0.6)',
-                        }
-                      : {
-                          boxShadow: 'none',
-                          borderColor: 'rgba(255,255,255,0.08)',
-                        }
-                  }
-                  transition={{ duration: 2, repeat: inputValue.trim() ? Infinity : 0, ease: 'easeInOut' }}
-                  whileHover={inputValue.trim() ? { scale: 1.04, boxShadow: '0 0 28px 10px rgba(99,102,241,0.5)' } : {}}
+                  whileHover={inputValue.trim() ? { scale: 1.04 } : {}}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Send size={18} />
@@ -930,13 +930,15 @@ export default function ChatPage() {
               onClick={() => setSourcesModalOpen(false)}
             />
             <motion.div
-              className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-2xl max-h-[70vh] overflow-y-auto rounded-2xl border border-border/40 bg-bg/97 backdrop-blur-2xl shadow-2xl"
+              // Opaque panel: the glass law keeps body text off a blur, and the
+              // scrim behind it already supplies the depth.
+              className="fixed inset-x-4 top-[10%] z-50 mx-auto max-w-2xl max-h-[70vh] overflow-y-auto rounded-panel border border-border bg-solid shadow-e3"
               initial={{ opacity: 0.99, scale: 0.93, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ duration: 0.15, ease: 'easeOut' }}
             >
-              <div className="flex items-center justify-between border-b border-border/40 px-5 py-4">
+              <div className="flex items-center justify-between border-b border-border px-5 py-4">
                 <div className="flex items-center gap-2">
                   <FileText size={16} className="text-primary-soft" />
                   <h3 className="text-sm font-bold text-text">Sources Used</h3>
@@ -971,23 +973,23 @@ export default function ChatPage() {
                         initial={{ opacity: 0.99, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.05 }}
-                        className="group relative rounded-2xl border border-border/40 bg-card/60 p-4 hover:border-primary/30 hover:bg-card-hover transition-all duration-300"
+                        className="group relative rounded-card border border-border bg-card-2 p-4 transition-all duration-300 hover:border-primary/40 hover:bg-card-hover"
                         whileHover={{ y: -2, scale: 1.005 }}
                       >
                         <div className="space-y-3">
                           {/* Row 1: Icon + Exhibit tag + Name + Type */}
                           <div className="flex items-start gap-3">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary-dark/20 border border-primary/20">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10">
                               <FileText size={16} className="text-primary-soft" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="mb-1 flex items-center gap-1.5">
-                                <span className="inline-flex items-center rounded-[3px] bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-bg">
+                                <span className="inline-flex items-center rounded-chip bg-primary px-1.5 py-[1px] font-mono text-[8px] font-bold uppercase tracking-widest text-on-primary">
                                   Exhibit {String(i + 1).padStart(2, '0')}
                                 </span>
                                 <Badge color="gray" className="shrink-0 text-[10px]">{fileExt}</Badge>
                               </div>
-                              <p className="truncate font-mono text-sm font-medium text-primary">
+                              <p className="truncate font-mono text-sm font-medium text-primary-soft">
                                 {docName}
                                 {source.page_number ? <span className="font-sans font-normal text-text-dim"> · p.{source.page_number}</span> : null}
                               </p>
@@ -1007,9 +1009,9 @@ export default function ChatPage() {
                                 {relevancePct}%
                               </span>
                             </div>
-                            <div className="relative h-2 rounded-full bg-white/5 overflow-hidden">
+                            <div className="relative h-2 rounded-full bg-card-2 overflow-hidden">
                               <motion.div
-                                className={clsx('absolute inset-y-0 left-0 rounded-full', relevance.colors.bar)}
+                                className={clsx('absolute inset-y-0 left-0 rounded-full', TRUST_BAR_FILL[relevance.tier])}
                                 initial={{ width: 0 }}
                                 animate={{ width: `${relevancePct}%` }}
                                 transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
@@ -1017,8 +1019,9 @@ export default function ChatPage() {
                             </div>
                           </div>
 
-                          {/* Row 3: Excerpt */}
-                          <p className="text-xs text-text-muted leading-relaxed line-clamp-2">
+                          {/* Row 3: Excerpt — quoted source text, so Newsreader
+                              on an opaque field. */}
+                          <p className="font-quote line-clamp-2 rounded-control border border-border bg-solid p-2.5 text-[13px] leading-relaxed text-text">
                             {source.excerpt || 'No content'}
                           </p>
 
@@ -1073,7 +1076,7 @@ const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExam
       animate="animate"
     >
       <motion.div
-        className="mb-6 flex h-20 w-20 items-center justify-center rounded-2xl glass shadow-lg shadow-primary/10"
+        className="mb-6 flex h-20 w-20 items-center justify-center rounded-panel glass shadow-e2"
         initial={{ scale: 0, rotate: -10 }}
         animate={{ scale: 1, rotate: 0 }}
         transition={{ type: 'spring', damping: 12, stiffness: 150, delay: 0.1 }}
@@ -1110,7 +1113,7 @@ const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExam
             key={q}
             type="button"
             onClick={() => onExampleClick(q)}
-            className="inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-sm text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-text hover:shadow-lg hover:shadow-primary/10"
+            className="inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-sm text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-text hover:shadow-e2"
             variants={staggerItem}
             whileHover={{ scale: 1.04, y: -2 }}
             whileTap={{ scale: 0.97 }}
@@ -1128,9 +1131,9 @@ const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExam
         animate="animate"
       >
         {[
-          { icon: FileText, color: 'text-accent', label: 'Semantic search', desc: 'Retrieve relevant chunks' },
-          { icon: Shield, color: 'text-primary-soft', label: 'Guardrails', desc: 'Factual accuracy checks' },
-          { icon: Brain, color: 'text-gold', label: 'Trust scores', desc: 'Confidence metrics' },
+          { icon: FileText, color: 'text-primary-soft', label: 'Semantic search', desc: 'Retrieve relevant chunks' },
+          { icon: Shield, color: 'text-green', label: 'Guardrails', desc: 'Factual accuracy checks' },
+          { icon: Brain, color: 'text-orange', label: 'Trust scores', desc: 'Confidence metrics' },
         ].map((item) => (
           <motion.div key={item.label} className="space-y-2" variants={staggerItem}>
             <motion.div
@@ -1208,19 +1211,24 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
         {/* ─── USER MESSAGE ───────────────────────────────────────────── */}
         {isUser && (
           <motion.div
-            className="rounded-2xl rounded-br-md bg-gradient-to-br from-primary to-primary-dark px-4 py-2.5 shadow-lg shadow-primary/20"
+            className="rounded-card rounded-br-md bg-primary px-4 py-2.5 shadow-e1"
             initial={{ opacity: 0.99, scale: 0.9, x: 20 }}
             animate={{ opacity: 1, scale: 1, x: 0 }}
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
           >
-            <p className="text-sm text-white">{message.content}</p>
+            {/* `text-white` on dark's #8B85FF was 3.04:1 — `on-primary` flips
+                with the theme and clears 6.2:1 in both. */}
+            <p className="text-sm text-on-primary">{message.content}</p>
           </motion.div>
         )}
 
         {/* ─── ASSISTANT MESSAGE ─────────────────────────────────────── */}
         {isAssistant && (
           <div
-            className="glass rounded-2xl bg-card/60 border border-white/10 p-5 flex flex-col gap-4 shadow-xl"
+            // `.glass` is unlayered, so it already owned this element's
+            // background and border — the `bg-card/60 border-white/10` pair
+            // never applied and only misdescribed the surface.
+            className="glass rounded-card p-5 flex flex-col gap-4 shadow-e1"
             role="log"
             aria-live="polite"
             aria-atomic="false"
@@ -1300,7 +1308,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             {isComplete && message.content && (
               <>
                 {/* TOP: Metadata row (guardrail + trust score) */}
-                <div className="flex items-center gap-3 border-b border-white/5 pb-3">
+                <div className="flex items-center gap-3 border-b border-border-light pb-3">
                   {message.guardrail && (
                     <GuardrailBadge guardrail={message.guardrail} />
                   )}
@@ -1328,7 +1336,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 </div>
 
                 {/* BOTTOM: Footer — latency, model, actions */}
-                <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-text-dim">
+                <div className="flex items-center justify-between pt-2 border-t border-border-light text-xs text-text-dim">
                   <div className="flex flex-wrap items-center gap-3">
                     {message.latencyMs !== null && (
                       <span className="flex items-center gap-1">
@@ -1417,7 +1425,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             {/* Error state */}
             {isError && message.error && (
               <motion.div
-                className="flex items-start gap-3 rounded-xl border border-red/30 bg-red/10 p-3"
+                className="flex items-start gap-3 rounded-control border border-red/35 bg-red/12 p-3 shadow-[inset_3px_0_0_var(--color-trust-low)]"
                 role="alert"
                 initial={{ opacity: 0.99, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -1541,37 +1549,38 @@ const CitationHoverCard = memo(function CitationHoverCard({ source, children }: 
           transition={{ duration: 0.15, ease: 'easeOut' }}
           onMouseEnter={showCard}
           onMouseLeave={hideCard}
-          className="fixed z-[70] w-80 rounded-2xl border border-glass-border bg-bg-soft/95 backdrop-blur-2xl shadow-2xl shadow-black/60 overflow-hidden"
+          // Carries a quoted excerpt, so it is an opaque card, not a third blur.
+          className="fixed z-[70] w-80 overflow-hidden rounded-card border border-border bg-solid shadow-e3"
           style={{ top: pos.top, left: pos.left }}
         >
           {/* Header */}
-          <div className="px-4 pt-3 pb-2 border-b border-white/[0.06]">
+          <div className="px-4 pt-3 pb-2 border-b border-border-light">
             <div className="flex items-center gap-2">
               <FileText size={14} className="text-primary-soft shrink-0" />
-              <span className="truncate font-mono text-sm font-medium text-primary">{docName}</span>
+              <span className="truncate font-mono text-sm font-medium text-primary-soft">{docName}</span>
               <span className="ml-auto font-mono text-[10px] text-text-dim tabular-nums">{relevancePct}%</span>
             </div>
           </div>
 
           {/* Excerpt */}
           <div className="px-4 py-3 max-h-28 overflow-y-auto">
-            <p className="text-xs text-text-muted leading-relaxed line-clamp-4">
+            <p className="font-quote line-clamp-4 text-[13px] leading-relaxed text-text">
               {source.excerpt || 'No excerpt available'}
             </p>
           </div>
 
           {/* Score bar */}
           <div className="px-4 pb-3">
-            <div className="h-1 rounded-full bg-white/5 overflow-hidden">
+            <div className="h-1 rounded-full bg-card-2 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-all duration-700"
+                className="h-full rounded-full bg-primary transition-all duration-700"
                 style={{ width: `${relevancePct}%` }}
               />
             </div>
           </div>
 
           {/* Click hint */}
-          <div className="px-4 pb-3 flex items-center gap-1.5 text-[10px] text-text-dim border-t border-white/[0.06] pt-2">
+          <div className="px-4 pb-3 flex items-center gap-1.5 text-[10px] text-text-dim border-t border-border-light pt-2">
             <Brain size={10} />
             Click to locate in sidebar
           </div>
@@ -1657,10 +1666,12 @@ const GuardrailBadge = memo(function GuardrailBadge({ guardrail }: { guardrail: 
   return (
     <motion.div
       className={clsx(
-        'flex items-start gap-2 rounded-xl border p-3',
+        // The 3px rail repeats the verdict without relying on hue, matching
+        // the abstention card's treatment.
+        'flex items-start gap-2 rounded-control border p-3',
         guardrail.passed
-          ? 'border-green/30 bg-green/10'
-          : 'border-orange/30 bg-orange/10',
+          ? 'border-green/35 bg-green/12 shadow-[inset_3px_0_0_var(--color-trust-high)]'
+          : 'border-orange/35 bg-orange/12 shadow-[inset_3px_0_0_var(--color-trust-mid)]',
       )}
       initial={{ opacity: 0.99, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -1731,7 +1742,20 @@ const TrustScoreRing = memo(function TrustScoreRing({ score }: { score: number }
 
   const tone = getTrustBadgeColor(score);
   const isHigh = tone === 'green';
-  const color = tone === 'green' ? 'var(--color-accent)' : tone === 'orange' ? 'var(--color-orange)' : 'var(--color-red)';
+  // Was `--color-accent` for the passing band, which is now the same indigo as
+  // the accent — a high-trust ring read identical to the UI chrome around it.
+  // These are the trust fill hues; the numeric score sits inside the ring, so
+  // colour is never the only signal.
+  const color =
+    tone === 'green'
+      ? 'var(--color-trust-high)'
+      : tone === 'orange'
+        ? 'var(--color-trust-mid)'
+        : 'var(--color-trust-low)';
+  // The fill hue is tuned to be seen, not read: #16A34A is only 3.4:1 on the
+  // light ground. The numeral inside the ring takes the text-safe ink instead.
+  const inkColor =
+    tone === 'green' ? 'var(--color-green)' : tone === 'orange' ? 'var(--color-orange)' : 'var(--color-red)';
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
@@ -1741,7 +1765,7 @@ const TrustScoreRing = memo(function TrustScoreRing({ score }: { score: number }
           cy={size / 2}
           r={radius}
           fill="none"
-          stroke="rgba(122,136,162,0.28)"
+          stroke="var(--color-border)"
           strokeWidth={strokeWidth}
         />
         <motion.circle
@@ -1773,7 +1797,7 @@ const TrustScoreRing = memo(function TrustScoreRing({ score }: { score: number }
         />
       )}
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-[10px] font-mono font-medium" style={{ color }}>
+        <span className="text-[10px] font-mono font-medium" style={{ color: inkColor }}>
           {(score * 100).toFixed(0)}
         </span>
       </div>

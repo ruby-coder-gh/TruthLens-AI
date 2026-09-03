@@ -288,9 +288,9 @@ export default function AdminDocumentsPage() {
       {selected.size > 0 && (
         <motion.div
           variants={staggerItem}
-          className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 backdrop-blur-md"
+          className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-card border border-primary/30 bg-primary/10 px-4 py-3 shadow-e1 backdrop-blur-md"
         >
-          <p className="text-sm font-medium text-text">{selected.size} selected</p>
+          <p className="text-[13px] font-semibold text-primary-soft">{selected.size} selected</p>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setTagModalOpen(true)}>
               <TagIcon size={14} />
@@ -311,12 +311,12 @@ export default function AdminDocumentsPage() {
       {/* Table */}
       <motion.div
         variants={staggerItem}
-        className="overflow-x-auto rounded-xl border border-border glass"
+        className="overflow-x-auto rounded-card border border-border bg-solid shadow-e1"
       >
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-border bg-card-2/80">
-              <th className="px-4 py-3 w-10">
+            <tr className="border-b border-border bg-card-2">
+              <th className="px-4 py-2.5 w-10">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -326,15 +326,15 @@ export default function AdminDocumentsPage() {
                   className="h-4 w-4 accent-primary"
                 />
               </th>
-              <th className="px-4 py-3 font-medium text-text-muted">Name</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Type</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Status</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Chunks</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Size</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Tags</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Uploaded By</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Date</th>
-              <th className="px-4 py-3 w-10" />
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Type</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Chunks</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Size</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Tags</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Uploaded By</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Date</th>
+              <th className="px-4 py-2.5 w-10" />
             </tr>
           </thead>
           <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
@@ -354,7 +354,11 @@ export default function AdminDocumentsPage() {
                   key={doc.id}
                   variants={staggerItem}
                   onClick={() => navigate(`/admin/documents/${doc.id}`)}
-                  className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50 cursor-pointer"
+                  className={`border-b border-border-light last:border-b-0 cursor-pointer transition-colors ${
+                    selected.has(doc.id)
+                      ? 'bg-primary/8 shadow-[inset_3px_0_0_var(--color-primary)]'
+                      : 'hover:bg-card-2'
+                  }`}
                 >
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
@@ -455,7 +459,7 @@ export default function AdminDocumentsPage() {
                       type="button"
                       onClick={() => removeTag(tag)}
                       aria-label={`Remove tag ${tag}`}
-                      className="ml-1 rounded-full p-0.5 hover:bg-black/20"
+                      className="ml-1 rounded-full p-0.5 transition-colors hover:bg-primary/20"
                     >
                       <X size={10} />
                     </button>
@@ -484,7 +488,7 @@ export default function AdminDocumentsPage() {
       {/* Delete confirm modal */}
       <Modal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Documents">
         <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-xl border border-red/20 bg-red/10 p-4">
+          <div className="flex items-start gap-3 rounded-card border border-red/30 bg-red/10 p-4">
             <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red" />
             <div>
               <p className="text-sm font-medium text-red">Are you sure?</p>
@@ -493,10 +497,14 @@ export default function AdminDocumentsPage() {
               </p>
             </div>
           </div>
-          <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border bg-card-2/60 p-2">
+          <ul className="max-h-48 overflow-y-auto rounded-control border border-border bg-card-2">
             {selectedDocs.map((doc) => (
-              <li key={doc.id} className="truncate px-2 py-1 text-xs text-text">
-                {doc.original_filename}
+              <li
+                key={doc.id}
+                className="flex items-center gap-2 border-b border-border-light px-3 py-2 last:border-b-0 text-xs text-text"
+              >
+                <FileText size={13} aria-hidden="true" className="shrink-0 text-text-dim" />
+                <span className="truncate">{doc.original_filename}</span>
               </li>
             ))}
           </ul>

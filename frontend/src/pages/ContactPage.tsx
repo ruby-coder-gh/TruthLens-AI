@@ -1,5 +1,4 @@
 import { Mail, MessageSquare, Code2 } from 'lucide-react';
-import { Card } from '../components/ui';
 import LegalPageLayout from '../components/LegalPageLayout';
 
 export default function ContactPage() {
@@ -11,8 +10,11 @@ export default function ContactPage() {
       <p>Have questions, feedback, or need help? We&apos;d love to hear from you.</p>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Card className="border-white/[0.06] bg-white/[0.03] p-5">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+        {/* Plain divs, not Cards: these sit inside LegalPageLayout's glass
+            card, and a blurred surface inside a blurred surface breaks the
+            glass law. Opaque tile + hairline edge instead. */}
+        <div className="rounded-card border border-border bg-solid p-5">
+          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-chip border border-primary/26 bg-primary/11">
             <Mail size={18} className="text-primary-soft" />
           </div>
           <h3 className="mb-1 font-medium text-text">Email</h3>
@@ -21,11 +23,11 @@ export default function ContactPage() {
               hello@truthlens.ai
             </a>
           </p>
-        </Card>
+        </div>
 
-        <Card className="border-white/[0.06] bg-white/[0.03] p-5">
-          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10">
-            <Code2 size={18} className="text-accent" />
+        <div className="rounded-card border border-border bg-solid p-5">
+          <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-chip border border-primary/26 bg-primary/11">
+            <Code2 size={18} className="text-primary-soft" />
           </div>
           <h3 className="mb-1 font-medium text-text">GitHub</h3>
           <p className="text-xs text-text-dim">
@@ -38,7 +40,7 @@ export default function ContactPage() {
               @truthlens-ai
             </a>
           </p>
-        </Card>
+        </div>
       </div>
 
       <p className="pt-1 text-xs text-text-dim">We aim to respond within 24 hours during business days.</p>

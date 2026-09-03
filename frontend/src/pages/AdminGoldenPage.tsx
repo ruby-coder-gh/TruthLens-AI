@@ -172,17 +172,17 @@ export default function AdminGoldenPage() {
               : 'No promoted entries match this filter.'}
           />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-border glass">
+          <div className="overflow-x-auto rounded-card border border-border bg-solid shadow-e1">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-card-2/80">
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Question</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Category</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Difficulty</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Source workspace</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Created</th>
-                  <th scope="col" className="px-4 py-3 font-medium text-text-muted">Status</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium text-text-muted">Actions</th>
+                <tr className="border-b border-border bg-card-2">
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Question</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Category</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Difficulty</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Source workspace</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Created</th>
+                  <th scope="col" className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+                  <th scope="col" className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Actions</th>
                 </tr>
               </thead>
               <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
@@ -194,7 +194,7 @@ export default function AdminGoldenPage() {
                     <motion.tr
                       key={entry.id}
                       variants={staggerItem}
-                      className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
+                      className="border-b border-border-light transition-colors last:border-b-0 hover:bg-card-2"
                     >
                       <td className="max-w-xs px-4 py-3 text-text" title={entry.question}>
                         {truncate(entry.question, 90)}

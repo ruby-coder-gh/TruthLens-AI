@@ -78,7 +78,7 @@ export default function AdminInviteUserPage() {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ type: 'spring', stiffness: 200, damping: 12 }}
-                className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green/15 border border-green/25"
+                className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-green/30 bg-green/12"
               >
                 <CheckCircle size={40} className="text-green" />
               </motion.div>

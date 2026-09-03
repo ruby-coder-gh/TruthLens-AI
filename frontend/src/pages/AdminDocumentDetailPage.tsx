@@ -187,7 +187,7 @@ export default function AdminDocumentDetailPage() {
         <Card className="p-5 lg:p-6">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-start gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl glass text-primary-soft">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-card border border-primary/25 bg-primary/10 text-primary-soft">
                 <FileText size={24} />
               </div>
               <div>
@@ -266,8 +266,8 @@ export default function AdminDocumentDetailPage() {
               const isLastCompleted = isDone && (i === currentIdx || currentIdx === STATUS_ORDER.length - 1);
               return (
                 <div key={status} className="flex items-center gap-3">
-                  <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                    isDone ? 'bg-green/15 text-green' : 'bg-card-2 text-text-dim'
+                  <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                    isDone ? 'border-green/30 bg-green/12 text-green' : 'border-border bg-card-2 text-text-dim'
                   }`}>
                     {isDone ? <CheckCircle size={12} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
                   </div>
@@ -287,7 +287,7 @@ export default function AdminDocumentDetailPage() {
       <motion.div variants={fadeInUp}>
         <Card className="p-5 lg:p-6">
           <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
-            <FileText size={14} className="text-accent" />
+            <FileText size={14} className="text-primary-soft" />
             Chunks
           </h2>
           <p className="text-sm text-text-muted">
@@ -298,7 +298,7 @@ export default function AdminDocumentDetailPage() {
 
       <Modal open={deleteModalOpen} onClose={() => setDeleteModalOpen(false)} title="Delete Document">
         <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-xl bg-red/10 border border-red/20 p-4">
+          <div className="flex items-start gap-3 rounded-card border border-red/30 bg-red/10 p-4">
             <AlertTriangle size={20} className="text-red shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-red">Are you sure?</p>
