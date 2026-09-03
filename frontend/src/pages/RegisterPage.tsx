@@ -1,7 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, User, Eye, EyeOff, UserPlus, Sparkles, Check } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, UserPlus, Check, AlertCircle } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';
@@ -13,14 +13,6 @@ const PASSWORD_REQUIREMENTS = [
   { label: 'At least 8 characters', test: (v: string) => v.length >= 8 },
   { label: 'One uppercase letter', test: (v: string) => /[A-Z]/.test(v) },
   { label: 'One digit', test: (v: string) => /\d/.test(v) },
-];
-
-const floatingParticles = [
-  { icon: <Sparkles size={14} />, x: '15%', y: '25%', delay: 0, duration: 4 },
-  { icon: <Logo size={14} />, x: '80%', y: '20%', delay: 1.5, duration: 5 },
-  { icon: <Sparkles size={12} />, x: '70%', y: '70%', delay: 0.8, duration: 3.5 },
-  { icon: <Logo size={12} />, x: '25%', y: '75%', delay: 2.2, duration: 4.5 },
-  { icon: <Sparkles size={10} />, x: '50%', y: '10%', delay: 1, duration: 4.2 },
 ];
 
 export default function RegisterPage() {
@@ -73,43 +65,14 @@ export default function RegisterPage() {
 
   return (
     <motion.div
-      className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12"
+      className="relative flex min-h-screen items-center justify-center px-4 py-12"
       initial={{ opacity: 0.99, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -12, transition: { duration: 0.2 } }}
     >
-      {/* Slow pan animated gradient background */}
-      <motion.div
-        className="absolute inset-0 opacity-30"
-        style={{
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
-          backgroundSize: '400% 400%',
-        }}
-        animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-        aria-hidden="true"
-      />
-
-      {/* Ambient blobs */}
-      <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
-
-      {/* Floating particles */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        {floatingParticles.map((p, i) => (
-          <motion.div
-            key={i}
-            className="absolute text-primary-soft/20"
-            style={{ left: p.x, top: p.y }}
-            animate={{ y: [0, -20, 0], opacity: [0.2, 0.5, 0.2] }}
-            transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: 'easeInOut' }}
-          >
-            {p.icon}
-          </motion.div>
-        ))}
-      </div>
-
+      {/* No decorative background layer: the ruled ground from <body> is the
+          whole surface. See LoginPage — an auth screen earns trust by
+          restraint, not by atmosphere. */}
       <div className="relative z-10 w-full max-w-md">
         {/* Brand */}
         <motion.div
@@ -124,18 +87,13 @@ export default function RegisterPage() {
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
           >
-            <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary-soft to-accent shadow-2xl shadow-primary/30">
+            <div className="flex h-16 w-16 items-center justify-center rounded-panel bg-primary shadow-e1">
               <Logo size={36} animated={false} />
-              <motion.div
-                className="absolute -inset-1 rounded-2xl border border-white/10"
-                animate={{ opacity: [0.3, 0.6, 0.3] }}
-                transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-              />
             </div>
           </motion.div>
 
-          <motion.h1 className="text-3xl font-bold" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
-            <span className="gradient-text">Create account</span>
+          <motion.h1 className="text-3xl font-semibold tracking-tight text-text" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
+            Create account
           </motion.h1>
 
           <motion.p className="mt-2 text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.35, duration: 0.5 }}>
@@ -149,14 +107,8 @@ export default function RegisterPage() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
-          <Card className="relative overflow-hidden p-6 lg:p-8">
-            <div
-              className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30"
-              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15), transparent)' }}
-              aria-hidden="true"
-            />
-
-            <form onSubmit={handleSubmit} noValidate className="relative space-y-5">
+          <Card className="p-6 shadow-e3 lg:p-8">
+            <form onSubmit={handleSubmit} noValidate className="space-y-5">
               {/* API Error */}
               <AnimatePresence>
                 {apiError && (
@@ -165,11 +117,11 @@ export default function RegisterPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -12, scale: 0.95 }}
                     transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-                    className="rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red backdrop-blur-sm"
+                    className="rounded-control border border-red/28 bg-red/10 px-4 py-3 text-sm text-red"
                     role="alert"
                   >
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red/20 text-[10px] font-bold">!</span>
+                    <span className="flex items-start gap-2">
+                      <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
                       {apiError}
                     </span>
                   </motion.div>
@@ -243,9 +195,9 @@ export default function RegisterPage() {
                             className="flex items-center gap-2 text-xs"
                           >
                             <motion.span
-                              animate={{ scale: req.met ? [1, 1.3, 1] : 1, backgroundColor: req.met ? 'rgba(52,211,153,0.2)' : 'transparent' }}
+                              animate={{ scale: req.met ? [1, 1.3, 1] : 1 }}
                               transition={{ duration: 0.3 }}
-                              className={'flex h-4 w-4 items-center justify-center rounded-full ' + (req.met ? 'bg-green/20 text-green' : 'text-text-dim')}
+                              className={'flex h-4 w-4 items-center justify-center rounded-full ' + (req.met ? 'bg-green/15 text-green' : 'text-text-dim')}
                             >
                               {req.met ? (
                                 <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400, damping: 15 }}>
@@ -315,14 +267,6 @@ export default function RegisterPage() {
             </motion.span>
           </Link>
         </motion.p>
-
-        <motion.div
-          className="mx-auto mt-8 h-px max-w-[200px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-          initial={{ scaleX: 0.01, opacity: 0.99 }}
-          animate={{ scaleX: 1, opacity: 1 }}
-          transition={{ delay: 0.75, duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
-          aria-hidden="true"
-        />
       </div>
     </motion.div>
   );

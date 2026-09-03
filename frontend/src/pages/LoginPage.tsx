@@ -1,7 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, Eye, EyeOff, LogIn, Sparkles } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
 import { Card } from '../components/ui';
@@ -9,13 +9,6 @@ import { useAuth } from '../context/auth-context';
 import Logo from '../components/Logo';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const floatingParticles = [
-  { icon: <Sparkles size={14} />, x: '15%', y: '20%', delay: 0, duration: 4 },
-  { icon: <Logo size={14} />, x: '85%', y: '15%', delay: 1.5, duration: 5 },
-  { icon: <Sparkles size={12} />, x: '75%', y: '75%', delay: 0.8, duration: 3.5 },
-  { icon: <Logo size={12} />, x: '20%', y: '80%', delay: 2.2, duration: 4.5 },
-];
 
 export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -60,41 +53,12 @@ export default function LoginPage() {
   }
 
   return (
-    <motion.div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
-      {/* Slow pan animated gradient background */}
-      <motion.div
-        className="absolute inset-0 opacity-30"
-        style={{
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
-          backgroundSize: '400% 400%',
-        }}
-        animate={{
-          backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-        }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-        aria-hidden="true"
-      />
-
-      {/* Ambient blobs */}
-      <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
-
-      {/* Floating particles */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        {floatingParticles.map((p, i) => (
-          <motion.div
-            key={i}
-            className="absolute text-primary-soft/20"
-            style={{ left: p.x, top: p.y }}
-            animate={{ y: [0, -20, 0], opacity: [0.2, 0.5, 0.2] }}
-            transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: 'easeInOut' }}
-          >
-            {p.icon}
-          </motion.div>
-        ))}
-      </div>
-
+    // The auth surface is deliberately bare: the ruled ground from <body> is
+    // the whole background. The pan-gradient wash, the ambient blobs and the
+    // drifting Sparkles/Logo particles were Midnight-era chrome — on a
+    // sign-in screen anything decorative reads as an attempt to look
+    // legitimate, which is the opposite of what this page needs to convey.
+    <motion.div className="relative flex min-h-screen items-center justify-center px-4 py-12">
       <div className="relative z-10 w-full max-w-md">
         {/* Brand */}
         <motion.div
@@ -109,23 +73,18 @@ export default function LoginPage() {
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
           >
-            <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary-soft to-accent shadow-2xl shadow-primary/30">
+            <div className="flex h-16 w-16 items-center justify-center rounded-panel bg-primary shadow-e1">
               <Logo size={36} animated={false} />
-              <motion.div
-                className="absolute -inset-1 rounded-2xl border border-white/10"
-                animate={{ opacity: [0.3, 0.6, 0.3] }}
-                transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-              />
             </div>
           </motion.div>
 
           <motion.h1
-            className="text-3xl font-bold"
+            className="text-3xl font-semibold tracking-tight text-text"
             initial={{ opacity: 0.99, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25, duration: 0.5 }}
           >
-            <span className="gradient-text">Welcome back</span>
+            Welcome back
           </motion.h1>
 
           <motion.p
@@ -144,14 +103,8 @@ export default function LoginPage() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] as const }}
         >
-          <Card className="relative overflow-hidden p-6 lg:p-8">
-            <div
-              className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30"
-              style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15), transparent)' }}
-              aria-hidden="true"
-            />
-
-            <form onSubmit={handleSubmit} noValidate className="relative space-y-5">
+          <Card className="p-6 shadow-e3 lg:p-8">
+            <form onSubmit={handleSubmit} noValidate className="space-y-5">
               {/* API Error */}
               <AnimatePresence>
                 {apiError && (
@@ -160,11 +113,11 @@ export default function LoginPage() {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -12, scale: 0.95 }}
                     transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-                    className="rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red backdrop-blur-sm"
+                    className="rounded-control border border-red/28 bg-red/10 px-4 py-3 text-sm text-red"
                     role="alert"
                   >
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red/20 text-[10px] font-bold">!</span>
+                    <span className="flex items-start gap-2">
+                      <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
                       {apiError}
                     </span>
                   </motion.div>
@@ -204,7 +157,7 @@ export default function LoginPage() {
                 >
                   <div className="flex items-center justify-between">
                     <label htmlFor="password" className="block text-sm font-medium text-text-muted">Password</label>
-                    <Link to="/forgot-password" className="text-xs text-primary-soft/70 hover:text-primary-soft transition-colors">Forgot password?</Link>
+                    <Link to="/forgot-password" className="text-xs text-primary-soft transition-colors hover:text-primary">Forgot password?</Link>
                   </div>
                   <div className="relative">
                     <AnimatedInput
@@ -223,9 +176,11 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => setShowPassword((p) => !p)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 text-text-dim hover:text-text transition-colors rounded-lg hover:bg-white/[0.06] z-10"
+                      // Anchored to the field row, not the wrapper: the wrapper
+                      // grows by the error line, which used to drag a
+                      // vertically-centred toggle off the input.
+                      className="absolute right-2.5 top-[5px] z-10 flex h-8 w-8 items-center justify-center rounded-chip text-text-dim transition-colors hover:bg-card-2 hover:text-text"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      tabIndex={-1}
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -243,7 +198,7 @@ export default function LoginPage() {
                   type="submit"
                   loading={loading}
                   className="w-full"
-                  size="md"
+                  size="lg"
                   icon={<LogIn size={18} />}
                 >
                   Sign in
@@ -267,15 +222,6 @@ export default function LoginPage() {
             </motion.span>
           </Link>
         </motion.p>
-
-        {/* Bottom decorative gradient line */}
-        <motion.div
-          className="mx-auto mt-8 h-px max-w-[200px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-          initial={{ scaleX: 0.01, opacity: 0.99 }}
-          animate={{ scaleX: 1, opacity: 1 }}
-          transition={{ delay: 0.7, duration: 0.8, ease: [0.16, 1, 0.3, 1] as const }}
-          aria-hidden="true"
-        />
       </div>
     </motion.div>
   );

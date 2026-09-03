@@ -61,7 +61,7 @@ export default function ApiCatalogPage() {
                   initial={{ x: 280 }}
                   animate={{ x: 0 }}
                   exit={{ x: 280 }}
-                  className="absolute right-0 top-0 bottom-0 w-72 bg-[#0b0f17]/95 backdrop-blur-2xl border-l border-white/[0.06] p-4 overflow-y-auto"
+                  className="absolute right-0 top-0 bottom-0 w-72 overflow-y-auto border-l border-border bg-solid/95 p-4 backdrop-blur-2xl"
                 >
                   <RightPanel />
                 </motion.div>

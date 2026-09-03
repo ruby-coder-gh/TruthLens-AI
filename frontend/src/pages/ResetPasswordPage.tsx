@@ -51,29 +51,19 @@ export default function ResetPasswordPage() {
   if (!token && !success) {
     return (
       <motion.div
-        className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12"
+        className="relative flex min-h-screen items-center justify-center px-4 py-12"
         initial={{ opacity: 0.99, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
-        <motion.div
-          className="absolute inset-0 opacity-30"
-          style={{
-            background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
-            backgroundSize: '400% 400%',
-          }}
-          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-          transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-          aria-hidden="true"
-        />
-        <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
-        <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
-        <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
+        {/* No decorative background layer: the ruled ground from <body> is the
+            whole surface. See LoginPage — an auth screen earns trust by
+            restraint, not by atmosphere. */}
         <div className="relative z-10 w-full max-w-md text-center">
-          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl glass border border-red/20">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-panel border border-red/25 bg-red/8">
             <RefreshCw size={36} className="text-red" />
           </div>
-          <h2 className="text-2xl font-bold text-text">Invalid or missing token</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-text">Invalid or missing token</h2>
           <p className="mt-2 text-sm text-text-muted">This password reset link is invalid or has expired.</p>
           <Link to="/forgot-password" className="mt-6 inline-block">
             <PremiumButton variant="secondary">Request new reset link</PremiumButton>
@@ -85,27 +75,14 @@ export default function ResetPasswordPage() {
 
   return (
     <motion.div
-      className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12"
+      className="relative flex min-h-screen items-center justify-center px-4 py-12"
       initial={{ opacity: 0.99, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
-      {/* Slow pan animated gradient background */}
-      <motion.div
-        className="absolute inset-0 opacity-30"
-        style={{
-          background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(52,211,153,0.08), rgba(99,102,241,0.12), rgba(99,102,241,0.15))',
-          backgroundSize: '400% 400%',
-        }}
-        animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-        aria-hidden="true"
-      />
-
-      <div className="ambient-blob ambient-blob-1" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-2" aria-hidden="true" />
-      <div className="ambient-blob ambient-blob-3" aria-hidden="true" />
-
+      {/* No decorative background layer: the ruled ground from <body> is the
+          whole surface. See LoginPage — an auth screen earns trust by
+          restraint, not by atmosphere. */}
       <div className="relative z-10 w-full max-w-md">
         <motion.div
           className="mb-8 text-center"
@@ -119,13 +96,13 @@ export default function ResetPasswordPage() {
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
           >
-            <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary-soft to-accent shadow-2xl shadow-primary/30">
-              <Lock size={28} className="text-white" />
+            <div className="flex h-16 w-16 items-center justify-center rounded-panel bg-primary shadow-e1">
+              <Lock size={28} className="text-on-primary" />
             </div>
           </motion.div>
 
-          <motion.h1 className="text-3xl font-bold" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
-            <span className="gradient-text">Set new password</span>
+          <motion.h1 className="text-3xl font-semibold tracking-tight text-text" initial={{ opacity: 0.99, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.5 }}>
+            Set new password
           </motion.h1>
 
           <motion.p className="mt-2 text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.35, duration: 0.5 }}>
@@ -138,15 +115,13 @@ export default function ResetPasswordPage() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: 0.15, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
         >
-          <Card className="relative overflow-hidden p-6 lg:p-8">
-            <div className="pointer-events-none absolute -inset-x-20 -top-40 h-80 w-[calc(100%+160px)] opacity-30" style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15), transparent)' }} aria-hidden="true" />
-
+          <Card className="p-6 shadow-e3 lg:p-8">
             {success ? (
               <motion.div
                 initial={{ opacity: 0.99, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                className="relative space-y-5 text-center"
+                className="space-y-5 text-center"
               >
                 <motion.div
                   initial={{ scale: 0 }}
@@ -160,7 +135,7 @@ export default function ResetPasswordPage() {
                 <p className="text-sm text-text-muted">You will be redirected to login shortly.</p>
               </motion.div>
             ) : (
-              <form onSubmit={handleSubmit} noValidate className="relative space-y-5">
+              <form onSubmit={handleSubmit} noValidate className="space-y-5">
                 <AnimatePresence>
                   {apiError && (
                     <motion.div
@@ -168,7 +143,7 @@ export default function ResetPasswordPage() {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -12, scale: 0.95 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      className="rounded-xl border border-red/30 bg-red/10 px-4 py-3 text-sm text-red backdrop-blur-sm"
+                      className="rounded-control border border-red/28 bg-red/10 px-4 py-3 text-sm text-red"
                       role="alert"
                     >
                       {apiError}
@@ -188,7 +163,7 @@ export default function ResetPasswordPage() {
                   >
                     <div className="flex items-center justify-between">
                       <label htmlFor="new-password" className="block text-sm font-medium text-text-muted">New password</label>
-                      <button type="button" onClick={() => setShowPassword((p) => !p)} className="text-xs text-primary-soft/70 hover:text-primary-soft transition-colors" tabIndex={-1}>
+                      <button type="button" onClick={() => setShowPassword((p) => !p)} className="text-xs text-primary-soft transition-colors hover:text-primary">
                         {showPassword ? 'Hide' : 'Show'}
                       </button>
                     </div>
@@ -242,13 +217,6 @@ export default function ResetPasswordPage() {
           </Link>
         </motion.p>
 
-        <motion.div
-          className="mx-auto mt-8 h-px max-w-[200px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-          initial={{ scaleX: 0.01, opacity: 0.99 }}
-          animate={{ scaleX: 1, opacity: 1 }}
-          transition={{ delay: 0.7, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          aria-hidden="true"
-        />
       </div>
     </motion.div>
   );

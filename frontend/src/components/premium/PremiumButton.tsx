@@ -12,59 +12,39 @@ interface PremiumButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
 }
 
+/**
+ * Press feedback. `bg-current` picks up each variant's own ink, so the ripple
+ * reads on the accent fill, on glass and on the danger tint without a literal.
+ */
 function RippleEffect({ x, y }: { x: number; y: number }) {
   return (
     <motion.span
-      className="absolute rounded-full bg-white/30 pointer-events-none"
+      className="pointer-events-none absolute rounded-full bg-current"
       style={{ left: x, top: y, width: 20, height: 20, marginLeft: -10, marginTop: -10 }}
-      initial={{ scale: 0, opacity: 0.8 }}
+      initial={{ scale: 0, opacity: 0.28 }}
       animate={{ scale: 6, opacity: 0 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
+      transition={{ duration: 0.5, ease: 'easeOut' }}
     />
   );
 }
 
-function BorderBeam() {
-  return (
-    <motion.span
-      className="absolute inset-0 rounded-xl pointer-events-none overflow-hidden"
-      aria-hidden="true"
-    >
-      <motion.span
-        className="absolute inset-0 rounded-xl"
-        style={{
-          background: 'conic-gradient(from 0deg, transparent, rgba(99,102,241,0.55), rgba(52,211,153,0.5), rgba(248,113,113,0.4), transparent)',
-        }}
-        animate={{ rotate: 360 }}
-        transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
-      />
-      <span className="absolute inset-[1px] rounded-[11px] bg-primary" />
-    </motion.span>
-  );
-}
-
-function ParticleSpark() {
-  return (
-    <span className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <motion.span
-          key={i}
-          className="absolute w-1 h-1 rounded-full bg-primary-soft"
-          style={{ left: `${20 + i * 25}%`, top: '50%' }}
-          initial={{ y: 0, opacity: 0 }}
-          animate={{
-            y: [0, -24 - i * 6],
-            opacity: [0, 0.8, 0],
-            scale: [0, 1, 0],
-          }}
-          transition={{ duration: 0.8, delay: i * 0.1, ease: 'easeOut' }}
-        />
-      ))}
-    </span>
-  );
-}
-
+/**
+ * The primary action.
+ *
+ * Midnight dressed this in four simultaneous decorative systems: a frozen
+ * `#a5b4fc → #6366f1 → #4f46e5` fill, a 4s infinite background-position pan,
+ * a 3s infinite rotating conic "border beam" that cycled indigo → green → red
+ * around the edge, and a two-hue bloom on hover. All four are gone.
+ *
+ * They were built to make a button glow out of a near-black page. Against a
+ * light frosted ground they do the opposite — a rainbow ring on the one
+ * control that has to look trustworthy reads as a novelty, and the sign-in
+ * screen ran two of those loops forever. Grounded Glass states the primary
+ * action the way the board does: a flat accent fill, `on-primary` ink, e2 to
+ * lift it off the panel, and a colour step on hover. The ripple stays because
+ * it is press *feedback*, not decoration.
+ */
 export default function PremiumButton({
   children,
   loading = false,
@@ -78,7 +58,6 @@ export default function PremiumButton({
   type = 'submit',
 }: PremiumButtonProps) {
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
-  const [showSpark, setShowSpark] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const rippleId = useRef(0);
 
@@ -94,83 +73,52 @@ export default function PremiumButton({
       }, 600);
     }
     if (!loading && !success && onClick) {
-      setShowSpark(true);
-      setTimeout(() => setShowSpark(false), 800);
       onClick(e);
     }
   };
 
+  // Heights track the design system's control ramp (28 / 36 / 44).
   const sizeStyles = {
-    sm: 'px-5 py-2.5 text-xs gap-1.5',
-    md: 'px-6 py-3 text-sm gap-2',
-    lg: 'px-8 py-4 text-base gap-2',
+    sm: 'h-8 px-4 text-xs gap-1.5',
+    md: 'h-9 px-5 text-sm gap-2',
+    lg: 'h-11 px-6 text-[15px] gap-2',
   };
 
   const isDisabled = disabled || loading || success;
 
   return (
-      <motion.button
-        ref={btnRef}
-        type={type}
-        disabled={isDisabled}
-        onClick={handleClick}
-      whileHover={isDisabled ? {} : { scale: 1.02, y: -2 }}
-      whileTap={isDisabled ? {} : { scale: 0.98 }}
+    <motion.button
+      ref={btnRef}
+      type={type}
+      disabled={isDisabled}
+      onClick={handleClick}
+      whileHover={isDisabled ? {} : { y: -1 }}
+      whileTap={isDisabled ? {} : { scale: 0.985 }}
+      transition={{ duration: 0.15, ease: 'easeOut' }}
       className={clsx(
-        'relative overflow-hidden rounded-xl font-semibold transition-all duration-300 inline-flex items-center justify-center',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+        'relative inline-flex items-center justify-center overflow-hidden rounded-control font-semibold',
+        'transition-colors duration-200',
+        // The global :focus-visible rule in index.css resolves its outline to
+        // the element's own currentColor on buttons, which on this one means a
+        // white ring on the accent fill (and a near-black ring in dark) —
+        // invisible either way. A ring utility paints box-shadow instead, so it
+        // is not in that rule's way, and the offset is the page ground so the
+        // ring reads on any surface the button is dropped onto.
+        'focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
         'disabled:cursor-not-allowed disabled:opacity-50',
         sizeStyles[size],
-        variant === 'primary' && [
-          // BorderBeam insets an accent-filled panel over the gradient, so the
-          // visible surface is the accent — use the on-accent ink, which flips
-          // with the theme (white on light's indigo, near-black on dark's).
-          'text-on-primary',
-          !loading && !success && 'shadow-lg',
-        ],
-        variant === 'secondary' && 'glass text-text hover:bg-card-hover',
-        variant === 'danger' && 'bg-red/15 text-red border border-red/30 hover:bg-red/25',
+        variant === 'primary' && 'bg-primary text-on-primary shadow-e2 hover:bg-primary-dark',
+        variant === 'secondary' && 'glass text-text hover:bg-glass-hover',
+        variant === 'danger' && 'border border-red/30 bg-red/12 text-red hover:bg-red/20',
         className,
       )}
-      style={
-        variant === 'primary' && !loading && !success
-          ? {
-              background: 'linear-gradient(135deg, #a5b4fc, #6366f1, #4f46e5)',
-              backgroundSize: '200% 200%',
-              boxShadow: '0 4px 24px rgba(99,102,241,0.3)',
-            }
-          : variant === 'primary' && loading
-          ? { background: 'linear-gradient(135deg, #a5b4fc, #6366f1)' }
-          : {}
-      }
     >
-      {/* Animated gradient for primary */}
-      {variant === 'primary' && !loading && !success && (
-        <motion.span
-          className="absolute inset-0 rounded-xl"
-          style={{
-            background: 'linear-gradient(135deg, #a5b4fc, #6366f1, #4f46e5, #a5b4fc)',
-            backgroundSize: '300% 300%',
-          }}
-          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-          transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-        />
-      )}
-
-      {/* Border beam for primary */}
-      {variant === 'primary' && !loading && !success && <BorderBeam />}
-
-      {/* Particle spark on click */}
-      {showSpark && !loading && !success && <ParticleSpark />}
-
-      {/* Ripple effects */}
       <AnimatePresence>
         {ripples.map((r) => (
           <RippleEffect key={r.id} x={r.x} y={r.y} />
         ))}
       </AnimatePresence>
 
-      {/* Content */}
       <span className="relative z-10 flex items-center gap-2">
         {loading ? (
           <motion.span
@@ -181,8 +129,8 @@ export default function PremiumButton({
           </motion.span>
         ) : success ? (
           <motion.span
-            initial={{ scale: 0, rotate: -90 }}
-            animate={{ scale: 1, rotate: 0 }}
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
             transition={{ type: 'spring', damping: 15, stiffness: 200 }}
           >
             <Check size={size === 'sm' ? 14 : 16} />
@@ -190,25 +138,8 @@ export default function PremiumButton({
         ) : icon ? (
           icon
         ) : null}
-        <motion.span
-          animate={success ? { scale: [1, 1.1, 1] } : {}}
-          transition={{ duration: 0.3 }}
-        >
-          {success ? 'Saved!' : children}
-        </motion.span>
+        <span>{success ? 'Saved!' : children}</span>
       </span>
-
-      {/* Glow shadow overlay */}
-      {variant === 'primary' && !loading && !success && (
-        <motion.span
-          className="absolute inset-0 rounded-xl opacity-0"
-          style={{
-            boxShadow: '0 0 30px rgba(99,102,241,0.4), 0 0 60px rgba(52,211,153,0.2)',
-          }}
-          whileHover={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-        />
-      )}
     </motion.button>
   );
 }
