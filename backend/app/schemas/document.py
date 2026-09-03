@@ -5,12 +5,35 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, Field, computed_field, field_serializer, model_validator
 
 from app.schemas._datetime import utc_iso
 
 
-class DocumentResponse(BaseModel):
+class _SearchabilityMixin(BaseModel):
+    """Whether a document actually contributes anything to retrieval.
+
+    `status` describes how *processing* ended, not whether the result is
+    usable: when every chunk of an upload trips the injection scan the
+    document ends `status="ready"` with `chunk_count=0`, which reads as a
+    healthy green badge while the document is invisible to search (BUG-9).
+
+    Derived on the way out rather than stored, so it can never drift from the
+    counts it is computed from: releasing a quarantined chunk raises
+    `chunk_count` and the document becomes searchable again with no state to
+    migrate, and rows written before this field existed report correctly too.
+    """
+
+    chunk_count: int = 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_searchable(self) -> bool:
+        """True when at least one chunk of this document is in the index."""
+        return self.chunk_count > 0
+
+
+class DocumentResponse(_SearchabilityMixin):
     id: str
     workspace_id: str
     filename: str
@@ -41,7 +64,7 @@ class ChunkInfo(BaseModel):
     _serialize_created_at = field_serializer("created_at")(utc_iso)
 
 
-class DocumentDetailResponse(BaseModel):
+class DocumentDetailResponse(_SearchabilityMixin):
     id: str
     workspace_id: str
     original_filename: str
@@ -59,10 +82,13 @@ class DocumentDetailResponse(BaseModel):
     _serialize_updated_at = field_serializer("updated_at")(utc_iso)
 
 
-class DocumentStatusResponse(BaseModel):
+class DocumentStatusResponse(_SearchabilityMixin):
     id: str
     status: str
     chunk_count: int = 0
+    # The poll response is where a just-finished upload is judged, so it also
+    # has to say why a "ready" document is unsearchable.
+    quarantined_chunk_count: int = 0
     error_message: str | None = None
 
 

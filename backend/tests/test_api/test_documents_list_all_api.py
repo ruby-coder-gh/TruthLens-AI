@@ -260,3 +260,46 @@ async def test_list_all_documents_search_treats_wildcards_literally(
     ids = [d["id"] for d in resp.json()["data"]]
     assert underscore.id in ids
     assert underscore_decoy.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_all_documents_flags_the_fully_quarantined_document(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """BUG-9: the admin list must distinguish an unsearchable "ready" document."""
+    ws = Workspace(name="Quarantine list-all WS", owner_id=test_user.id)
+    test_db.add(ws)
+    await test_db.commit()
+    await test_db.refresh(ws)
+
+    poisoned = Document(
+        workspace_id=ws.id,
+        filename=f"{uuid.uuid4().hex}.txt",
+        original_filename="doc-injection.txt",
+        mime_type="text/plain",
+        file_size=1,
+        status="ready",
+        chunk_count=0,
+        quarantined_chunk_count=1,
+        error_message="All 1 chunks quarantined for review",
+    )
+    healthy = Document(
+        workspace_id=ws.id,
+        filename=f"{uuid.uuid4().hex}.txt",
+        original_filename="clean.txt",
+        mime_type="text/plain",
+        file_size=1,
+        status="ready",
+        chunk_count=3,
+    )
+    test_db.add_all([poisoned, healthy])
+    await test_db.commit()
+    await test_db.refresh(poisoned)
+    await test_db.refresh(healthy)
+
+    resp = await client.get("/api/documents", headers=admin_headers)
+    assert resp.status_code == 200
+    by_id = {d["id"]: d for d in resp.json()["data"]}
+    assert by_id[poisoned.id]["status"] == "ready"
+    assert by_id[poisoned.id]["is_searchable"] is False
+    assert by_id[healthy.id]["is_searchable"] is True

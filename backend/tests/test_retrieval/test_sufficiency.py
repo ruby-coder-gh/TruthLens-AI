@@ -266,6 +266,8 @@ class TestMaybeAbstain:
             "latency_ms": 42,
             "token_count": 0,
             "edge_case": "insufficient_evidence",
+            # Persisted so a cache hit can replay the evidence-count line.
+            "sufficiency": abstention.verdict.as_payload(),
         }
 
 
