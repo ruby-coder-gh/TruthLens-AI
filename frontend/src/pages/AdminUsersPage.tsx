@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Search, UserPlus, User, Ban, ChevronRight, Clock } from 'lucide-react';
+import { Users, Search, UserPlus, User, Ban, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { Button, Badge, Input, EmptyState } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
@@ -133,17 +133,17 @@ export default function AdminUsersPage() {
       {/* Table */}
       <motion.div
         variants={staggerItem}
-        className="overflow-x-auto rounded-xl border border-border glass"
+        className="overflow-x-auto rounded-card border border-border bg-solid shadow-e1"
       >
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-border bg-card-2/80">
-              <th className="px-4 py-3 font-medium text-text-muted">User</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Email</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Role</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Status</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Last Login</th>
-              <th className="px-4 py-3 font-medium text-text-muted">Actions</th>
+            <tr className="border-b border-border bg-card-2">
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">User</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Email</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Role</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Last Login</th>
+              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Actions</th>
               <th className="w-10" />
             </tr>
           </thead>
@@ -163,12 +163,12 @@ export default function AdminUsersPage() {
                 <motion.tr
                   key={user.id}
                   variants={staggerItem}
-                  className="border-b border-border last:border-b-0 transition-colors hover:bg-white/[0.03] cursor-pointer"
+                  className="cursor-pointer border-b border-border-light transition-colors last:border-b-0 hover:bg-card-2"
                   onClick={() => navigate(`/admin/users/${user.id}`)}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full glass text-text-muted">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card-2 text-text-muted">
                         <User size={14} />
                       </div>
                       <span className="text-text font-medium">{user.username}</span>
@@ -176,20 +176,28 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3 text-text-muted text-xs">{user.email}</td>
                   <td className="px-4 py-3">
-                    <select
-                      value={user.role}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => roleMutation.mutate({ userId: user.id, role: e.target.value })}
-                      className={`rounded-lg border px-2 py-1 text-xs font-medium transition-all ${
-                        user.role === 'admin'
-                          ? 'bg-primary/15 text-primary-soft border-primary/20'
-                          : 'bg-card-2 text-text-muted border-border'
-                      } focus:outline-none focus:ring-2 focus:ring-primary/20`}
-                      aria-label="Change user role"
-                    >
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    {/* appearance-none so the themed surface paints: a native
+                        select widget ignores it and stays light in dark mode. */}
+                    <div className="relative inline-flex" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={user.role}
+                        onChange={(e) => roleMutation.mutate({ userId: user.id, role: e.target.value })}
+                        className={`appearance-none rounded-chip border py-1 pl-2 pr-7 text-xs font-medium transition-colors ${
+                          user.role === 'admin'
+                            ? 'border-primary/30 bg-primary/12 text-primary-soft'
+                            : 'border-border bg-solid text-text-muted'
+                        } focus:outline-none focus:ring-2 focus:ring-primary/30`}
+                        aria-label="Change user role"
+                      >
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      <ChevronDown
+                        size={12}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-dim"
+                      />
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <Badge color={user.is_active ? 'green' : 'red'}>
@@ -207,10 +215,10 @@ export default function AdminUsersPage() {
                       <button
                         type="button"
                         onClick={() => statusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
-                        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-all ${
+                        className={`flex items-center gap-1 rounded-chip px-2 py-1 text-xs font-medium transition-colors ${
                           user.is_active
-                            ? 'text-orange hover:bg-orange/10'
-                            : 'text-green hover:bg-green/10'
+                            ? 'text-orange hover:bg-orange/12'
+                            : 'text-green hover:bg-green/12'
                         }`}
                         aria-label={user.is_active ? 'Deactivate user' : 'Activate user'}
                       >
@@ -223,7 +231,7 @@ export default function AdminUsersPage() {
                     <motion.button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); navigate(`/admin/users/${user.id}`); }}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-white/[0.06] transition-all"
+                      className="flex h-7 w-7 items-center justify-center rounded-chip text-text-dim transition-colors hover:bg-card-2 hover:text-text"
                       aria-label="View user details"
                       whileHover={{ scale: 1.1, x: 2 }}
                       whileTap={{ scale: 0.9 }}

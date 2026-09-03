@@ -39,15 +39,15 @@ function IngestionTracker({ status }: { status: UploadFile['status'] }) {
     <div className="flex items-center gap-2 mt-2">
       {status === 'uploading' && (
         <>
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-2/20">
-            <Loader2 size={10} className="animate-spin text-accent-2" />
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15">
+            <Loader2 size={10} className="animate-spin text-primary-soft" />
           </span>
-          <span className="text-[10px] text-accent-2 font-medium">Uploading...</span>
+          <span className="text-[10px] text-primary-soft font-medium">Uploading...</span>
         </>
       )}
       {status === 'complete' && (
         <>
-          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green/15">
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green/12">
             <CheckCircle size={10} className="text-green" />
           </span>
           <span className="text-[10px] text-green font-medium">Complete</span>
@@ -83,10 +83,14 @@ function FileRow({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 8, height: 0 }}
       transition={{ duration: 0.2 }}
-      className="flex items-start gap-3 rounded-xl glass p-4"
+      className="flex items-start gap-3 rounded-card glass p-4 shadow-e1"
     >
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-        isComplete ? 'bg-green/15 text-green' : isError ? 'bg-red/15 text-red' : 'glass text-primary-soft'
+      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-control border ${
+        isComplete
+          ? 'border-green/30 bg-green/12 text-green'
+          : isError
+            ? 'border-red/30 bg-red/10 text-red'
+            : 'border-primary/25 bg-primary/10 text-primary-soft'
       }`}>
         {isComplete ? <CheckCircle size={18} /> : isError ? <AlertCircle size={18} /> : <FileText size={18} />}
       </div>
@@ -100,7 +104,7 @@ function FileRow({
             <button
               type="button"
               onClick={() => onRemove(item.id)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-text-dim hover:text-red hover:bg-red/10 transition-all shrink-0"
+              className="flex h-7 w-7 items-center justify-center rounded-chip text-text-dim transition-colors hover:bg-red/10 hover:text-red shrink-0"
               aria-label="Remove file"
             >
               <X size={14} />
@@ -267,7 +271,7 @@ export default function AdminUploadPage() {
         <button
           type="button"
           onClick={() => navigate('/admin/documents')}
-          className="flex h-8 w-8 items-center justify-center rounded-lg glass text-text-muted hover:text-text transition-all"
+          className="flex h-8 w-8 items-center justify-center rounded-control border border-border bg-card-hover text-text-muted transition-colors hover:bg-card-2 hover:text-text"
           aria-label="Back to documents"
         >
           <ArrowLeft size={16} />
@@ -306,7 +310,7 @@ export default function AdminUploadPage() {
       ) : (
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-text whitespace-nowrap">Workspace</span>
-          <span className="rounded-lg glass border border-border px-3 py-2 text-sm text-text-muted">
+          <span className="rounded-control border border-border bg-solid px-3 py-2 text-sm text-text-muted">
             {workspaces[0].name}
           </span>
         </div>
@@ -317,10 +321,10 @@ export default function AdminUploadPage() {
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative rounded-2xl border-2 border-dashed p-8 lg:p-12 text-center transition-all ${
+        className={`relative rounded-panel border-2 border-dashed p-8 lg:p-12 text-center transition-colors ${
           dragOver
-            ? 'border-primary/50 bg-primary/5'
-            : 'border-border hover:border-primary/30'
+            ? 'border-primary bg-primary/10'
+            : 'border-border bg-card-2 hover:border-primary/40'
         }`}
       >
         <input
@@ -332,7 +336,7 @@ export default function AdminUploadPage() {
           className="hidden"
         />
         <div className="flex flex-col items-center gap-3">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl glass text-primary-soft">
+          <div className="flex h-16 w-16 items-center justify-center rounded-card border border-primary/25 bg-primary/10 text-primary-soft">
             <Upload size={28} />
           </div>
           <div>

@@ -196,7 +196,7 @@ export default function AdminAuditLogPage() {
           <select
             value={actionFilter}
             onChange={(e) => handleActionFilterChange(e.target.value)}
-            className="w-40 appearance-none rounded-lg border border-border bg-bg-soft/80 backdrop-blur-sm px-3 py-2.5 pl-9 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="w-40 appearance-none rounded-control border border-border bg-solid px-3 py-2.5 pl-9 pr-8 text-sm text-text transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             aria-label="Filter by action type"
           >
             {ACTION_FILTERS.map((opt) => (
@@ -228,7 +228,7 @@ export default function AdminAuditLogPage() {
           <select
             value={resourceTypeFilter}
             onChange={(e) => handleResourceTypeFilterChange(e.target.value)}
-            className="w-44 appearance-none rounded-lg border border-border bg-bg-soft/80 backdrop-blur-sm px-3 py-2.5 pr-8 text-sm text-text transition-colors focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="w-44 appearance-none rounded-control border border-border bg-solid px-3 py-2.5 pr-8 text-sm text-text transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             aria-label="Filter by resource type"
           >
             {RESOURCE_TYPE_FILTERS.map((opt) => (
@@ -245,7 +245,7 @@ export default function AdminAuditLogPage() {
             value={dateFrom}
             max={dateTo || undefined}
             onChange={(e) => handleDateFromChange(e.target.value)}
-            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+            className="glass-input rounded-control px-2 py-2 text-xs text-text focus:outline-none"
           />
         </label>
         <label htmlFor="audit-log-date-to" className="flex items-center gap-1.5 text-xs text-text-muted">
@@ -256,7 +256,7 @@ export default function AdminAuditLogPage() {
             value={dateTo}
             min={dateFrom || undefined}
             onChange={(e) => handleDateToChange(e.target.value)}
-            className="glass-input rounded-lg px-2 py-2 text-xs text-text focus:outline-none"
+            className="glass-input rounded-control px-2 py-2 text-xs text-text focus:outline-none"
           />
         </label>
         <div className="ml-auto flex items-center gap-2">
@@ -302,16 +302,16 @@ export default function AdminAuditLogPage() {
         />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border border-border glass">
+          <div className="overflow-x-auto rounded-card border border-border bg-solid shadow-e1">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-card-2/80">
-                  <th className="px-4 py-3 w-10" />
-                  <th className="px-4 py-3 font-medium text-text-muted">Timestamp</th>
-                  <th className="px-4 py-3 font-medium text-text-muted">User</th>
-                  <th className="px-4 py-3 font-medium text-text-muted">Action</th>
-                  <th className="px-4 py-3 font-medium text-text-muted">Resource</th>
-                  <th className="px-4 py-3 font-medium text-text-muted">Details</th>
+                <tr className="border-b border-border bg-card-2">
+                  <th className="px-4 py-2.5 w-10" />
+                  <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Timestamp</th>
+                  <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">User</th>
+                  <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Action</th>
+                  <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Resource</th>
+                  <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Details</th>
                 </tr>
               </thead>
               <motion.tbody
@@ -330,7 +330,11 @@ export default function AdminAuditLogPage() {
                         initial="initial"
                         animate="animate"
                         exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }}
-                        className="border-b border-border last:border-b-0 transition-colors hover:bg-card-2/50"
+                        className={`border-b border-border-light transition-colors last:border-b-0 ${
+                          isExpanded
+                            ? 'bg-primary/8 shadow-[inset_3px_0_0_var(--color-primary)]'
+                            : 'hover:bg-card-2'
+                        }`}
                       >
                         <td className="px-4 py-3">
                           <button
@@ -385,7 +389,7 @@ export default function AdminAuditLogPage() {
                   initial={{ opacity: 0.99, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
-                  className="rounded-xl border border-primary/20 glass p-4"
+                  className="rounded-card border border-primary/30 bg-solid p-4 shadow-e1"
                 >
                   <div className="mb-2 flex items-center gap-2">
                     <Shield size={14} className="text-primary-soft" />
@@ -406,7 +410,7 @@ export default function AdminAuditLogPage() {
                     </div>
                   </dl>
                   {entry.details ? (
-                    <pre className="overflow-x-auto text-xs text-text leading-relaxed whitespace-pre-wrap font-mono">
+                    <pre className="overflow-x-auto rounded-control border border-border-light bg-card-2 p-3 font-mono text-xs leading-relaxed text-text-muted whitespace-pre-wrap">
                       {JSON.stringify(entry.details, null, 2)}
                     </pre>
                   ) : (
