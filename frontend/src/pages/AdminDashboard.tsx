@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Cell,
 } from 'recharts';
 import {
   Users,
@@ -42,6 +43,7 @@ import { adminApi } from '../api/client';
 import { useAuth } from '../context/auth-context';
 import type { AdminStats, AuditLogEntry } from '../api/types';
 import { getSafeLabel, getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
+import { toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -150,10 +152,18 @@ function normalizeTrustDistribution(resp: unknown): TrustScoreBucket[] {
   }));
 }
 
+/** Text-safe ink for an eval score — used on the percentage label. */
 function evalScoreColor(value: number): string {
   if (value >= 0.8) return 'var(--color-green)';
   if (value >= 0.6) return 'var(--color-orange)';
   return 'var(--color-red)';
+}
+
+/** Badge tone for the same score — feeds the meter fill via `toneColor()`. */
+function evalScoreTone(value: number): 'green' | 'orange' | 'red' {
+  if (value >= 0.8) return 'green';
+  if (value >= 0.6) return 'orange';
+  return 'red';
 }
 
 function actionBadgeColor(action: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
@@ -214,7 +224,10 @@ function AccessDenied() {
   );
 }
 
-/** Big metric card with gradient background */
+/** Big metric card. The tile is a glass surface with ink text: the old
+ *  gradient-filled version put `text-white` on a translucent accent, which
+ *  measured 3.1:1 on light and 1.3:1 over dark's amber. The accent now lives in
+ *  the icon tile — a small mark — while the label and value wear ink tokens. */
 function StatCard({
   icon,
   label,
@@ -225,6 +238,7 @@ function StatCard({
   icon: React.ReactNode;
   label: string;
   value: number;
+  /** Tint + edge classes for the icon tile. */
   gradient: string;
   trend?: { direction: 'up' | 'down'; percent: number };
 }) {
@@ -233,16 +247,14 @@ function StatCard({
   return (
     <motion.div
       variants={staggerItem}
-      className={`relative overflow-hidden rounded-xl border border-border/60 p-5 lg:p-6 ${gradient}`}
+      className="relative overflow-hidden rounded-card border border-border bg-card p-5 shadow-e1 backdrop-blur-xl lg:p-6"
     >
-      {/* Ambient glow */}
-      <div className="pointer-events-none absolute -inset-1 bg-white/[0.04] blur-2xl" />
-      <div className="relative z-10 flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-white/70">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-wider text-text-muted">
             {label}
           </p>
-          <p className="mt-1.5 text-3xl font-bold text-white tabular-nums">
+          <p className="mt-1.5 text-3xl font-bold text-text tabular-nums">
             {animated.toLocaleString()}
           </p>
           {trend && (
@@ -252,24 +264,17 @@ function StatCard({
               ) : (
                 <TrendingDown size={14} className="text-red" />
               )}
-              <span
-                className={
-                  trend.direction === 'up' ? 'text-green' : 'text-red'
-                }
-              >
+              <span className={trend.direction === 'up' ? 'text-green' : 'text-red'}>
                 {trend.percent}%
               </span>
-              <span className="text-white/50">vs last month</span>
+              <span className="text-text-dim">vs last month</span>
             </div>
           )}
         </div>
-        <div className="z-10 flex h-12 w-12 items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm">
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-control border ${gradient}`}>
           {icon}
         </div>
       </div>
-      {/* Decorative circles */}
-      <div className="pointer-events-none absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/5" />
-      <div className="pointer-events-none absolute -top-8 -left-8 h-16 w-16 rounded-full bg-white/[0.03]" />
     </motion.div>
   );
 }
@@ -368,6 +373,11 @@ function ChartsSection({
   onRetryQueries: () => void;
   onRetryTrust: () => void;
 }) {
+  // Recharts takes literal colour props — resolve the tokens at runtime so the
+  // plots follow the theme toggle instead of staying frozen at one palette.
+  const chart = useChartPalette();
+  const chartTooltip = useMemo(() => tooltipStyles(chart), [chart]);
+
   return (
     <motion.div
       className="grid gap-4 lg:grid-cols-2"
@@ -405,25 +415,24 @@ function ChartsSection({
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={queriesData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                  <XAxis dataKey="month" stroke="#6b7888" fontSize={12} />
-                  <YAxis stroke="#6b7888" fontSize={12} />
+                  <CartesianGrid stroke={chart.grid} vertical={false} />
+                  <XAxis dataKey="month" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />
+                  <YAxis stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(20,26,38,0.85)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(122,136,162,0.15)',
-                      borderRadius: '8px',
-                      color: '#e6eaf2',
-                    }}
+                    contentStyle={chartTooltip.contentStyle}
+                    labelStyle={chartTooltip.labelStyle}
+                    itemStyle={chartTooltip.itemStyle}
+                    cursor={{ stroke: chart.axis, strokeWidth: 1 }}
                   />
                   <Line
                     type="monotone"
                     dataKey="queries"
-                    stroke="#6366f1"
+                    stroke={chart.accent}
                     strokeWidth={2}
-                    dot={{ fill: '#6366f1', r: 4 }}
-                    activeDot={{ r: 6 }}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    dot={false}
+                    activeDot={{ r: 4, fill: chart.accent, stroke: chart.surface, strokeWidth: 2 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -464,23 +473,23 @@ function ChartsSection({
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={trustData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2b3548" />
-                  <XAxis dataKey="range" stroke="#6b7888" fontSize={12} />
-                  <YAxis stroke="#6b7888" fontSize={12} />
+                  <CartesianGrid stroke={chart.grid} vertical={false} />
+                  <XAxis dataKey="range" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />
+                  <YAxis stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'rgba(20,26,38,0.85)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(122,136,162,0.15)',
-                      borderRadius: '8px',
-                      color: '#e6eaf2',
-                    }}
+                    contentStyle={chartTooltip.contentStyle}
+                    labelStyle={chartTooltip.labelStyle}
+                    itemStyle={chartTooltip.itemStyle}
+                    cursor={{ fill: chart.grid }}
                   />
-                  <Bar
-                    dataKey="count"
-                    fill="#6366f1"
-                    radius={[4, 4, 0, 0]}
-                  />
+                  {/* Same status colouring as the analytics page plots the same
+                      buckets with — red/amber/green at the 50/75 trust
+                      thresholds, redundant with the ordered, labelled x-axis. */}
+                  <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={24}>
+                    {trustData.map((entry) => (
+                      <Cell key={entry.range} fill={trustBucketColor(entry.range, chart)} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -773,6 +782,9 @@ function EvaluationTab({
   isRunning: boolean;
   onRunEvaluation: () => void;
 }) {
+  // Hook first — every early return below it is unconditional from React's view.
+  const chart = useChartPalette();
+
   if (isLoading) {
     return (
       <motion.div
@@ -883,9 +895,11 @@ function EvaluationTab({
                     {pct}%
                   </motion.span>
                 </div>
-                {/* Custom progress bar */}
+                {/* Custom progress bar. Opaque inset track — a translucent
+                    card-2 track dropped the light-mode green/amber fills under
+                    the 3:1 the filled-vs-unfilled boundary needs. */}
                 <div
-                  className="h-2.5 w-full overflow-hidden rounded-full bg-card-2"
+                  className="h-2.5 w-full overflow-hidden rounded-full bg-solid ring-1 ring-inset ring-border-light"
                   role="progressbar"
                   aria-valuenow={pct}
                   aria-valuemin={0}
@@ -897,15 +911,9 @@ function EvaluationTab({
                     initial={{ width: '0%' }}
                     animate={{ width: `${pct}%` }}
                     transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-                    style={{
-                      background: `linear-gradient(90deg, ${evalScoreColor(entry.value)}, ${
-                        entry.value >= 0.8
-                          ? 'var(--color-accent)'
-                          : entry.value >= 0.6
-                            ? 'var(--color-gold)'
-                            : 'var(--color-red)'
-                      })`,
-                    }}
+                    // Flat severity fill — a meter's colour states one thing;
+                    // the second hue in the old gradient meant nothing.
+                    style={{ backgroundColor: toneColor(evalScoreTone(entry.value), chart) }}
                   />
                 </div>
               </Card>
@@ -1085,28 +1093,28 @@ export default function AdminDashboard() {
           animate="animate"
         >
           <StatCard
-            icon={<Users size={22} className="text-white" />}
+            icon={<Users size={22} className="text-primary-soft" />}
             label="Total Users"
             value={stats.total_users}
-            gradient="bg-gradient-to-br from-primary/80 to-primary-dark/80"
+            gradient="border-primary/25 bg-primary/10"
           />
           <StatCard
-            icon={<FolderOpen size={22} className="text-white" />}
+            icon={<FolderOpen size={22} className="text-primary-soft" />}
             label="Total Workspaces"
             value={stats.total_workspaces}
-            gradient="bg-gradient-to-br from-accent/80 to-accent/60"
+            gradient="border-primary/25 bg-primary/10"
           />
           <StatCard
-            icon={<FileText size={22} className="text-white" />}
+            icon={<FileText size={22} className="text-green" />}
             label="Total Documents"
             value={stats.total_documents}
-            gradient="bg-gradient-to-br from-accent-2/80 to-accent-2/60"
+            gradient="border-green/25 bg-green/10"
           />
           <StatCard
-            icon={<MessageSquare size={22} className="text-white" />}
+            icon={<MessageSquare size={22} className="text-orange" />}
             label="Total Queries"
             value={stats.total_queries}
-            gradient="bg-gradient-to-br from-gold/70 to-gold/50"
+            gradient="border-orange/25 bg-orange/10"
           />
         </motion.div>
 
