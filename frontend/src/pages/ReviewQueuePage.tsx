@@ -90,7 +90,9 @@ function TrustBreakdown({ item }: { item: ReviewQueueItem }) {
  * SECURITY: `chunk.content` is the injection payload itself — attacker-authored
  * text that reached the corpus. It is rendered as a plain React text node only
  * (never markdown, never `dangerouslySetInnerHTML`), and truncated client-side
- * rather than trusting any server-supplied excerpt.
+ * rather than trusting any server-supplied excerpt. It sits on the opaque
+ * `bg-solid` surface in monospace so nothing behind the glass can bleed through
+ * and disguise a character of it.
  */
 function QuarantineRow({
   chunk,
@@ -119,7 +121,7 @@ function QuarantineRow({
             <Badge color="gray">{chunk.pattern}</Badge>
           </div>
 
-          <p className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-text-muted">
+          <p className="mt-2 whitespace-pre-wrap break-words rounded-lg border border-border bg-solid p-3 font-mono text-xs leading-relaxed text-text-muted">
             {shown}
           </p>
           {isLong && (
@@ -533,10 +535,10 @@ export default function ReviewQueuePage() {
                           )
                         ) : null}
                         <span
-                          className={`ml-auto rounded-full px-2 py-0.5 text-xs ${
+                          className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-medium ${
                             getTrustBadgeColor(item.trust_score ?? 0) === 'red'
-                              ? 'bg-red/15 text-red'
-                              : 'bg-orange/15 text-orange'
+                              ? 'border-red/25 bg-red/15 text-red'
+                              : 'border-orange/25 bg-orange/15 text-orange'
                           }`}
                         >
                           {item.trust_score == null
@@ -635,7 +637,7 @@ export default function ReviewQueuePage() {
               </span>
               . Releasing re-embeds this text and makes it retrievable by every future answer.
             </p>
-            <p className="whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-card-2/50 p-3 font-mono text-xs text-text-muted">
+            <p className="whitespace-pre-wrap break-words rounded-lg border border-border bg-solid p-3 font-mono text-xs text-text-muted">
               {releaseTarget.content.slice(0, CONTENT_PREVIEW_CHARS)}
               {releaseTarget.content.length > CONTENT_PREVIEW_CHARS ? '…' : ''}
             </p>
