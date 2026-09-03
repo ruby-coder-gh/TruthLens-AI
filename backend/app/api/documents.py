@@ -299,6 +299,7 @@ async def get_document_status(
         id=doc.id,
         status=doc.status,
         chunk_count=doc.chunk_count,
+        quarantined_chunk_count=doc.quarantined_chunk_count,
         error_message=doc.error_message,
     )
 
