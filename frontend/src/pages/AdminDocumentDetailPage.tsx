@@ -8,6 +8,7 @@ import { pageTransition, fadeInUp } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
+import type { Document } from '../api/types';
 
 const STATUS_ORDER = ['uploaded', 'parsing', 'chunking', 'embedding', 'indexing', 'indexed'] as const;
 
@@ -42,6 +43,20 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
     default: return 'gray';
   }
 }
+
+/**
+ * BUG-9. `status === 'ready'` only means processing finished without a crash
+ * — a document whose every chunk was quarantined at ingest ends up "ready"
+ * with `chunk_count === 0` and is invisible to search. `is_searchable` is
+ * derived server-side from the live chunk counts, so it self-heals once a
+ * chunk is released; absent on rows predating the fix, hence the `=== false`.
+ */
+function isUnsearchableReady(doc: Document): boolean {
+  return doc.is_searchable === false && doc.status === 'ready' && (doc.quarantined_chunk_count ?? 0) > 0;
+}
+
+const UNSEARCHABLE_TOOLTIP =
+  'Every chunk of this document is held in quarantine — it returns no search results until a chunk is released.';
 
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
@@ -179,6 +194,11 @@ export default function AdminDocumentDetailPage() {
                 <h1 className="text-xl font-bold text-text">{doc.original_filename}</h1>
                 <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                   <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
+                  {isUnsearchableReady(doc) && (
+                    <span title={UNSEARCHABLE_TOOLTIP}>
+                      <Badge color="orange">Unsearchable</Badge>
+                    </span>
+                  )}
                   <span className="text-xs text-text-muted">{getFileType(doc.mime_type)}</span>
                   <span className="text-xs text-text-muted">{formatFileSize(doc.file_size)}</span>
                   {doc.page_count != null && <span className="text-xs text-text-muted">{doc.page_count} pages</span>}

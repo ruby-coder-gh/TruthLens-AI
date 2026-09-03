@@ -246,9 +246,21 @@ async def test_bulk_reindex_returns_accepted_sets_pending_and_bumps_version_once
 
 @pytest.mark.asyncio
 async def test_bulk_reindex_respects_concurrency_semaphore(
-    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+    client: AsyncClient,
+    admin_headers: dict[str, str],
+    test_db: AsyncSession,
+    test_user: User,
+    _point_app_db_at_test_engine,
 ):
-    """No more than BULK_REINDEX_CONCURRENCY reindex jobs run at once."""
+    """No more than BULK_REINDEX_CONCURRENCY reindex jobs run at once.
+
+    `_point_app_db_at_test_engine` is required here (not just for the BUG-3
+    regression tests below): once each fired task is properly awaited to
+    completion (rather than raced against teardown), `_reindex_one` reads
+    the document back via `app.database.async_session_factory` — which,
+    without the redirect, is the real (empty) `data/truthlens.db` rather
+    than this test's engine, and raises `OperationalError: no such table`.
+    """
     ws = await _make_workspace(test_db, test_user)
     docs = [await _make_document(test_db, ws.id, status="ready") for _ in range(6)]
     doc_ids = [d.id for d in docs]
@@ -275,8 +287,23 @@ async def test_bulk_reindex_respects_concurrency_semaphore(
         async with lock:
             concurrent -= 1
 
+    # Wrap `_track` (rather than sampling `_background_tasks` or
+    # `asyncio.all_tasks()` after the fact) so we capture exactly the tasks
+    # this request fires — no more, no less — regardless of scheduling
+    # timing. `asyncio.all_tasks()` also sweeps up unrelated tasks (e.g. from
+    # the ASGI transport) and races with fixture teardown of the shared
+    # SQLite DB if any of this test's own tasks are still running when the
+    # test function returns.
+    scheduled_tasks: list[asyncio.Task[None]] = []
+    original_track = admin_documents_module._track
+
+    def _capturing_track(task: asyncio.Task[None]) -> None:
+        scheduled_tasks.append(task)
+        original_track(task)
+
     with patch("app.api.documents.process_document_background", side_effect=fake_process), \
-         patch("app.api.admin_documents.settings.BULK_REINDEX_CONCURRENCY", 2):
+         patch("app.api.admin_documents.settings.BULK_REINDEX_CONCURRENCY", 2), \
+         patch.object(admin_documents_module, "_track", side_effect=_capturing_track):
         resp = await client.post(
             "/api/admin/documents/bulk",
             json={"action": "reindex", "document_ids": doc_ids},
@@ -284,9 +311,10 @@ async def test_bulk_reindex_respects_concurrency_semaphore(
         )
         assert resp.status_code == 200
 
-        # Drain background tasks fired via asyncio.create_task before asserting.
-        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        await asyncio.gather(*pending)
+        # Await exactly the tasks this test scheduled so none is still
+        # running when the fixtures tear down the shared DB.
+        assert len(scheduled_tasks) == 6
+        await asyncio.gather(*scheduled_tasks)
 
     assert max_concurrent == 2
 

@@ -110,25 +110,41 @@ class TestStreamer:
     """Test streamer utilities."""
 
     @pytest.mark.asyncio
-    async def test_stream_tokens_no_ollama(self):
-        """Should handle Ollama unavailable gracefully."""
+    async def test_stream_tokens_no_ollama(self, monkeypatch):
+        """Should handle Ollama unavailable gracefully.
+
+        Force the Ollama provider at an unreachable address and disable the
+        API provider so the test is deterministic regardless of whether a
+        local Ollama or a real OPENAI_API_KEY happens to be present in the
+        environment (LLM_PROVIDER=auto would otherwise probe the real
+        OpenAI-compatible endpoint over the network).
+        """
+        from app.config import settings
+        from app.generation import provider as provider_mod
         from app.generation.streamer import stream_tokens
         from app.generation.generator import GenerationInput
 
-        inp = GenerationInput(
-            query="test",
-            contexts=[{"content": "test context", "document_name": "doc"}],
-        )
+        monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+        monkeypatch.setattr(settings, "OLLAMA_BASE_URL", "http://127.0.0.1:1")
+        provider_mod.reset_provider_cache()
+        try:
+            inp = GenerationInput(
+                query="test",
+                contexts=[{"content": "test context", "document_name": "doc"}],
+            )
 
-        async def mock_send(msg: dict) -> None:
-            pass
+            async def mock_send(msg: dict) -> None:
+                pass
 
-        text, count, model, prompt_tokens, prompt_version = await stream_tokens(
-            inp, "query-id", mock_send
-        )
-        # Should return some text even on error
-        assert isinstance(text, str)
-        assert isinstance(count, int)
-        assert isinstance(model, str)
-        assert prompt_tokens is None
-        assert isinstance(prompt_version, str)
+            text, count, model, prompt_tokens, prompt_version = await stream_tokens(
+                inp, "query-id", mock_send
+            )
+            # Should return some text even on error
+            assert isinstance(text, str)
+            assert isinstance(count, int)
+            assert isinstance(model, str)
+            assert prompt_tokens is None
+            assert isinstance(prompt_version, str)
+        finally:
+            provider_mod.reset_provider_cache()

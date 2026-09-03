@@ -392,3 +392,165 @@ async def test_cached_replay_reports_the_prompt_version_that_wrote_the_row():
     complete = recorder.frames[-1]["payload"]
     assert complete["from_cache"] is True
     assert complete["prompt_version"] == "activehash01"
+
+
+# ─── BUG-7 · the cached replay of an abstention keeps its explanation ─────────
+
+
+@pytest.mark.asyncio
+async def test_abstention_persists_the_sufficiency_verdict(pipeline):
+    """The verdict is saved, not just streamed — a cache hit has to replay it."""
+    await pipeline.run()
+
+    saved = pipeline.state["saved"]
+    assert isinstance(saved, dict)
+    streamed = pipeline.sent[-1]["payload"]["sufficiency"]
+    assert saved["sufficiency"] == streamed
+
+
+@pytest.mark.asyncio
+async def test_cached_replay_of_an_abstention_repeats_the_sufficiency_verdict(pipeline):
+    """Fresh and cached renders of the same abstention carry the same payload."""
+    from app.api import ws as ws_api
+
+    await pipeline.run()
+    fresh = pipeline.sent[-1]["payload"]["sufficiency"]
+    saved = pipeline.state["saved"]
+    assert isinstance(saved, dict)
+
+    recorder = Recorder()
+    cached = Query(
+        id="cached-abstain-verdict",
+        workspace_id="ws-1",
+        query_text=saved["query_text"],
+        response_text=saved["response_text"],
+        response_sources="[]",
+        trust_score=saved["trust_score"],
+        guardrail_score=saved["guardrail_score"],
+        guardrail_passed=saved["guardrail_passed"],
+        model_used=saved["model_used"],
+        token_count=saved["token_count"],
+        edge_case=saved["edge_case"],
+        sufficiency=saved["sufficiency"],
+    )
+
+    await ws_api._send_cached_query(cached, _sink(recorder, "cached-abstain-verdict"), 3)
+
+    complete = recorder.frames[-1]["payload"]
+    assert complete["from_cache"] is True
+    assert complete["edge_case"] == "insufficient_evidence"
+    assert complete["sufficiency"] == fresh
+
+
+@pytest.mark.asyncio
+async def test_cached_replay_of_a_normal_answer_carries_no_sufficiency():
+    """A generated answer never had a verdict; the replay must not invent one."""
+    from app.api import ws as ws_api
+
+    recorder = Recorder()
+    cached = Query(
+        id="cached-normal-verdict",
+        workspace_id="ws-1",
+        query_text="What is RAG?",
+        response_text="Retrieval Augmented Generation.",
+        response_sources="[]",
+        trust_score=0.9,
+        model_used="qwen3:4b",
+        token_count=4,
+    )
+
+    await ws_api._send_cached_query(cached, _sink(recorder, "cached-normal-verdict"), 3)
+
+    assert "sufficiency" not in recorder.frames[-1]["payload"]
+
+
+@pytest.mark.asyncio
+async def test_save_query_writes_the_sufficiency_verdict_to_the_queries_table(
+    monkeypatch, test_engine, test_db: AsyncSession
+):
+    from app.api import ws as ws_api
+
+    monkeypatch.setattr(
+        ws_api,
+        "async_session_factory",
+        async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    user = User(email="verdict@example.com", username="verdict", password_hash="h", role="user", is_active=True)
+    test_db.add(user)
+    await test_db.commit()
+    workspace = Workspace(name="Verdict workspace", owner_id=user.id)
+    test_db.add(workspace)
+    await test_db.commit()
+
+    verdict = {
+        "sufficient": False,
+        "reason": "low_relevance",
+        "top_score": 0.02,
+        "supporting_count": 0,
+        "searched_count": 2,
+        "document_count": 1,
+    }
+    await ws_api._save_query(
+        query_id="query-abstain-verdict",
+        workspace_id=workspace.id,
+        user_id=user.id,
+        query_text="Who signed the 1994 lease?",
+        rewritten_query=None,
+        response_text="I cannot find this information in your documents.",
+        response_sources=[],
+        trust_score=0.0,
+        trust_components={"retrieval_quality": 0.02},
+        guardrail_score=1.0,
+        guardrail_passed=True,
+        model_used="abstain",
+        latency_ms=12,
+        token_count=0,
+        normalized_query="who signed the 1994 lease",
+        document_version=0,
+        edge_case="insufficient_evidence",
+        sufficiency=verdict,
+    )
+
+    row = (await test_db.execute(select(Query).where(Query.id == "query-abstain-verdict"))).scalar_one()
+    assert row.sufficiency == verdict
+
+
+@pytest.mark.asyncio
+async def test_save_query_leaves_sufficiency_null_for_normal_answers(
+    monkeypatch, test_engine, test_db: AsyncSession
+):
+    from app.api import ws as ws_api
+
+    monkeypatch.setattr(
+        ws_api,
+        "async_session_factory",
+        async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    user = User(email="noverdict@example.com", username="noverdict", password_hash="h", role="user", is_active=True)
+    test_db.add(user)
+    await test_db.commit()
+    workspace = Workspace(name="No verdict workspace", owner_id=user.id)
+    test_db.add(workspace)
+    await test_db.commit()
+
+    await ws_api._save_query(
+        query_id="query-normal-verdict",
+        workspace_id=workspace.id,
+        user_id=user.id,
+        query_text="What is RAG?",
+        rewritten_query=None,
+        response_text="Retrieval Augmented Generation.",
+        response_sources=[],
+        trust_score=0.8,
+        trust_components={},
+        guardrail_score=0.9,
+        guardrail_passed=True,
+        model_used="qwen3:4b",
+        latency_ms=12,
+        token_count=3,
+        normalized_query="what is rag",
+        document_version=0,
+    )
+
+    row = (await test_db.execute(select(Query).where(Query.id == "query-normal-verdict"))).scalar_one()
+    assert row.sufficiency is None
