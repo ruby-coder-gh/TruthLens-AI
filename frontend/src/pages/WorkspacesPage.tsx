@@ -270,7 +270,7 @@ export default function WorkspacesPage() {
             initial={{ scale: 0, rotate: -30 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', damping: 12, stiffness: 180, delay: 0.1 }}
-            className="flex h-14 w-14 items-center justify-center rounded-2xl glass border border-primary/20 shadow-lg shadow-primary/10"
+            className="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 shadow-e1"
           >
             <Sparkles size={26} className="text-primary-soft" />
           </motion.div>
@@ -352,7 +352,7 @@ export default function WorkspacesPage() {
               <div className="absolute -inset-[1px] rounded-2xl bg-gradient-to-br from-primary/40 via-accent/20 to-accent-2/40 opacity-0 blur-sm transition-opacity duration-500 group-hover:opacity-100" />
 
               <Card
-                className="relative h-full border border-glass-border bg-card backdrop-blur-xl transition-all duration-300 group-hover:border-primary/30 group-hover:shadow-xl group-hover:shadow-primary/10"
+                className="relative h-full border border-border bg-card backdrop-blur-xl transition-all duration-300 group-hover:border-primary/30 group-hover:shadow-e2"
               >
                 {/* Top accent line */}
                 <div className="absolute inset-x-0 top-0 h-[2px] rounded-t-2xl bg-gradient-to-r from-primary/50 via-accent/30 to-accent-2/50 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
@@ -386,14 +386,14 @@ export default function WorkspacesPage() {
                   initial={{ opacity: 0.99 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.2, duration: 0.3 }}
-                  className="mt-5 flex items-center gap-5 border-t border-border/50 pt-4 text-xs text-text-dim"
+                  className="mt-5 flex items-center gap-5 border-t border-border-light pt-4 text-xs text-text-dim"
                 >
                   <span className="flex items-center gap-1.5 transition-colors group-hover:text-text-muted">
-                    <Users size={14} className="text-accent/70" />
+                    <Users size={14} className="text-accent" />
                     {ws.member_count || 1} member{(ws.member_count || 1) !== 1 ? 's' : ''}
                   </span>
                   <span className="flex items-center gap-1.5 transition-colors group-hover:text-text-muted">
-                    <FileText size={14} className="text-accent-2/70" />
+                    <FileText size={14} className="text-accent-2" />
                     {ws.document_count || 0} document{(ws.document_count || 0) !== 1 ? 's' : ''}
                   </span>
                 </motion.div>

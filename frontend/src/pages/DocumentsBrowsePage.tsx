@@ -189,7 +189,7 @@ export default function DocumentsBrowsePage() {
                   type="button"
                   onClick={() => { setTypeFilter(filter); setPage(1); }}
                   className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                    typeFilter === filter ? 'border border-primary/20 bg-primary/15 text-primary-soft' : 'glass text-text-muted hover:bg-white/[0.04] hover:text-text'
+                    typeFilter === filter ? 'border border-primary/30 bg-primary/15 text-primary-soft' : 'border border-border bg-card text-text-muted hover:bg-card-hover hover:text-text'
                   }`}
                 >
                   {filter}
@@ -232,7 +232,7 @@ export default function DocumentsBrowsePage() {
               >
                 <Card hover className="h-full p-4">
                   <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg glass text-primary-soft">{getFileIcon(document.mime_type)}</div>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-primary/10 text-primary-soft">{getFileIcon(document.mime_type)}</div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-text">{document.original_filename}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -267,7 +267,7 @@ export default function DocumentsBrowsePage() {
 
           <Modal open={uploadModalOpen} onClose={() => setUploadModalOpen(false)} title="Choose upload workspace">
             <div className="space-y-4 text-center">
-              <div className="rounded-2xl border-2 border-dashed border-white/10 p-8">
+              <div className="rounded-2xl border-2 border-dashed border-border bg-card-2 p-8">
                 {resolvingWorkspace ? <Loader2 size={32} className="mx-auto mb-3 animate-spin text-primary-soft" /> : <Upload size={32} className="mx-auto mb-3 text-text-dim" />}
                 <p className="text-sm text-text-muted">{resolvingWorkspace ? 'Finding your workspace…' : 'Documents are governed by the workspace they are uploaded to.'}</p>
                 <p className="mt-1 text-xs text-text-dim">You will choose a file from the workspace document area.</p>

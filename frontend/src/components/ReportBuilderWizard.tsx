@@ -125,9 +125,9 @@ function OptionToggle({ checked, onChange, title, description }: { checked: bool
       type="button"
       aria-pressed={checked}
       onClick={() => onChange(!checked)}
-      className={classes('flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', checked ? 'border-primary/40 bg-primary/10' : 'border-glass-border bg-white/[0.025] hover:border-primary/25')}
+      className={classes('flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', checked ? 'border-primary/40 bg-primary/10' : 'border-border bg-card-2 hover:border-primary/25')}
     >
-      <span className={classes('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border', checked ? 'border-primary/60 bg-primary text-bg' : 'border-border bg-bg-soft text-transparent')}>
+      <span className={classes('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border', checked ? 'border-primary/60 bg-primary text-on-primary' : 'border-border bg-solid text-transparent')}>
         <Check size={13} strokeWidth={3} aria-hidden="true" />
       </span>
       <span><span className="block text-sm font-medium text-text">{title}</span><span className="mt-0.5 block text-xs leading-relaxed text-text-dim">{description}</span></span>
@@ -149,9 +149,9 @@ function StepIndicator({ currentStep, onStepChange }: { currentStep: WizardStep;
               disabled={!reachable && !active}
               onClick={() => onStepChange(step.number)}
               aria-current={active ? 'step' : undefined}
-              className={classes('flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed', active ? 'border-primary/40 bg-primary/10 text-primary-soft' : complete ? 'border-accent/30 bg-accent/10 text-accent hover:border-accent/50' : 'border-glass-border bg-white/[0.02] text-text-dim')}
+              className={classes('flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed', active ? 'border-primary/40 bg-primary/10 text-primary-soft' : complete ? 'border-accent/30 bg-accent/10 text-accent-2' : 'border-border bg-card-2 text-text-dim')}
             >
-              <span className={classes('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold', active ? 'bg-primary text-bg' : complete ? 'bg-accent text-bg' : 'bg-card-2 text-text-dim')}>{complete ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : step.number}</span>
+              <span className={classes('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold', active ? 'bg-primary text-on-primary' : complete ? 'bg-accent text-on-primary' : 'bg-card-2 text-text-dim')}>{complete ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : step.number}</span>
               <span className="min-w-0"><span className="block truncate text-xs font-semibold">{step.label}</span><span className="hidden truncate text-[10px] opacity-75 sm:block">{step.description}</span></span>
             </button>
           </li>
@@ -247,7 +247,7 @@ export function ReportBuilderWizard({ open, onClose, sources }: ReportBuilderWiz
                   const key = sourceKey(source, index);
                   const selected = selectedSourceKeys.has(key);
                   const confidence = formatOptionalScore(source.confidence);
-                  return <label key={key} className={classes('flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors', selected ? 'border-primary/40 bg-primary/10' : 'border-glass-border bg-white/[0.02] hover:border-primary/25')}>
+                  return <label key={key} className={classes('flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors', selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-card-2 hover:border-primary/25')}>
                     <input type="checkbox" checked={selected} onChange={() => toggleSource(source, index)} className="mt-1 h-4 w-4 shrink-0 accent-primary" />
                     <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="max-w-full truncate text-sm font-medium text-text" title={sourceName(source)}>{sourceName(source)}</span><span className="font-mono text-[10px] text-text-dim">{source.chunk_id}</span></span><span className="mt-1 block text-xs leading-relaxed text-text-muted">{snippet(source.excerpt, 180) || 'No passage preview was returned.'}</span><span className="mt-2 flex flex-wrap gap-2 text-[11px] text-text-dim"><span>Relevance {relevancePercent(source.relevance_score)}%</span>{confidence && <span>Confidence {confidence}</span>}{source.page_number != null && <span>p. {source.page_number}</span>}</span></span>
                   </label>;
@@ -273,12 +273,12 @@ export function ReportBuilderWizard({ open, onClose, sources }: ReportBuilderWiz
           <section aria-labelledby="report-generate-heading" className="space-y-4">
             <div className="flex flex-col gap-2 border-b border-glass-border pb-3 sm:flex-row sm:items-end sm:justify-between"><div><h3 id="report-generate-heading" className="text-base font-semibold text-text">Review Markdown</h3><p className="mt-1 text-xs text-text-dim">Preview the package before downloading or copying it.</p></div><span className="text-xs font-medium text-primary-soft">{selectedSources.length} evidence sources</span></div>
             {!canGenerate && <div className="rounded-xl border border-red/30 bg-red/5 p-3 text-xs text-red">{selectionError ?? titleError}</div>}
-            <pre className="max-h-[22rem] overflow-auto rounded-xl border border-glass-border bg-[#0b0f17]/80 p-4 text-xs leading-relaxed text-text-muted"><code>{markdown}</code></pre>
+            <pre className="max-h-[22rem] overflow-auto rounded-xl border border-border bg-solid p-4 text-xs leading-relaxed text-text-muted"><code>{markdown}</code></pre>
             <div className="flex flex-col gap-3 border-t border-glass-border pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => void copyMarkdown()} disabled={!canGenerate} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-bg-soft px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:border-primary/30 hover:text-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"><Clipboard size={14} aria-hidden="true" />Copy Markdown</button>{copyStatus && <span className="text-xs text-text-dim" role="status">{copyStatus}</span>}</div>
               <PremiumButton type="button" onClick={downloadReport} disabled={!canGenerate} icon={<Download size={16} />} size="md">Generate Report</PremiumButton>
             </div>
-            {generated && <div className="flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/10 p-3"><GlowingIcon icon={<Check size={18} className="text-accent" aria-hidden="true" />} active color="#34d399" onClick={() => setGenerated(false)} ariaLabel="Dismiss report generated confirmation" /><div><p className="text-sm font-semibold text-accent">Report generated</p><p className="text-xs text-text-muted">The Markdown package was downloaded. Select the glow icon to dismiss this confirmation.</p></div></div>}
+            {generated && <div className="flex items-center gap-3 rounded-xl border border-accent/25 bg-accent/10 p-3"><GlowingIcon icon={<Check size={18} className="text-accent-2" aria-hidden="true" />} active onClick={() => setGenerated(false)} ariaLabel="Dismiss report generated confirmation" /><div><p className="text-sm font-semibold text-accent-2">Report generated</p><p className="text-xs text-text-muted">The Markdown package was downloaded. Select the glow icon to dismiss this confirmation.</p></div></div>}
           </section>
         )}
 
