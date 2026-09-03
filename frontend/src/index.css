@@ -50,6 +50,17 @@
   --color-gold: #9A4508;
   --color-red: #B91C1C;
 
+  /* ── Trust / status MARKS ──
+     The tokens above are text-safe INKS (dark on light). A chart bar, a meter
+     fill or a sparkline is a graphical object, not text: it needs 3:1, not
+     4.5:1, and an ink that dark reads as a heavy block at bar scale. These are
+     the saturated mark steps of the same three hues — never used for text.
+     On the light surface (#FFFFFF): 3.09:1 green · 3.13:1 amber · 4.83:1 red.
+     On the dark surface  (#191D24): 7.9:1 green · 9.4:1 amber · 6.0:1 red. */
+  --color-green-mark: #16A34A;
+  --color-orange-mark: #D97706;
+  --color-red-mark: #DC2626;
+
   /* ── Ground & surfaces ── */
   --color-bg: #FAFAF9;
   --color-bg-soft: #F1F0EE;
@@ -124,6 +135,10 @@
   --color-orange: #FCD34D;
   --color-gold: #FCD34D;
   --color-red: #FCA5A5;
+
+  --color-green-mark: #34D399;
+  --color-orange-mark: #FBBF24;
+  --color-red-mark: #F87171;
 
   --color-bg: #0F1115;
   --color-bg-soft: #15181E;
