@@ -50,6 +50,21 @@
   --color-gold: #9A4508;
   --color-red: #B91C1C;
 
+  /* ── Trust hues — FILLS ONLY (bars, arcs, rails, dots) ──
+     The chromatic counterpart of each trust ink above. The inks are tuned to
+     read as *text* on the ground, which makes them heavy as a meter fill; these
+     are the saturated hue the design draws meters with. Never use them as text
+     — they are graphics-only, held to 3:1, not 4.5:1.
+
+     The design board's own #16A34A / #D97706 measure 2.3–2.9:1 against a
+     near-white track, so on light they step down one notch to the 700s, which
+     clear 3:1 on every light surface they land on (see GG-2's contrast table)
+     while staying clearly more chromatic than the inks above.
+     Additive — no existing token moved. */
+  --color-trust-high: #15803D;
+  --color-trust-mid: #B45309;
+  --color-trust-low: #DC2626;
+
   /* ── Ground & surfaces ── */
   --color-bg: #FAFAF9;
   --color-bg-soft: #F1F0EE;
@@ -124,6 +139,10 @@
   --color-orange: #FCD34D;
   --color-gold: #FCD34D;
   --color-red: #FCA5A5;
+
+  --color-trust-high: #34D399;
+  --color-trust-mid: #FBBF24;
+  --color-trust-low: #F87171;
 
   --color-bg: #0F1115;
   --color-bg-soft: #15181E;
