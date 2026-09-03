@@ -5,10 +5,30 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TruthLens AI</title>
+    <script>
+      // Resolve the theme before first paint so the app never flashes the
+      // wrong ground. Mirrors getPreferredTheme() in src/context/theme-context.ts.
+      (function () {
+        try {
+          var stored = localStorage.getItem('truthlens:theme');
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia &&
+                window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
     <style>
-      /* Ensure visible background before CSS loads */
-      html { background: #080b12; }
-      body { background: #080b12; min-height: 100vh; margin: 0; }
+      /* Ensure visible background before CSS loads — Grounded Glass ground. */
+      html { background: #FAFAF9; }
+      html[data-theme='dark'] { background: #0F1115; }
+      body { background: inherit; min-height: 100vh; margin: 0; }
       #root { min-height: 100vh; }
     </style>
   </head>

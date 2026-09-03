@@ -37,7 +37,7 @@ export function InputActionButton({
         'border backdrop-blur-sm overflow-hidden',
         active
           ? 'border-primary/40 bg-primary/15 text-primary-soft'
-          : 'border-glass-border bg-[#0b0f17]/60 text-text-dim hover:text-text hover:border-primary/30',
+          : 'border-border bg-card-2 text-text-dim hover:text-text hover:border-primary/30',
       )}
       whileHover={{ scale: 1.08 }}
       whileTap={{ scale: 0.92 }}
@@ -141,10 +141,10 @@ export default function AnimatedInput({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             className={clsx(
-              'w-full rounded-xl px-3 py-2.5 text-sm text-text placeholder-text-dim transition-all duration-300',
-              'bg-[#0b0f17]/70 backdrop-blur-sm border',
+              'w-full rounded-control px-3 py-2.5 text-sm text-text placeholder:text-text-dim transition-colors duration-200',
+              'bg-solid border',
               focused
-                ? 'border-primary/40 bg-[#0b0f17]/90'
+                ? 'border-primary'
                 : error
                   ? 'border-red/50'
                   : 'border-glass-border hover:border-primary/20',

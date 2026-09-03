@@ -39,7 +39,7 @@ function BorderBeam() {
         animate={{ rotate: 360 }}
         transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
       />
-      <span className="absolute inset-[1px] rounded-[11px] bg-[#0b0f17]" />
+      <span className="absolute inset-[1px] rounded-[11px] bg-primary" />
     </motion.span>
   );
 }
@@ -122,9 +122,10 @@ export default function PremiumButton({
         'disabled:cursor-not-allowed disabled:opacity-50',
         sizeStyles[size],
         variant === 'primary' && [
-          // PremiumButton insets an ink panel (BorderBeam) over the manila
-          // gradient, so its visible surface is dark — use light text, not ink.
-          'text-text',
+          // BorderBeam insets an accent-filled panel over the gradient, so the
+          // visible surface is the accent — use the on-accent ink, which flips
+          // with the theme (white on light's indigo, near-black on dark's).
+          'text-on-primary',
           !loading && !success && 'shadow-lg',
         ],
         variant === 'secondary' && 'glass text-text hover:bg-card-hover',
