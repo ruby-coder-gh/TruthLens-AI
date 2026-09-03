@@ -35,7 +35,7 @@ import { useToast } from '../components/toast-context';
 import { adminApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import { startOfDayIso, endOfDayIso } from '../utils/dates';
-import { toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
+import { CHART_INITIAL_DIMENSION, toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
 import type {
   EvalRunNotes,
   EvalRunResponse,
@@ -768,7 +768,7 @@ export default function AdminAnalyticsPage() {
               {queriesOverTimeData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-text-dim">No query trend data yet.</div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220} initialDimension={CHART_INITIAL_DIMENSION}>
                   <LineChart data={queriesOverTimeData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
                     {/* Solid hairline grid, recessive; the accent carries the one series. */}
                     <CartesianGrid stroke={chart.grid} vertical={false} />
@@ -816,7 +816,7 @@ export default function AdminAnalyticsPage() {
               {trustScoreDistributionData.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-text-dim">No distribution data yet.</div>
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220} initialDimension={CHART_INITIAL_DIMENSION}>
                   <BarChart data={trustScoreDistributionData} margin={{ top: 8, right: 10, left: -14, bottom: 0 }}>
                     <CartesianGrid stroke={chart.grid} vertical={false} />
                     <XAxis dataKey="range" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} tickMargin={8} />

@@ -340,7 +340,7 @@ export default function Layout() {
 
       {/* ─── Main area ────────────────────────────────────────────────── */}
       <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="px-4 pt-4 lg:hidden">
+        <div className="relative z-40 px-4 pt-4 lg:hidden">
           <button
             type="button"
             onClick={() => setSidebarOpen((open) => !open)}
@@ -354,11 +354,15 @@ export default function Layout() {
           </button>
         </div>
 
-        <div className="hidden border-b border-border-light px-4 py-3 lg:flex lg:items-center lg:justify-end lg:gap-2">
+        {/* `relative z-40` on both header rows: page content can float panels
+            (the chat evidence sidebar sits at z-30) over the main column, and
+            the header has to stay hit-testable above them — the theme toggle and
+            global search were being intercepted at every width (QA S2-1). */}
+        <div className="relative z-40 hidden border-b border-border-light px-4 py-3 lg:flex lg:items-center lg:justify-end lg:gap-2">
           <GlobalSearch />
           <ThemeToggle />
         </div>
-        <div className="flex items-center gap-2 px-4 pt-4 lg:hidden">
+        <div className="relative z-40 flex items-center gap-2 px-4 pt-4 lg:hidden">
           <div className="min-w-0 flex-1">
             <GlobalSearch />
           </div>

@@ -268,3 +268,15 @@ export function tooltipStyles(palette: ChartPalette) {
     cursor: { fill: palette.grid, stroke: palette.axis },
   } as const;
 }
+
+/**
+ * Seed size for `<ResponsiveContainer initialDimension>`.
+ *
+ * Recharts starts the container at `{width: -1, height: -1}` and warns
+ * ("The width(-1) and height(-1) of chart should be greater than 0…") on the
+ * first render — before its own ResizeObserver has reported. Every chart in
+ * the app lives in an `h-64` (256px) box, so handing that height over for the
+ * one pre-measurement frame silences the warning without pretending to know
+ * the width: the observer still supplies the real box on mount.
+ */
+export const CHART_INITIAL_DIMENSION = { width: 0, height: 256 };

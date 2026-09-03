@@ -689,7 +689,8 @@ export default function ChatPage() {
           layout
           className={clsx(
             'flex flex-col flex-1 min-w-0',
-            // The Evidence sidebar renders `position: fixed` (right: 16px, w-72 = 18rem)
+            // The Evidence sidebar renders `position: absolute` against this
+            // shell (right: 0, w-80 = 20rem)
             // so it never participates in this flex layout — at lg+ it visually floats
             // over whatever sits at that screen position. Without reserving matching
             // space here, the sidebar's higher z-index (30 vs this panel's 10)

@@ -43,7 +43,7 @@ import { adminApi } from '../api/client';
 import { useAuth } from '../context/auth-context';
 import type { AdminStats, AuditLogEntry } from '../api/types';
 import { getSafeLabel, getTrustBadgeColor, getTrustColorVar, getTrustStatusLabel } from '../utils/relevance';
-import { toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
+import { CHART_INITIAL_DIMENSION, toneColor, tooltipStyles, trustBucketColor, useChartPalette } from '../utils/chartTheme';
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -413,7 +413,7 @@ function ChartsSection({
             </div>
           ) : (
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_DIMENSION}>
                 <LineChart data={queriesData}>
                   <CartesianGrid stroke={chart.grid} vertical={false} />
                   <XAxis dataKey="month" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />
@@ -471,7 +471,7 @@ function ChartsSection({
             </div>
           ) : (
             <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_DIMENSION}>
                 <BarChart data={trustData}>
                   <CartesianGrid stroke={chart.grid} vertical={false} />
                   <XAxis dataKey="range" stroke={chart.axis} tick={{ fill: chart.axisText, fontSize: 12 }} />

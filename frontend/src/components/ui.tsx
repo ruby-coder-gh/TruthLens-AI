@@ -70,7 +70,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         className={clsx(
           'inline-flex items-center justify-center whitespace-nowrap font-semibold',
           'transition-[background-color,border-color,color,box-shadow] duration-150',
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
+          // Two-tone ring: `ring-focus-halo` paints the outline-offset gap, so
+          // the outline stays legible on a filled primary button where the ring
+          // and the fill are otherwise the same indigo (QA S3-5).
+          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
+          'focus-visible:ring-2 focus-visible:ring-focus-halo',
           'disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
           variantStyles[variant],
           sizeStyles[size],

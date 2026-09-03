@@ -1067,7 +1067,13 @@ export default function EvidenceSidebar({
           exit={{ x: '100%' }}
           transition={{ type: 'spring', damping: 30, stiffness: 300, mass: 0.8 }}
           className={clsx(
-            'fixed inset-y-0 right-0 z-30 flex flex-col',
+            // `absolute`, not `fixed`: the panel is scoped to the chat column's
+            // positioned box (ChatPage's `relative` shell), so it spans the main
+            // content area and stops at its top edge. As `fixed inset-y-0` it
+            // ran the full viewport height and sat over the app header, making
+            // the theme toggle and global search unhittable at every width
+            // (QA S2-1) — the panel's own close button won `elementFromPoint`.
+            'absolute inset-y-0 right-0 z-30 flex flex-col',
             'w-full sm:w-[22rem] lg:w-80',
           )}
         >
@@ -1116,7 +1122,10 @@ export default function EvidenceSidebar({
                       onClick={() => onTabChange?.(tab.id)}
                       className={clsx(
                         'relative flex w-full min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                        isActive ? 'text-primary-soft' : 'text-text-dim hover:bg-card-hover hover:text-text',
+                        // Inactive ink is `text-text-muted`: `text-text-dim` on
+                        // the tab bar's own `bg-card-2` fill measured 4.09:1 in
+                        // light theme (QA S3-2).
+                        isActive ? 'text-primary-soft' : 'text-text-muted hover:bg-card-hover hover:text-text',
                       )}
                       whileTap={{ scale: 0.97 }}
                     >

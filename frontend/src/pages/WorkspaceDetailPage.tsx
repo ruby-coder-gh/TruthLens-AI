@@ -239,7 +239,10 @@ function DashboardStats({ workspace }: { workspace: Workspace }) {
         >
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <p className="text-xs font-medium text-text-dim tracking-wide">{stat.label}</p>
+              {/* `text-text-muted`, not `text-text-dim`: these labels sit on a
+                  tinted gradient card, not the plain ground, where dim ink
+                  measured 3.76–3.89:1 (QA S3-1). */}
+              <p className="text-xs font-medium text-text-muted tracking-wide">{stat.label}</p>
               <p className={`text-2xl font-bold ${stat.textColor}`}>
                 {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
               </p>
@@ -817,7 +820,11 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
             <UploadCloud size={28} />
           </motion.div>
           <p className="text-sm font-medium text-text">
-            {dragOver ? 'Drop file to upload' : 'Drop files here or click to browse'}
+            {/* Singular: this dropzone uploads one file at a time (the input
+                has no `multiple` and `handleDrop` reads `files[0]`), so the
+                plural copy promised a multi-select that fails (QA S3-6).
+                /admin/documents/upload is the multi-file queue. */}
+            {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
           </p>
           <p className="mt-1 text-xs text-text-muted">
             PDF, DOCX, TXT, MD, CSV up to 50MB
@@ -872,7 +879,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
             <UploadCloud size={20} className="text-primary" />
           </motion.div>
           <p className="text-sm text-text-muted">
-            {dragOver ? 'Drop file to upload' : 'Drop files or click to add more documents'}
+            {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
           </p>
         </div>
         <input

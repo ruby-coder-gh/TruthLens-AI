@@ -32,8 +32,12 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
+// The chip sits *inside* an amber card, so its own `bg-orange/12` used to
+// stack tint on tint (composite #E5D2C5) and drag the amber ink down to
+// 4.41:1 (QA S3-3). An opaque base stops the stacking; the amber border and
+// ink still carry the family.
 const chipClass =
-  'inline-flex items-center gap-1.5 rounded-full border border-orange/35 bg-orange/12 px-3 py-1.5 text-xs font-semibold text-orange transition-colors hover:bg-orange/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'inline-flex items-center gap-1.5 rounded-full border border-orange/35 bg-solid px-3 py-1.5 text-xs font-semibold text-orange transition-colors hover:bg-orange/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 export const AbstentionCard = memo(function AbstentionCard({
   answer,

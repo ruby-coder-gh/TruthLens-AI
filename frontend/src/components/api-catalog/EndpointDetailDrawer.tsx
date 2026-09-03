@@ -46,7 +46,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="relative overflow-x-auto rounded-xl bg-black/40 border border-white/[0.06] p-4 text-xs font-mono leading-relaxed text-text-muted">
+      <pre className="relative overflow-x-auto rounded-xl bg-solid border border-border p-4 text-xs font-mono leading-relaxed text-text-muted">
         <code>{code}</code>
       </pre>
     </div>
@@ -86,10 +86,10 @@ export default function EndpointDetailDrawer({ endpoint, onClose }: EndpointDeta
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 320 }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-[#0b0f17]/95 backdrop-blur-2xl border-l border-white/[0.06] shadow-2xl flex flex-col"
+            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-bg-soft/95 backdrop-blur-2xl border-l border-border shadow-2xl flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-3">
                 <span
                   className={clsx(
@@ -104,7 +104,7 @@ export default function EndpointDetailDrawer({ endpoint, onClose }: EndpointDeta
               <button
                 type="button"
                 onClick={onClose}
-                className="flex items-center justify-center w-8 h-8 rounded-lg text-text-dim hover:text-text hover:bg-white/[0.06] transition-all"
+                className="flex items-center justify-center w-8 h-8 rounded-lg text-text-dim hover:text-text hover:bg-card-2 transition-all"
                 aria-label="Close drawer"
               >
                 <X size={18} />

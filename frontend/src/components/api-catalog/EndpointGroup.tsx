@@ -67,7 +67,7 @@ function EndpointItem({ endpoint, onSelectEndpoint }: { endpoint: ApiEndpoint; o
           onSelectEndpoint(endpoint);
         }
       }}
-      className="relative w-full flex items-center gap-3 px-4 py-2.5 text-left rounded-xl transition-all duration-150 group hover:bg-white/[0.03] active:scale-[0.99] cursor-pointer"
+      className="relative w-full flex items-center gap-3 px-4 py-2.5 text-left rounded-xl transition-all duration-150 group hover:bg-card-2 active:scale-[0.99] cursor-pointer"
     >
       {/* Method badge */}
       <span
@@ -95,7 +95,7 @@ function EndpointItem({ endpoint, onSelectEndpoint }: { endpoint: ApiEndpoint; o
       <button
         type="button"
         onClick={copyPath}
-        className="shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-text-dim hover:text-text hover:bg-white/[0.06] transition-all opacity-0 group-hover:opacity-100"
+        className="shrink-0 flex items-center justify-center w-7 h-7 rounded-lg text-text-dim hover:text-text hover:bg-card-2 transition-all opacity-0 group-hover:opacity-100"
         aria-label="Copy endpoint path"
       >
         {copied ? <Check size={14} className="text-green" /> : <Copy size={13} />}
@@ -121,7 +121,7 @@ export default function EndpointGroup({ group, defaultOpen = false, onSelectEndp
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left transition-colors hover:bg-white/[0.02]"
+        className="w-full flex items-center gap-3 px-4 sm:px-5 py-3.5 text-left transition-colors hover:bg-card-2"
       >
         {/* Icon */}
         <div
@@ -173,7 +173,7 @@ export default function EndpointGroup({ group, defaultOpen = false, onSelectEndp
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="overflow-hidden"
           >
-            <div className="border-t border-white/[0.04] px-2 pb-2 pt-1">
+            <div className="border-t border-border-light px-2 pb-2 pt-1">
               {group.endpoints.map((ep, i) => (
                 <EndpointItem key={`${ep.method}-${ep.path}-${i}`} endpoint={ep} onSelectEndpoint={onSelectEndpoint} />
               ))}
