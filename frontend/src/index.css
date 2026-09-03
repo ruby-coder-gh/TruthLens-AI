@@ -3,7 +3,7 @@
 
 /* ══════════════════════════════════════════════════════════════════════════
    GROUNDED GLASS — TruthLens AI design system
-   Light by default. Frosted glass surfaces over a faint ruled ground, one
+   Light by default. Frosted glass surfaces over a softly washed ground, one
    indigo accent, trust colour green/amber/red, three shadow steps, and a
    complete dark variant on [data-theme="dark"].
 
@@ -16,7 +16,7 @@
                    micro 11/14 600 +0.02em · eyebrow 10/12 700 +0.12em UPPER
                    Inter = all UI. Newsreader (.q / font-quote) = quoted source
                    excerpts ONLY. System mono = hashes, ids, scores, costs.
-   GLASS LAW       Ground (ruled substrate) → L1 glass panel → L2 glass card.
+   GLASS LAW       Ground (washed substrate) → L1 glass panel → L2 glass card.
                    STOP. Anything inside an L2 card sits on --color-solid or a
                    flat tint, never a third blur. Tables, inputs, code and
                    quarantined text are always opaque.
@@ -125,7 +125,6 @@
   --wash-a0: rgba(79, 70, 229, 0);
   --wash-b: rgba(22, 163, 74, 0.07);
   --wash-b0: rgba(22, 163, 74, 0);
-  --rule: rgba(31, 35, 40, 0.042);
   --scrollbar-thumb: rgba(31, 35, 40, 0.22);
   --scrollbar-thumb-hover: rgba(31, 35, 40, 0.34);
   --noise-opacity: 0.02;
@@ -182,7 +181,6 @@
   --wash-a0: rgba(139, 133, 255, 0);
   --wash-b: rgba(52, 211, 153, 0.09);
   --wash-b0: rgba(52, 211, 153, 0);
-  --rule: rgba(255, 255, 255, 0.05);
   --scrollbar-thumb: rgba(255, 255, 255, 0.20);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.32);
   --noise-opacity: 0.015;
@@ -199,10 +197,7 @@ body {
   background-color: var(--color-bg);
   background-image:
     radial-gradient(880px 520px at 8% -12%, var(--wash-a), var(--wash-a0) 62%),
-    radial-gradient(720px 460px at 94% 0%, var(--wash-b), var(--wash-b0) 62%),
-    linear-gradient(var(--rule) 1px, transparent 1px),
-    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
-  background-size: auto, auto, 100% 32px, 32px 100%;
+    radial-gradient(720px 460px at 94% 0%, var(--wash-b), var(--wash-b0) 62%);
   background-attachment: fixed;
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -252,8 +247,8 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
-/* ─── The ruled ground ───
-   <body> paints it once. `.bg-grid` re-paints it for the containers that lay
+/* ─── The washed ground ───
+   <body> paints it once. `.bg-grid` re-paints the washed ground for containers that lay
    an opaque `bg-bg` over the body (Layout, LegalPageLayout) — without it those
    screens would be a flat fill. The ground is never painted twice on the same
    screen, so the washes keep their designed strength. */
@@ -265,14 +260,11 @@ select:focus-visible {
   background-color: var(--color-bg);
   background-image:
     radial-gradient(880px 520px at 8% -12%, var(--wash-a), var(--wash-a0) 62%),
-    radial-gradient(720px 460px at 94% 0%, var(--wash-b), var(--wash-b0) 62%),
-    linear-gradient(var(--rule) 1px, transparent 1px),
-    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
-  background-size: auto, auto, 100% 32px, 32px 100%;
+    radial-gradient(720px 460px at 94% 0%, var(--wash-b), var(--wash-b0) 62%);
 }
 
 /* The Midnight-era floating blobs are retired: the direction's depth comes
-   from the ruled ground and the two static washes on it, not from animated
+   from the washed ground and its two static washes, not from animated
    blur. Left inert (rather than deleted) so the existing markup on Login,
    Register, Reset and the legal pages stays valid. */
 .ambient-blob {
