@@ -11,38 +11,23 @@ interface GlowingIconProps {
   ariaLabel?: string;
 }
 
-function ParticleBurst({ color }: { color: string }) {
-  // Deterministic burst directions (6 evenly-spread radial offsets) — pure render.
-  return (
-    <span className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      {Array.from({ length: 6 }).map((_, i) => {
-        const angle = (i / 6) * Math.PI * 2;
-        const dx = Math.cos(angle) * 18;
-        const dy = Math.sin(angle) * 18;
-        return (
-          <motion.span
-            key={i}
-            className="absolute w-1 h-1 rounded-full"
-            style={{ background: color, left: '50%', top: '50%' }}
-            initial={{ x: 0, y: 0, opacity: 0.99 }}
-            animate={{
-              x: [0, dx],
-              y: [0, dy],
-              opacity: [0.99, 0],
-              scale: [1, 0],
-            }}
-            transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 2 + i * 0.3, ease: 'easeOut' }}
-          />
-        );
-      })}
-    </span>
-  );
-}
-
+/**
+ * An icon button whose active state is stated, not radiated.
+ *
+ * The Midnight version pulsed a coloured box-shadow forever (even at rest),
+ * fired a six-particle burst on a loop while active, and hung a drop-shadow
+ * off the glyph. On a light ground those halos have nothing to bloom into —
+ * they just smear. Grounded Glass says the same thing with a flat accent tint
+ * and a 1px edge, which is legible in both themes and costs one paint.
+ *
+ * `color` is unchanged as an override, but it is now composited with
+ * `color-mix` instead of hex-alpha string concatenation, so the default can be
+ * a theme token that flips with the theme rather than a frozen Midnight hex.
+ */
 export default function GlowingIcon({
   icon,
   active = false,
-  color = '#6366f1',
+  color = 'var(--color-primary)',
   size = 'md',
   className,
   onClick,
@@ -51,75 +36,43 @@ export default function GlowingIcon({
   const sizeMap = { sm: 28, md: 36, lg: 44 };
   const iconSize = sizeMap[size];
 
+  const tint = `color-mix(in srgb, ${color} 12%, transparent)`;
+  const edge = `color-mix(in srgb, ${color} 30%, transparent)`;
+
   return (
     <motion.button
       type="button"
       onClick={onClick}
+      // No aria-pressed: the one call site passes an action label ("Dismiss
+      // …"), and a toggle state on an action name reads as a contradiction.
       aria-label={ariaLabel}
       className={clsx(
-        'relative flex items-center justify-center rounded-xl transition-all duration-300',
-        'cursor-pointer',
+        'relative flex shrink-0 items-center justify-center rounded-control border',
+        'cursor-pointer transition-colors duration-200',
         className,
       )}
-      style={{ width: iconSize, height: iconSize }}
-      whileHover={{ scale: 1.1 }}
+      style={{
+        width: iconSize,
+        height: iconSize,
+        background: active ? tint : 'transparent',
+        borderColor: active ? edge : 'transparent',
+      }}
+      whileHover="hover"
       whileTap={{ scale: 0.95 }}
-      animate={
-        active
-          ? {
-              boxShadow: [
-                `0 0 8px ${color}40, 0 0 16px ${color}20`,
-                `0 0 12px ${color}60, 0 0 24px ${color}30`,
-                `0 0 8px ${color}40, 0 0 16px ${color}20`,
-              ],
-            }
-          : {
-              boxShadow: [
-                `0 0 0px ${color}00`,
-                `0 0 4px ${color}10`,
-                `0 0 0px ${color}00`,
-              ],
-            }
-      }
-      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+      variants={{ hover: { scale: 1.06 } }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
     >
-      {/* Active background glow */}
-      {active && (
-        <motion.div
-          className="absolute inset-0 rounded-xl"
-          style={{
-            background: `radial-gradient(circle, ${color}20, transparent)`,
-            border: `1px solid ${color}40`,
-          }}
-          animate={{ opacity: [0.6, 1, 0.6] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        />
-      )}
-
-      {/* Hover glow ring */}
-      <motion.div
-        className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100"
-        style={{
-          background: `radial-gradient(circle at center, ${color}15, transparent 70%)`,
-        }}
-        whileHover={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
+      {/* Hover tint — the only state layer, and it fades rather than pulses. */}
+      <motion.span
+        className="absolute inset-0 rounded-control"
+        style={{ background: tint }}
+        initial={{ opacity: 0 }}
+        variants={{ hover: { opacity: 1 } }}
+        transition={{ duration: 0.18 }}
+        aria-hidden="true"
       />
 
-      {/* Floating particles (active only) */}
-      {active && <ParticleBurst color={color} />}
-
-      {/* Icon */}
-      <motion.span
-        className="relative z-10 flex items-center justify-center"
-        style={{
-          filter: active ? `drop-shadow(0 0 6px ${color}60)` : 'none',
-        }}
-        animate={active ? { scale: [1, 1.05, 1] } : {}}
-        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-      >
-        {icon}
-      </motion.span>
+      <span className="relative z-10 flex items-center justify-center">{icon}</span>
     </motion.button>
   );
 }
