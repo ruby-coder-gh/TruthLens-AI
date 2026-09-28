@@ -62,6 +62,16 @@ class TestNliBatch:
 
         assert result == [(0.33, 0.34, 0.33), (0.33, 0.34, 0.33)]
 
+    def test_wrong_row_count_returns_uniform_fallback(self):
+        """A malformed predict() (rows != pairs) must not misalign scores with pairs."""
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([[0.0, 2.0, 1.0]])
+
+        with patch("app.generation.guardrail._load_nli_model", return_value=mock_model):
+            result = nli_batch([("p1", "h1"), ("p2", "h2")])
+
+        assert result == [(0.33, 0.34, 0.33)] * 2
+
     def test_predict_error_returns_uniform_fallback(self):
         """predict() raising falls back to uniform scores per pair, no crash."""
         mock_model = MagicMock()

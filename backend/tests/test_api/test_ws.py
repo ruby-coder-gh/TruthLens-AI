@@ -611,3 +611,147 @@ class TestCompleteFramePayload:
         assert complete["model_used"] == "served:7b"
         assert complete["prompt_version"] == "promptv1hash"
 
+
+# ─── Truth Lens: per-claim verdicts on the guardrail frame ────────
+
+
+CLAIM = {
+    "text": "Revenue grew 12% in fiscal 2025.",
+    "start": 0,
+    "end": 43,
+    "verdict": "supported",
+    "entailment": 0.93,
+    "contradiction": 0.02,
+    "source_index": 1,
+    "chunk_id": "chunk-1",
+    "document_id": "doc-1",
+    "document_name": "Doc 1",
+    "page_number": 3,
+    "evidence": "Revenue grew 12% in fiscal 2025 to $48.2M.",
+}
+
+
+class TestGuardrailClaims:
+    @staticmethod
+    def _install_guardrail(monkeypatch, result):
+        import sys
+        import types
+
+        async def fake_guardrail_check(answer, contexts):
+            return result
+
+        module = types.ModuleType("app.generation.guardrail")
+        module.check = fake_guardrail_check
+        monkeypatch.setitem(sys.modules, "app.generation.guardrail", module)
+
+    @staticmethod
+    async def _run_pipeline(workspace, user, query_id, sent):
+        from app.api import ws as ws_api
+
+        async def _send(msg):
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was revenue?",
+            workspace_id=workspace.id,
+            user_id=user.id,
+            query_id=query_id,
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(_send, query_id=query_id),
+        )
+        return next(m["payload"] for m in sent if m["type"] == "guardrail")
+
+    async def test_frame_carries_claims_and_a_claims_row_is_saved(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        import json
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.query_claims import QueryClaims
+
+        workspace, user = ws_workspace
+        real_save_query = ws_api._save_query
+        TestPipelineResolvesActivePrompt._patch_pipeline(
+            monkeypatch, {}, ("Revenue grew 12% in fiscal 2025 [source:1].", 9, "served:7b", 50, "h")
+        )
+        monkeypatch.setattr(ws_api, "_save_query", real_save_query)
+        self._install_guardrail(monkeypatch, SimpleNamespace(
+            passed=False, score=0.4, details="1/2 supported",
+            claims=[CLAIM], unsupported_claims=["Costs fell."],
+        ))
+
+        frame = await self._run_pipeline(workspace, user, "q-claims-1", [])
+
+        assert frame["claims"] == [CLAIM]
+        assert frame["unsupported_claims"] == ["Costs fell."]
+        row = (
+            await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == "q-claims-1"))
+        ).scalar_one()
+        assert json.loads(row.claims) == [CLAIM]
+
+    async def test_guardrail_without_claims_sends_empty_lists_and_saves_no_row(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.query import Query
+        from app.models.query_claims import QueryClaims
+
+        workspace, user = ws_workspace
+        real_save_query = ws_api._save_query
+        TestPipelineResolvesActivePrompt._patch_pipeline(monkeypatch, {}, ("answer", 1, "m", 1, "h"))
+        monkeypatch.setattr(ws_api, "_save_query", real_save_query)
+        self._install_guardrail(monkeypatch, SimpleNamespace(passed=True, score=1.0, details="skipped"))
+
+        frame = await self._run_pipeline(workspace, user, "q-claims-2", [])
+
+        assert frame["claims"] == []
+        assert frame["unsupported_claims"] == []
+        assert (await test_db.execute(select(Query).where(Query.id == "q-claims-2"))).scalar_one()
+        assert (
+            await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == "q-claims-2"))
+        ).scalar_one_or_none() is None
+
+    async def test_cache_hit_replays_the_origin_claims(self, monkeypatch, test_db, ws_session_factory):
+        import json
+
+        from app.models.query import Query
+        from app.models.query_claims import QueryClaims
+        from app.prompts.registry import DEFAULT_PROMPT_HASH
+
+        await TestCacheRespectsPromotedPrompt._seed_cached_row(test_db, DEFAULT_PROMPT_HASH)
+        origin = (await test_db.execute(select(Query).where(Query.workspace_id == "ws-cache"))).scalar_one()
+        origin.guardrail_score = 0.9
+        origin.guardrail_passed = True
+        test_db.add(QueryClaims(query_id=origin.id, claims=json.dumps([CLAIM])))
+        await test_db.commit()
+        sent: list[dict] = []
+
+        await TestCacheRespectsPromotedPrompt._run(monkeypatch, sent, DEFAULT_PROMPT_HASH, test_db=test_db)
+
+        assert sent[-1]["payload"]["from_cache"] is True
+        frame = next(m["payload"] for m in sent if m["type"] == "guardrail")
+        assert frame["claims"] == [CLAIM]
+        assert frame["unsupported_claims"] == []
+
+    async def test_cached_replay_without_a_claims_row_sends_empty_claims(self):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        cached = Query(
+            id="cached-no-claims", workspace_id="ws-1", query_text="q", response_text="a",
+            response_sources="[]", guardrail_score=0.9, guardrail_passed=True, trust_score=0.8,
+        )
+        await ws_api._send_cached_query(cached, _pipeline_sink(_send, "cached-no-claims"), 3)
+
+        frame = next(m["payload"] for m in sent if m["type"] == "guardrail")
+        assert frame["claims"] == []
+

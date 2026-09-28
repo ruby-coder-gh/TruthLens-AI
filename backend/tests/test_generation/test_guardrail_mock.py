@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from app.generation.guardrail import (
@@ -136,11 +137,10 @@ class TestGuardrailCheckMockedNLI:
     async def test_all_claims_supported(self):
         """All claims entailed by context passes."""
         mock_model = MagicMock()
-        # Return logits [contradiction, entailment, neutral] with entailment
-        # dominant for every claim -> entail_ratio ~= 0.88 >= threshold (0.7).
-        mock_model.predict.return_value = MagicMock()
-        mock_model.predict.return_value.shape = (3,)
-        mock_model.predict.return_value.tolist.return_value = [0.0, 2.0, 1.0]
+        # check() scores every claim x context in one batched predict() call:
+        # one row of logits [contradiction, entailment, neutral] per pair, with
+        # entailment dominant -> entail_ratio ~= 0.88 >= threshold (0.7).
+        mock_model.predict.side_effect = lambda pairs: np.array([[0.0, 2.0, 1.0]] * len(pairs))
 
         with patch("app.generation.guardrail._load_nli_model", return_value=mock_model):
             result = await check(
@@ -156,14 +156,8 @@ class TestGuardrailCheckMockedNLI:
         """Claims not entailed by context fails."""
         mock_model = MagicMock()
 
-        # Return low entailment
-        def predict_side_effect(pairs):
-            mock = MagicMock()
-            mock.shape = (3,)
-            mock.tolist.return_value = [0.2, 0.3, 0.5]
-            return mock
-
-        mock_model.predict = predict_side_effect
+        # Return low entailment for every batched pair
+        mock_model.predict.side_effect = lambda pairs: np.array([[0.2, 0.3, 0.5]] * len(pairs))
 
         with patch("app.generation.guardrail._load_nli_model", return_value=mock_model):
             result = await check(
