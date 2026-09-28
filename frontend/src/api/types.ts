@@ -175,7 +175,7 @@ export interface Source {
   explanation?: string;
   updated_at?: string;
   file_type?: string;
-  /** Contradiction Radar (L5) — count of open contradictions touching this source's document. */
+  /** Contradiction Radar (L5) — count of open contradictions involving this source's chunk. */
   conflicts?: number;
 }
 
