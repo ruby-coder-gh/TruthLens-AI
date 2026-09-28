@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { clsx } from 'clsx';
 import {
   Key,
   Zap,
@@ -13,6 +14,7 @@ import {
 import { useState } from 'react';
 import WebSocketViz from './WebSocketViz';
 import { CATALOG_STATS } from './data';
+import { useReady } from '../../hooks/useReady';
 
 function AuthPanel() {
   const [copiedToken, setCopiedToken] = useState(false);
@@ -108,12 +110,28 @@ function QuickPlayground() {
   );
 }
 
+// R3-8: this card used to be entirely hard-coded — "Operational"/"Connected"
+// in green with a pulsing dot no matter what was actually happening. "API
+// Server" now reflects the real public health check (`GET /health/ready`,
+// the same endpoint the demo tour's warm-up toast polls via `useReady`).
+// "WebSocket" was dropped outright rather than faked — this page never opens
+// one, so there's no real signal to report (same call BUG-44 made for the
+// fabricated "Uptime %").
 function LiveStatus() {
+  const ready = useReady();
+  const checking = ready.isLoading;
+  const reachable = !checking && !!ready.ollama;
+
   return (
     <div className="rounded-xl glass border border-glass-border p-4">
       <div className="flex items-center gap-2 mb-3">
-        <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-green/12 border border-green/28">
-          <span className="w-2 h-2 rounded-full bg-green animate-pulse" />
+        <div
+          className={clsx(
+            'flex items-center justify-center w-6 h-6 rounded-lg border',
+            checking ? 'bg-card-2 border-border' : reachable ? 'bg-green/12 border-green/28' : 'bg-red/12 border-red/28',
+          )}
+        >
+          <span className={clsx('w-2 h-2 rounded-full', checking ? 'bg-text-dim' : reachable ? 'bg-green animate-pulse' : 'bg-red')} />
         </div>
         <span className="text-xs font-semibold uppercase tracking-wider text-text-dim">System Status</span>
       </div>
@@ -121,16 +139,9 @@ function LiveStatus() {
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
           <span className="text-text-muted">API Server</span>
-          <span className="flex items-center gap-1.5 text-green">
-            <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse-dot" />
-            Operational
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-text-muted">WebSocket</span>
-          <span className="flex items-center gap-1.5 text-green">
-            <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse-dot" />
-            Connected
+          <span className={clsx('flex items-center gap-1.5', checking ? 'text-text-dim' : reachable ? 'text-green' : 'text-red')}>
+            <span className={clsx('w-1.5 h-1.5 rounded-full', checking ? 'bg-text-dim' : reachable ? 'bg-green animate-pulse-dot' : 'bg-red')} />
+            {checking ? 'Checking…' : reachable ? 'Operational' : 'Unreachable'}
           </span>
         </div>
         <div className="flex items-center justify-between text-xs">
