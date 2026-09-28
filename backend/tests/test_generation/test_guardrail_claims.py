@@ -7,7 +7,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.generation import guardrail
-from app.generation.guardrail import _extract_claim_spans, _verdict, check
+from app.generation.guardrail import (
+    _doc_title,
+    _extract_claim_spans,
+    _is_heading_like,
+    _pick_evidence,
+    _verdict,
+    check,
+)
 
 CLAIM_KEYS = {
     "text", "start", "end", "verdict", "entailment", "contradiction", "source_index",
@@ -391,3 +398,150 @@ def test_premise_prefix_names_the_document():
     assert guardrail._premise_prefix({"document_name": "Northwind — Annual Report 2025.pdf"}) == "Northwind — Annual Report 2025: "
     assert guardrail._premise_prefix({"metadata": {"document_name": "notes.md"}}) == "notes: "
     assert guardrail._premise_prefix({}) == ""
+
+
+# ─── R2-4: honest "sources report X vs Y" claims must not fail ───
+
+
+class TestAlternativeValueClaims:
+    """A claim that presents >=2 distinct values as alternatives can't be
+    entailed as one NLI hypothesis. When every value is independently
+    grounded in some retrieved context, it must be `supported` -- never
+    unsupported/contradicted (real demo sentences, annual-report-2025.md /
+    sustainability-report-2025.md / leadership-team.md)."""
+
+    async def test_different_values_claim_is_supported_when_both_numbers_are_grounded(self):
+        answer = "Thus, the two sources provide different values: 41% and 34% [source:1][source:2]."
+        contexts = [
+            _ctx(0, "Emissions intensity was 41% below the 2020 baseline."),
+            _ctx(1, "Emissions intensity was 34% below the 2020 baseline."),
+        ]
+        result, _ = await _run(answer, contexts, [])
+        assert result.claims[0]["verdict"] == "supported"
+        assert result.passed is True
+
+    async def test_either_or_claim_is_supported_when_both_dates_are_grounded(self):
+        answer = "Thus, the start date for Dana Whitfield's tenure is reported as either March 2021 or January 2022 [source:1][source:2]."
+        contexts = [
+            _ctx(0, "Dana Whitfield became Chief Executive Officer in March 2021."),
+            _ctx(1, "Dana Whitfield became Chief Executive Officer in January 2022."),
+        ]
+        result, _ = await _run(answer, contexts, [])
+        assert result.claims[0]["verdict"] == "supported"
+        assert result.passed is True
+
+    async def test_while_reports_claim_is_supported_when_both_figures_are_grounded(self):
+        answer = (
+            "Revenue in 2025 was reported as €412 million in the Annual Report, "
+            "while the press release reports €412 million as €398 million [source:1][source:2]."
+        )
+        contexts = [
+            _ctx(0, "Revenue in 2025 was €412 million."),
+            _ctx(1, "Revenue in 2025 was €398 million."),
+        ]
+        result, _ = await _run(answer, contexts, [])
+        assert result.claims[0]["verdict"] == "supported"
+
+    async def test_alternatives_claim_without_grounding_is_not_forced_supported(self):
+        """Neither alternative value appears anywhere in the retrieved context --
+        this can't be verified, so it falls through to ordinary NLI scoring
+        (which the scripted NEUTRAL fallback fails), not a free pass."""
+        answer = "Thus, the two sources provide different values: 41% and 34% [source:1]."
+        result, _ = await _run(answer, [_ctx(0, "Revenue grew 12% in fiscal 2025.")], [])
+        assert result.claims[0]["verdict"] != "supported"
+
+    async def test_existing_disagree_and_discrepancy_meta_statements_are_unaffected(self):
+        """R2-4 regression guard: the original narrow disagree/discrepancy
+        meta-statement handling (exclude entirely, don't score) is untouched."""
+        result, _ = await _run(
+            "The sources disagree on the exact reduction.",
+            [_ctx(0, "Emissions fell.")],
+            [],
+        )
+        assert result.claims == [] and result.passed is True
+
+
+# ─── R2-4: bare list-item fragments aren't scored alone ──────────
+
+
+class TestFragmentMerging:
+    async def test_bare_date_fragment_is_merged_into_the_previous_claim(self):
+        """The exact QA3 repro: Aurora's commissioning date conflict, with the
+        second source's date landing on its own bullet line with no verb."""
+        answer = (
+            "Aurora's commissioning date is reported differently across sources: the Annual "
+            "Report states the third quarter of 2027 [source:1], while the board memorandum "
+            "reports\nFirst quarter of 2028 [source:2]"
+        )
+        contexts = [
+            _ctx(0, "Aurora is expected to commission in the third quarter of 2027."),
+            _ctx(1, "Aurora is now expected to commission in the first quarter of 2028."),
+        ]
+        result, _ = await _run(answer, contexts, [])
+        # Merged into one claim, not scored as two (the bare "First quarter
+        # of 2028" fragment never appears as its own claim object).
+        assert len(result.claims) == 1
+        assert "First quarter of 2028" in result.claims[0]["text"]
+        assert result.claims[0]["verdict"] == "supported"
+
+    async def test_leading_fragment_with_nothing_to_merge_into_is_dropped(self):
+        result, calls = await _run("First quarter of 2028", [_ctx(0, "Aurora commissions in 2028.")], [])
+        assert result.claims == [] and calls == []
+
+
+# ─── R3-1: evidence picking never prefers a heading over a real sentence ──
+
+
+class TestEvidencePicking:
+    async def test_evidence_prefers_the_fact_sentence_over_the_document_title(self):
+        """The exact QA3 repro: old sum-based overlap tied the title 6-6
+        against the real revenue sentence and picked the title (whichever
+        sentence came first). Numeric overlap alone now settles it (2 vs 1)."""
+        content = (
+            "Northwind Renewables — Annual Report 2025\n\n"
+            "Dear shareholders, Dana Whitfield became Chief Executive Officer in March 2021. "
+            "Revenue in 2025 was €412 million. This was up from €356 million in 2024."
+        )
+        answer = "Revenue in 2025 was reported as €412 million in the Annual Report 2025 [source:1]."
+        contexts = [_ctx(0, content, document_name="Annual Report 2025.pdf")]
+        result, _ = await _run(answer, contexts, [("Revenue", "Revenue", (0.9, 0.05, 0.05))])
+        assert result.claims[0]["evidence"] == "Revenue in 2025 was €412 million."
+
+    def test_pick_evidence_skips_a_tied_heading_for_a_tied_real_sentence(self):
+        sents = ["Q1 2028 Project Update", "The Q1 2028 project update was released."]
+        claim_words = guardrail._words("The project update for Q1 2028 was delayed.")
+        claim_numbers = guardrail._numbers("The project update for Q1 2028 was delayed.")
+        assert _pick_evidence(sents, claim_words, claim_numbers, "") == sents[1]
+
+    def test_pick_evidence_falls_back_to_the_heading_when_nothing_else_ties(self):
+        """If only a heading-like line scores, it's still better than nothing."""
+        sents = ["Q1 2028 Project Update"]
+        claim_words = guardrail._words("The project update for Q1 2028 was delayed.")
+        claim_numbers = guardrail._numbers("The project update for Q1 2028 was delayed.")
+        assert _pick_evidence(sents, claim_words, claim_numbers, "") == sents[0]
+
+    def test_pick_evidence_empty_when_nothing_overlaps(self):
+        assert _pick_evidence(["Unrelated text here."], {"foo"}, set(), "") == ""
+
+
+class TestIsHeadingLike:
+    def test_matches_the_document_title(self):
+        assert _is_heading_like("Annual Report 2025", "Annual Report 2025") is True
+        assert _is_heading_like("Revenue in the Annual Report 2025 was strong.", "Annual Report 2025") is False
+
+    def test_no_terminal_punctuation(self):
+        assert _is_heading_like("Northwind Renewables — Annual Report 2025", "") is True
+
+    def test_fewer_than_five_words(self):
+        assert _is_heading_like("Date: 8 December 2025.", "") is True
+
+    def test_a_real_sentence_is_not_heading_like(self):
+        assert _is_heading_like("Revenue in 2025 was €412 million.", "") is False
+
+    def test_empty_sentence_is_heading_like(self):
+        assert _is_heading_like("", "") is True
+
+
+def test_doc_title_strips_the_extension():
+    assert _doc_title({"document_name": "Annual Report 2025.pdf"}) == "Annual Report 2025"
+    assert _doc_title({}) == ""
