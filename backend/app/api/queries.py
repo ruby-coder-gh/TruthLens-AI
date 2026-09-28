@@ -16,6 +16,7 @@ from app.core.deps import check_workspace_access, get_accessible_workspace_ids, 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.query import Query
+from app.models.query_claims import QueryClaims
 from app.models.query_pin import QueryPin
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -26,6 +27,23 @@ from app.schemas.pin import QueryPinResponse
 from app.schemas.query import QueryDetailResponse, QuerySummary, SourceResponse
 from app.schemas.query_comparison import QueryComparisonResponse, QuerySourceDiff
 
+
+
+def stored_claims(query: Any) -> list[dict[str, Any]] | None:
+    """Decode the Truth Lens claims row loaded with `query`; None if it has none.
+
+    Reads `__dict__` so it never triggers a lazy load (which fails outside an
+    async greenlet): `Query.query_claims` is `selectin`, so rows fetched with
+    `select(Query)` already carry it.
+    """
+    row = query.__dict__.get("query_claims")
+    if row is None:
+        return None
+    try:
+        loaded = json.loads(row.claims or "[]")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return [claim for claim in loaded if isinstance(claim, dict)] if isinstance(loaded, list) else None
 
 
 def _deserialize_sources(query: Query) -> list[dict[str, Any]]:
@@ -112,6 +130,7 @@ def _to_detail(query: Query, *, is_pinned: bool = False) -> QueryDetailResponse:
         reviewed_by=query.reviewed_by,
         reviewed_at=query.reviewed_at,
         edge_case=query.edge_case,
+        claims=stored_claims(query),
         created_at=query.created_at,
     )
 
@@ -251,6 +270,7 @@ def _render_query_markdown(query: Query, sources: list[dict[str, Any]]) -> str:
         trust = f"{round(query.trust_score * 100)}%"
 
     sources_block = render_evidence_markdown(sources)
+    claims = stored_claims(query)
 
     return (
         "# TruthLens Export\n\n"
@@ -260,9 +280,33 @@ def _render_query_markdown(query: Query, sources: list[dict[str, Any]]) -> str:
         f"{answer}\n\n"
         "## Trust Score\n"
         f"{trust}\n\n"
-        "## Sources\n"
+        + (f"## Claim verification\n{_render_claims_markdown(claims)}\n\n" if claims else "")
+        + "## Sources\n"
         f"{sources_block}\n"
     )
+
+
+_VERDICT_LABELS = {
+    "supported": "✅ Supported",
+    "partial": "⚠️ Partial",
+    "unsupported": "❌ Unsupported",
+    "contradicted": "⛔ Contradicted",
+}
+
+
+def _render_claims_markdown(claims: list[dict[str, Any]]) -> str:
+    """One bullet per claim: verdict, text, the source it rests on, evidence quote."""
+    lines = []
+    for claim in claims:
+        label = _VERDICT_LABELS.get(claim.get("verdict"), "Unverified")
+        where = ""
+        if claim.get("source_index"):
+            page = f", p. {claim['page_number']}" if claim.get("page_number") is not None else ""
+            where = f" (source {claim['source_index']}: {claim.get('document_name') or 'unknown'}{page})"
+        lines.append(f"- {label}: {' '.join(str(claim.get('text', '')).split())}{where}")
+        if claim.get("evidence"):
+            lines.append(f"  > {' '.join(str(claim['evidence']).split())}")
+    return "\n".join(lines)
 
 
 @router.get("/queries/{query_id}/export")
@@ -485,6 +529,7 @@ async def compare_query_answer(
         compared_to_query_id=original.id,
         review_status="needs_review",
         edge_case=result.get("edge_case"),
+        query_claims=QueryClaims(claims=json.dumps(guardrail["claims"])) if guardrail.get("claims") else None,
     )
     db.add(rerun)
     await db.flush()

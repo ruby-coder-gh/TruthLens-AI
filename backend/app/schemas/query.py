@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_serializer
 
@@ -79,6 +79,23 @@ class SourceResponse(BaseModel):
     file_type: str | None = None
 
 
+class ClaimOut(BaseModel):
+    """One Truth Lens claim: an answer span, its NLI verdict and the chunk it rests on."""
+
+    text: str
+    start: int
+    end: int
+    verdict: Literal["supported", "partial", "unsupported", "contradicted"]
+    entailment: float
+    contradiction: float
+    source_index: int | None = None  # 1-based, same numbering as [source:N]
+    chunk_id: str | None = None
+    document_id: str | None = None
+    document_name: str | None = None
+    page_number: int | None = None
+    evidence: str | None = None
+
+
 class QueryDetailResponse(BaseModel):
     id: str
     workspace_id: str
@@ -102,6 +119,8 @@ class QueryDetailResponse(BaseModel):
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
     edge_case: str | None = None
+    # None = never verified (older rows, abstentions, NLI unavailable).
+    claims: list[ClaimOut] | None = None
     created_at: datetime
 
     _serialize_created_at = field_serializer("created_at")(utc_iso)

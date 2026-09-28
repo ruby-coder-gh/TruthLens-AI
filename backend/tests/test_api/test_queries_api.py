@@ -378,3 +378,109 @@ async def test_query_list_and_detail_expose_the_abstention_edge_case(
     detail = await client.get(f"/api/queries/{abstained.id}", headers=auth_headers)
     assert detail.status_code == 200
     assert detail.json()["edge_case"] == "insufficient_evidence"
+
+
+# ── Truth Lens claims ───────────────────────────────────────────
+
+SUPPORTED_CLAIM = {
+    "text": "RAG stands for Retrieval Augmented Generation.",
+    "start": 0,
+    "end": 46,
+    "verdict": "supported",
+    "entailment": 0.97,
+    "contradiction": 0.01,
+    "source_index": 1,
+    "chunk_id": "c1",
+    "document_id": "d1",
+    "document_name": "doc1.pdf",
+    "page_number": 2,
+    "evidence": "RAG is a technique that stands for Retrieval Augmented Generation.",
+}
+CONTRADICTED_CLAIM = {
+    **SUPPORTED_CLAIM,
+    "text": "RAG was invented in 1970.",
+    "start": 47,
+    "end": 72,
+    "verdict": "contradicted",
+    "entailment": 0.01,
+    "contradiction": 0.95,
+    "page_number": None,
+    "evidence": "RAG was introduced in 2020.",
+}
+
+
+@pytest.fixture
+async def seeded_claims(test_db: AsyncSession, seeded_query: tuple[str, str]) -> tuple[str, str]:
+    from app.models.query_claims import QueryClaims
+
+    ws_id, q_id = seeded_query
+    test_db.add(QueryClaims(query_id=q_id, claims=json.dumps([SUPPORTED_CLAIM, CONTRADICTED_CLAIM])))
+    await test_db.commit()
+    return ws_id, q_id
+
+
+@pytest.mark.asyncio
+async def test_query_detail_endpoints_return_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    ws_id, q_id = seeded_claims
+    for url in (f"/api/workspaces/{ws_id}/queries/{q_id}", f"/api/queries/{q_id}"):
+        resp = await client.get(url, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["claims"] == [SUPPORTED_CLAIM, CONTRADICTED_CLAIM]
+
+
+@pytest.mark.asyncio
+async def test_query_detail_without_claims_row_has_null_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_query: tuple[str, str]
+):
+    ws_id, q_id = seeded_query
+    resp = await client.get(f"/api/workspaces/{ws_id}/queries/{q_id}", headers=auth_headers)
+    assert resp.json()["claims"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_list_does_not_carry_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    ws_id, _ = seeded_claims
+    resp = await client.get(f"/api/workspaces/{ws_id}/queries", headers=auth_headers)
+    assert all("claims" not in item for item in resp.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_delete_query_removes_its_claims_row(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, seeded_claims: tuple[str, str]
+):
+    from sqlalchemy import select
+
+    from app.models.query_claims import QueryClaims
+
+    ws_id, q_id = seeded_claims
+    resp = await client.delete(f"/api/workspaces/{ws_id}/queries/{q_id}", headers=auth_headers)
+    assert resp.status_code == 204
+    remaining = (await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == q_id))).all()
+    assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_export_includes_claim_verification(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    _, q_id = seeded_claims
+    body = (await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)).text
+    assert "## Claim verification" in body
+    assert "✅ Supported: RAG stands for Retrieval Augmented Generation. (source 1: doc1.pdf, p. 2)" in body
+    assert "⛔ Contradicted: RAG was invented in 1970. (source 1: doc1.pdf)" in body
+    assert "> RAG was introduced in 2020." in body
+    # Section sits between the trust score and the sources.
+    assert body.index("## Trust Score") < body.index("## Claim verification") < body.index("## Sources")
+
+
+@pytest.mark.asyncio
+async def test_export_without_claims_has_no_claim_section(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_query: tuple[str, str]
+):
+    _, q_id = seeded_query
+    body = (await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)).text
+    assert "Claim verification" not in body

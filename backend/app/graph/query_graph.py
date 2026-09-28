@@ -219,6 +219,7 @@ async def _guardrail_node(state: GraphState) -> dict:
             "score": guardrail_result.score,
             "unsupported_claims": guardrail_result.unsupported_claims,
             "details": guardrail_result.details,
+            "claims": guardrail_result.claims,
         }
     }
 
