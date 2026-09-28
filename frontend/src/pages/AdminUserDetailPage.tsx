@@ -16,7 +16,9 @@ interface AdminUser {
   email: string;
   role: string;
   is_active: boolean;
-  last_login?: string;
+  // BUG-35: the API field is `last_login_at`, not `last_login` — reading the
+  // wrong key always fell through to "Never".
+  last_login_at?: string | null;
   created_at: string;
 }
 
@@ -49,6 +51,12 @@ export default function AdminUserDetailPage() {
   const [queries, setQueries] = useState<RecentQuery[]>([]);
   const [confirmModal, setConfirmModal] = useState<{ action: 'deactivate' | 'delete' } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  // BUG-39: a role change (especially promoting to admin) ran instantly with
+  // no confirmation. `pendingRole` holds the value picked in the <select>
+  // until the admin confirms it in a modal; the <select> itself stays on the
+  // current role until then.
+  const [pendingRole, setPendingRole] = useState<string | null>(null);
+  const [roleLoading, setRoleLoading] = useState(false);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -83,6 +91,21 @@ export default function AdminUserDetailPage() {
       addToast(err instanceof Error ? err.message : 'Failed to update user status', 'error');
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleRoleChange() {
+    if (!pendingRole || !user) return;
+    setRoleLoading(true);
+    try {
+      const updated = await adminApi.updateUserRole(user.id, pendingRole);
+      setUser(updated as AdminUser);
+      addToast(`Role changed to ${pendingRole}`, 'success');
+      setPendingRole(null);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
+    } finally {
+      setRoleLoading(false);
     }
   }
 
@@ -194,7 +217,7 @@ export default function AdminUserDetailPage() {
           </div>
           <div>
             <p className="text-xs text-text-dim">Last Login</p>
-            <p className="flex items-center gap-1 text-xs text-text"><Clock size={11} /> {user.last_login ? formatDate(user.last_login) : 'Never'}</p>
+            <p className="flex items-center gap-1 text-xs text-text"><Clock size={11} /> {user.last_login_at ? formatDate(user.last_login_at) : 'Never'}</p>
           </div>
           <div>
             <p className="text-xs text-text-dim">Role</p>
@@ -203,15 +226,9 @@ export default function AdminUserDetailPage() {
             <div className="relative inline-flex">
             <select
               value={user.role}
-              onChange={async (e) => {
+              onChange={(e) => {
                 const newRole = e.target.value;
-                try {
-                  await adminApi.updateUserRole(user.id, newRole);
-                  setUser((prev) => prev ? { ...prev, role: newRole } : null);
-                  addToast(`Role changed to ${newRole}`, 'success');
-                } catch (err) {
-                  addToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
-                }
+                if (newRole !== user.role) setPendingRole(newRole);
               }}
               className="appearance-none rounded-chip border border-border bg-solid py-1 pl-2 pr-7 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
               aria-label="Change user role"
@@ -311,6 +328,33 @@ export default function AdminUserDetailPage() {
               {confirmModal?.action === 'delete' ? 'Delete' : user?.is_active ? 'Deactivate' : 'Activate'}
             </Button>
             <Button variant="secondary" size="sm" onClick={() => setConfirmModal(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Role change confirmation */}
+      <Modal open={pendingRole !== null} onClose={() => setPendingRole(null)} title="Change role">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-card border border-orange/30 bg-orange/10 p-4">
+            <AlertTriangle size={20} className="text-orange shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-orange">
+                Change {user.username}&apos;s role from {user.role} to {pendingRole}?
+              </p>
+              <p className="text-xs text-text-muted mt-1">
+                {pendingRole === 'admin'
+                  ? 'This grants full administrative access, including user management and system settings.'
+                  : 'This removes administrative access.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="danger" size="sm" loading={roleLoading} onClick={() => void handleRoleChange()}>
+              Change role
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPendingRole(null)}>
               Cancel
             </Button>
           </div>
