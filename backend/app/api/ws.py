@@ -20,7 +20,9 @@ from app.api.stream_registry import (
 )
 from app.core.auth import decode_token
 from app.database import async_session_factory
+from app.api.queries import stored_claims
 from app.models.query import Query
+from app.models.query_claims import QueryClaims
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
@@ -150,6 +152,7 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
         {"query_id": query.id, "content": query.response_text or "", "index": 0},
     )
     if query.guardrail_score is not None and query.guardrail_passed is not None:
+        claims = stored_claims(query) or []
         await sink.emit(
             "guardrail",
             {
@@ -157,6 +160,10 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
                 "passed": query.guardrail_passed,
                 "score": query.guardrail_score,
                 "details": "Served from cached result.",
+                "claims": claims,
+                "unsupported_claims": [
+                    c.get("text") for c in claims if c.get("verdict") in ("unsupported", "contradicted")
+                ],
             },
         )
     if query.trust_score is not None:
@@ -363,6 +370,8 @@ async def _run_query_pipeline(
         )
 
         guardrail_result = await guardrail_check(full_text, contexts)
+        # getattr: test doubles (and any older guardrail) may not carry claims.
+        claims = getattr(guardrail_result, "claims", None) or []
 
         await sink.emit(
             "guardrail",
@@ -371,6 +380,8 @@ async def _run_query_pipeline(
                 "passed": guardrail_result.passed,
                 "score": guardrail_result.score,
                 "details": guardrail_result.details,
+                "claims": claims,
+                "unsupported_claims": list(getattr(guardrail_result, "unsupported_claims", None) or []),
             },
         )
 
@@ -435,6 +446,7 @@ async def _run_query_pipeline(
             document_version=document_version,
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
+            claims=claims,
         )
 
     except asyncio.CancelledError:
@@ -477,8 +489,9 @@ async def _save_query(
     sufficiency: dict[str, Any] | None = None,
     prompt_tokens: int | None = None,
     prompt_version: str | None = None,
+    claims: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Save query result to database."""
+    """Save query result (and its Truth Lens claims, if any) in one transaction."""
     import json as json_mod
 
     async with async_session_factory() as db:
@@ -503,6 +516,7 @@ async def _save_query(
             sufficiency=sufficiency,
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
+            query_claims=QueryClaims(claims=json_mod.dumps(claims)) if claims else None,
         )
         db.add(query)
         await db.commit()
