@@ -1,0 +1,13 @@
+name,technology,mw,country,status,expected_cod
+Aurora,offshore_wind,600,United Kingdom,construction,2027-Q3
+Fjellheim Repowering,onshore_wind,35,Norway,construction,2026-Q4
+Kestrel Ridge II,onshore_wind,120,Ireland,permitting,2028-Q2
+Solheim Solar Park,solar,80,Denmark,construction,2026-Q2
+Meridian Extension,offshore_wind,150,United Kingdom,early_development,2029-Q4
+Birkholm Solar,solar,45,Germany,permitting,2027-Q4
+Nordvik Onshore,onshore_wind,90,Sweden,early_development,2029-Q2
+Ashford Solar,solar,60,United Kingdom,construction,2026-Q3
+Tallberg Wind,onshore_wind,75,Sweden,permitting,2027-Q3
+Caldera Storage,battery_storage,50,Spain,early_development,2028-Q4
+Lindholm Solar,solar,38,Denmark,construction,2026-Q1
+Westerly Point,offshore_wind,400,Netherlands,early_development,2030-Q3

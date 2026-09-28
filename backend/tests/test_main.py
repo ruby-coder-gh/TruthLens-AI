@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from httpx import AsyncClient
 
@@ -158,3 +160,66 @@ class TestLifespanShutdown:
             pass
 
         assert calls[-2:] == ["drain", "dispose"]
+
+
+class TestLifespanWarmup:
+    """DEMO_MODE/DEMO_WARMUP starts a tracked background warmup task."""
+
+    @pytest.mark.asyncio
+    async def test_starts_background_warmup_on_startup(self, monkeypatch, tmp_path):
+        import app.main as main_module
+        from app.demo import warmup
+
+        TestLifespanShutdown._isolate_data_dirs(monkeypatch, tmp_path)
+        monkeypatch.setattr(main_module, "engine", TestLifespanShutdown._fake_engine([]))
+
+        async def fake_drain(timeout):
+            return 0
+
+        monkeypatch.setattr(main_module, "drain_pipeline_tasks", fake_drain)
+
+        started = {"called": False}
+
+        def fake_start_warmup():
+            started["called"] = True
+            return asyncio.ensure_future(asyncio.sleep(0))
+
+        monkeypatch.setattr(warmup, "start_warmup", fake_start_warmup)
+
+        async with main_module.lifespan(main_module.create_app()):
+            pass
+
+        assert started["called"] is True
+
+    @pytest.mark.asyncio
+    async def test_cancels_a_still_running_warmup_task_at_shutdown(self, monkeypatch, tmp_path):
+        import app.main as main_module
+        from app.demo import warmup
+
+        TestLifespanShutdown._isolate_data_dirs(monkeypatch, tmp_path)
+        monkeypatch.setattr(main_module, "engine", TestLifespanShutdown._fake_engine([]))
+
+        async def fake_drain(timeout):
+            return 0
+
+        monkeypatch.setattr(main_module, "drain_pipeline_tasks", fake_drain)
+
+        async def _never_finishes():
+            await asyncio.sleep(3600)
+
+        task_holder: dict[str, asyncio.Task] = {}
+
+        def fake_start_warmup():
+            task = asyncio.ensure_future(_never_finishes())
+            task_holder["task"] = task
+            return task
+
+        monkeypatch.setattr(warmup, "start_warmup", fake_start_warmup)
+
+        async with main_module.lifespan(main_module.create_app()):
+            pass
+        # cancel() only requests cancellation — give the loop one tick to
+        # actually deliver it before asserting the task stopped.
+        await asyncio.sleep(0)
+
+        assert task_holder["task"].cancelled() or task_holder["task"].done()

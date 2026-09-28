@@ -1,0 +1,65 @@
+{
+  "workspace_name": "Northwind Renewables — Due Diligence",
+  "docs": [
+    {
+      "source": "annual-report-2025.md",
+      "format": "pdf",
+      "title": "Northwind Renewables — Annual Report 2025"
+    },
+    {
+      "source": "q4-2025-press-release.md",
+      "format": "pdf",
+      "title": "Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results"
+    },
+    {
+      "source": "sustainability-report-2025.md",
+      "format": "pdf",
+      "title": "Northwind Renewables — 2025 Sustainability Report"
+    },
+    {
+      "source": "board-memo-aurora.md",
+      "format": "docx",
+      "title": "Board Memorandum: Aurora Offshore Wind Project Update"
+    },
+    {
+      "source": "leadership-team.md",
+      "format": "md",
+      "title": "Northwind Renewables — Leadership Team"
+    },
+    {
+      "source": "project-pipeline.csv",
+      "format": "csv",
+      "title": "Northwind Renewables — Project Pipeline"
+    }
+  ],
+  "suggested_questions": [
+    "What was Northwind Renewables' revenue in 2025?",
+    "When is the Aurora offshore wind project expected to be commissioned?",
+    "How much has Northwind Renewables reduced its emissions intensity versus 2020?",
+    "Who is the CEO of Northwind Renewables and when did they start?",
+    "Which projects in the pipeline are currently under construction?",
+    "What are the key risks facing the Aurora project?"
+  ],
+  "planted_contradictions": [
+    {
+      "topic": "2025 revenue",
+      "docs": ["annual-report-2025.md", "q4-2025-press-release.md"],
+      "values": ["€412 million", "€398 million"]
+    },
+    {
+      "topic": "Emissions intensity vs. 2020",
+      "docs": ["annual-report-2025.md", "sustainability-report-2025.md"],
+      "values": ["-34%", "-41%"]
+    },
+    {
+      "topic": "Aurora commissioning date",
+      "docs": ["annual-report-2025.md", "q4-2025-press-release.md", "board-memo-aurora.md"],
+      "values": ["Q3 2027", "Q3 2027", "Q1 2028"]
+    },
+    {
+      "topic": "Dana Whitfield's CEO start date",
+      "docs": ["annual-report-2025.md", "leadership-team.md"],
+      "values": ["March 2021", "January 2022"]
+    }
+  ]
+}
