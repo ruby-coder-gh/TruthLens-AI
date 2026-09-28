@@ -123,6 +123,23 @@ async def test_load_pdf_returns_one_clean_paragraph_per_text_block(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_load_docx_separates_paragraphs_with_blank_lines(tmp_path: Path):
+    """Same contract as PDF blocks: a blank line is a hard paragraph break, so a heading is
+    never read as the start of the sentence below it (a single newline may be a soft wrap)."""
+    from docx import Document as DocxDocument
+
+    path = tmp_path / "memo.docx"
+    doc = DocxDocument()
+    doc.add_heading("Outlook", level=2)
+    doc.add_paragraph("2026 capital expenditure guidance is €640 million.")
+    doc.save(str(path))
+
+    pages = await load(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    assert pages[0]["text"] == "Outlook\n\n2026 capital expenditure guidance is €640 million."
+
+
+@pytest.mark.asyncio
 async def test_load_pdf_rejoins_words_hyphenated_across_lines(tmp_path: Path):
     import fitz
 

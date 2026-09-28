@@ -96,8 +96,9 @@ def _load_docx(path: Path) -> list[dict[str, Any]]:
         if para.text.strip():
             full_text.append(para.text.strip())
 
-    # DOCX doesn't have page numbers natively; treat as single page
-    text = "\n".join(full_text)
+    # DOCX doesn't have page numbers natively; treat as single page. Blank
+    # line between paragraphs, as for PDF blocks.
+    text = "\n\n".join(full_text)
     if text:
         pages.append({
             "text": text,
