@@ -7,7 +7,8 @@ import { SourceViewerProvider } from '../context/SourceViewerContext';
 import ChatPage from './ChatPage';
 import { queryApi } from '../api/client';
 import type { QueryWebSocketCallbacks } from '../api/websocket';
-import type { Source } from '../api/types';
+import type { Claim, Source } from '../api/types';
+import { __resetTruthLensForTests } from '../components/truth-lens/AnswerBody';
 
 function makeSource(overrides: Partial<Source> = {}): Source {
   return {
@@ -21,9 +22,36 @@ function makeSource(overrides: Partial<Source> = {}): Source {
   };
 }
 
+function makeClaim(overrides: Partial<Claim> = {}): Claim {
+  const text = overrides.text ?? 'Revenue grew 12%.';
+  return {
+    text,
+    start: 0,
+    end: text.length, // matches `text` unless the caller overrides both.
+    verdict: 'supported',
+    entailment: 0.91,
+    contradiction: 0.02,
+    source_index: 1,
+    chunk_id: 'chunk-1',
+    document_id: 'doc-1',
+    document_name: 'Alpha Report',
+    page_number: 3,
+    evidence: 'Revenue increased by 12 percent year over year.',
+    ...overrides,
+  };
+}
+
 vi.mock('../api/client', () => ({
   feedbackApi: { submit: vi.fn() },
   queryApi: { exportMarkdown: vi.fn().mockResolvedValue({ blob: new Blob(['#']), filename: 'a.md' }) },
+}));
+
+// AnswerBody's "View in document" calls useSourceViewer() — the real context
+// (SourceViewerProvider, lane L8) isn't mounted by renderWithProviders, so
+// stub the hook the same way every lane's tests will need to.
+const mockOpenSourceViewer = vi.fn();
+vi.mock('../context/SourceViewerContext', () => ({
+  useSourceViewer: () => ({ open: mockOpenSourceViewer, close: vi.fn(), target: null }),
 }));
 
 const { mockConnect, mockDisconnect, mockCancel, instances } = vi.hoisted(() => ({
@@ -101,6 +129,10 @@ describe('ChatPage', () => {
     mockConnect.mockClear();
     mockDisconnect.mockClear();
     mockCancel.mockClear();
+    mockOpenSourceViewer.mockClear();
+    // Truth Lens toggle is (in this jsdom setup, in-memory) shared/global —
+    // start every test from its OFF default instead of leaking state.
+    __resetTruthLensForTests();
   });
 
   it('renders the empty state before any query has been sent', () => {
@@ -408,5 +440,145 @@ describe('ChatPage', () => {
     expect(alert).toHaveTextContent('Connection lost');
     expect(alert).toHaveTextContent('Lost connection to the server.');
     expect(screen.getByRole('button', { name: /retry this question/i })).toBeInTheDocument();
+  });
+
+  // ─── Truth Lens (L2) ───────────────────────────────────────────────────────
+
+  it('shows a claim-verdict summary chip once the guardrail frame carries claims', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.('Revenue grew 12%. It rained yesterday. Sales fell 5%.');
+      callbacks.onGuardrail?.({
+        passed: false,
+        score: 0.7,
+        details: '[]',
+        claims: [
+          makeClaim({ verdict: 'supported' }),
+          makeClaim({ text: 'Sales fell 5%.', verdict: 'partial', chunk_id: 'chunk-2' }),
+          makeClaim({ text: 'It rained yesterday.', verdict: 'unsupported', chunk_id: 'chunk-3' }),
+        ],
+        unsupportedClaims: ['It rained yesterday.'],
+      });
+      callbacks.onComplete?.({
+        query_id: 'q-lens-1',
+        latency_ms: 400,
+        model_used: 'qwen3:4b',
+        token_count: 12,
+        from_cache: false,
+      });
+    });
+
+    expect(screen.getByText('3 claims · 1 verified · 1 partial · 1 unsupported')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /truth lens/i })).toBeInTheDocument();
+  });
+
+  it('toggling Truth Lens renders a verdict-styled span at the claim\'s exact offsets', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const claimText = 'Revenue grew 12%.';
+    const content = `${claimText} It rained yesterday.`;
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.(content);
+      callbacks.onGuardrail?.({
+        passed: true,
+        score: 0.9,
+        details: '',
+        claims: [makeClaim({ text: claimText, verdict: 'supported' })],
+        unsupportedClaims: [],
+      });
+      callbacks.onComplete?.({
+        query_id: 'q-lens-2',
+        latency_ms: 300,
+        model_used: 'qwen3:4b',
+        token_count: 8,
+        from_cache: false,
+      });
+    });
+
+    // Off by default — no styled claim span yet.
+    expect(screen.queryByRole('button', { name: /supported claim/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /truth lens/i }));
+
+    const span = screen.getByRole('button', { name: /supported claim/i });
+    expect(span).toHaveTextContent(claimText);
+    // The rest of the answer still renders as plain text alongside the span.
+    expect(screen.getByText(/It rained yesterday\./)).toBeInTheDocument();
+  });
+
+  it('a claim hover card shows its evidence and "View in document" calls the source viewer', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText('Type your question'), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const claimText = 'Revenue grew 12%.';
+    const { callbacks } = instances[0];
+
+    act(() => {
+      callbacks.onToken?.(claimText);
+      callbacks.onGuardrail?.({
+        passed: true,
+        score: 0.9,
+        details: '',
+        claims: [makeClaim({ text: claimText, verdict: 'supported' })],
+        unsupportedClaims: [],
+      });
+      callbacks.onComplete?.({
+        query_id: 'q-lens-3',
+        latency_ms: 300,
+        model_used: 'qwen3:4b',
+        token_count: 8,
+        from_cache: false,
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: /truth lens/i }));
+    const span = screen.getByRole('button', { name: /supported claim/i });
+
+    // Focus is the keyboard-equivalent of hover — opens the card with no delay.
+    act(() => {
+      span.focus();
+    });
+
+    expect(screen.getByText(/Revenue increased by 12 percent/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /view in document/i }));
+
+    expect(mockOpenSourceViewer).toHaveBeenCalledWith({
+      workspaceId: 'ws-1',
+      documentId: 'doc-1',
+      chunkId: 'chunk-1',
+      documentName: 'Alpha Report',
+      pageNumber: 3,
+    });
+  });
+
+  it('clicking a suggested question sends it immediately instead of only filling the input', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    const question = 'What are the key findings in my documents?';
+    await user.click(screen.getByRole('button', { name: question }));
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].query).toBe(question);
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    // Sent immediately — not just parked in the composer.
+    expect(screen.getByLabelText('Type your question')).toHaveValue('');
   });
 });

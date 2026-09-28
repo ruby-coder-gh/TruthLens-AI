@@ -1,4 +1,4 @@
-import type { QueryEdgeCase, Source, SufficiencyVerdict } from './types';
+import type { Claim, QueryEdgeCase, Source, SufficiencyVerdict } from './types';
 import { attemptTokenRefresh } from './client';
 
 /**
@@ -29,7 +29,14 @@ export interface QueryCompleteResult {
 export interface QueryWebSocketCallbacks {
   onToken?: (token: string) => void;
   onSource?: (source: Source) => void;
-  onGuardrail?: (result: { passed: boolean; score: number; details: string }) => void;
+  onGuardrail?: (result: {
+    passed: boolean;
+    score: number;
+    details: string;
+    /** Truth Lens (L1) — per-claim verdicts. Empty when the answer had none. */
+    claims: Claim[];
+    unsupportedClaims: string[];
+  }) => void;
   onTrustScore?: (score: number, components: Record<string, number>) => void;
   onComplete?: (result: QueryCompleteResult) => void;
   onError?: (code: string, message: string) => void;
@@ -66,6 +73,8 @@ interface WSSourcePayload {
   explanation?: string;
   updated_at?: string;
   file_type?: string;
+  /** Contradiction Radar (L5) — open contradictions touching this chunk's document. */
+  conflicts?: number;
 }
 
 /** Payload fields the server may attach to a message envelope. */
@@ -77,6 +86,9 @@ interface WSMessagePayload {
   score?: number;
   details?: string;
   components?: Record<string, number>;
+  /** Truth Lens (L1) — carried on the `guardrail` frame. */
+  claims?: Claim[];
+  unsupported_claims?: string[];
   query_id?: string;
   latency_ms?: number;
   model_used?: string;
@@ -424,6 +436,7 @@ export class QueryWebSocket {
               explanation: s.explanation,
               updated_at: s.updated_at,
               file_type: s.file_type,
+              conflicts: s.conflicts,
             };
             this.callbacks.onSource?.(source);
           }
@@ -436,6 +449,8 @@ export class QueryWebSocket {
           passed: payload.passed ?? false,
           score: payload.score ?? 0,
           details: payload.details ?? '',
+          claims: payload.claims ?? [],
+          unsupportedClaims: payload.unsupported_claims ?? [],
         });
         break;
       }

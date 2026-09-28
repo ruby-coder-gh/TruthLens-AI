@@ -11,6 +11,8 @@ import AnswerComparison from '../components/AnswerComparison';
 import AnnotationThread from '../components/AnnotationThread';
 import AbstentionCard from '../components/AbstentionCard';
 import { getRelevanceMeta, getTrustBadgeColor } from '../utils/relevance';
+import { AnswerBody } from '../components/truth-lens/AnswerBody';
+import { SealReceiptButton } from '../components/SealReceiptButton';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -182,9 +184,24 @@ export default function ChatDetailPage() {
                 </div>
               ) : (
                 <>
-                  <div className="mt-2 text-sm text-text leading-relaxed whitespace-pre-wrap">
-                    {query.response_text || <span className="text-text-dim">No response</span>}
-                  </div>
+                  {query.response_text ? (
+                    <div className="mt-2">
+                      <AnswerBody
+                        messageId={query.id}
+                        content={query.response_text}
+                        sources={sources}
+                        claims={query.claims}
+                        workspaceId={query.workspace_id}
+                        onSourceClick={(source) => {
+                          document
+                            .getElementById(`source-${source.chunk_id}`)
+                            ?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-text-dim">No response</p>
+                  )}
 
                   {/* Trust score */}
                   {query.trust_score !== undefined && (
@@ -199,6 +216,10 @@ export default function ChatDetailPage() {
                       )}
                     </div>
                   )}
+
+                  <div className="mt-2">
+                    <SealReceiptButton queryId={query.id} />
+                  </div>
                 </>
               )}
 
@@ -240,7 +261,11 @@ export default function ChatDetailPage() {
                   well painted nothing at all. It holds a quoted source
                   excerpt, so it takes the opaque field. */}
               {sources.map((s, i) => (
-                <div key={s.chunk_id || i} className="rounded-control border border-border bg-solid p-3 text-sm">
+                <div
+                  key={s.chunk_id || i}
+                  id={`source-${s.chunk_id || i}`}
+                  className="rounded-control border border-border bg-solid p-3 text-sm"
+                >
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <span className="text-xs font-medium text-primary-soft truncate">
                       {s.document_name || `Source ${i + 1}`}
