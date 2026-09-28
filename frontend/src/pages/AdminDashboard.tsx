@@ -665,7 +665,7 @@ function AuditLogsTab({
             <tr className="border-b border-border bg-card-2/80">
               <th className="px-4 py-3 font-medium text-text-muted w-10" />
               <th className="px-4 py-3 font-medium text-text-muted">Timestamp</th>
-              <th className="px-4 py-3 font-medium text-text-muted">User ID</th>
+              <th className="px-4 py-3 font-medium text-text-muted">User</th>
               <th className="px-4 py-3 font-medium text-text-muted">Action</th>
               <th className="px-4 py-3 font-medium text-text-muted">Resource</th>
               <th className="px-4 py-3 font-medium text-text-muted">Details</th>
@@ -701,14 +701,21 @@ function AuditLogsTab({
                   <td className="whitespace-nowrap px-4 py-3 text-text tabular-nums">
                     {formatTimestamp(entry.created_at)}
                   </td>
-                  {/* `user_id` is an `ondelete=SET NULL` FK — deleting a user
-                      must not white-screen the activity table. */}
-                  <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                    {!entry.user_id
-                      ? '—'
-                      : entry.user_id.length > 12
-                        ? `${entry.user_id.slice(0, 12)}…`
-                        : entry.user_id}
+                  {/* BUG-36: show the resolved username, same as the
+                      dedicated audit-log page — the raw `user_id` is only a
+                      fallback for older responses or a deleted user (an
+                      `ondelete=SET NULL` FK, which must not white-screen
+                      this table). */}
+                  <td className="px-4 py-3 text-xs text-text-muted">
+                    {entry.user_name ?? (
+                      <span className="font-mono">
+                        {!entry.user_id
+                          ? '—'
+                          : entry.user_id.length > 12
+                            ? `${entry.user_id.slice(0, 12)}…`
+                            : entry.user_id}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <Badge color={actionBadgeColor(entry.action)}>
