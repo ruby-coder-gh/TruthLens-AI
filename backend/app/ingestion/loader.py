@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 import unicodedata
 from pathlib import Path
@@ -42,6 +43,8 @@ async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
         return _load_markdown(path)
     elif mime_type == "text/csv":
         return _load_csv(path)
+    elif mime_type == "application/json":
+        return _load_json(path)
     else:
         raise ValueError(f"Unsupported mime type: {mime_type}")
 
@@ -164,4 +167,47 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
             })
 
     logger.info("csv_loaded", rows=len(pages), path=str(path))
+    return pages
+
+
+def _flatten_json(obj: Any, prefix: str = "") -> list[str]:
+    """Flatten nested JSON into 'key.path: value' lines (R2-5)."""
+    if isinstance(obj, dict):
+        lines: list[str] = []
+        for key, value in obj.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            lines.extend(_flatten_json(value, path))
+        return lines
+    if isinstance(obj, list):
+        lines = []
+        for i, value in enumerate(obj):
+            lines.extend(_flatten_json(value, f"{prefix}[{i}]"))
+        return lines
+    return [f"{prefix}: {obj}"]
+
+
+def _load_json(path: Path) -> list[dict[str, Any]]:
+    """R2-5: JSON gets the same per-row retrievability as CSV. A top-level
+    array of records becomes one page per item; a single object becomes one
+    page. Each page's text is its 'key.path: value' lines (`_flatten_json`),
+    so a JSON upload no longer raises "Unsupported mime type" -- the upload
+    UI already advertises it (BUG-23) but the loader had no branch for it.
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}") from e
+
+    pages: list[dict[str, Any]] = []
+    items = data if isinstance(data, list) else [data]
+    per_item_page = isinstance(data, list)
+    for i, item in enumerate(items):
+        text = "\n".join(_flatten_json(item))
+        if not text.strip():
+            continue
+        metadata = {"source": path.name, "row_index": i} if per_item_page else {"source": path.name}
+        pages.append({"text": text, "page_number": None, "metadata": metadata})
+
+    logger.info("json_loaded", pages=len(pages), path=str(path))
     return pages

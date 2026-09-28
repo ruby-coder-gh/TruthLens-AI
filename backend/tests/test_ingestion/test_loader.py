@@ -71,6 +71,56 @@ async def test_load_csv_one_chunk_per_row(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_load_json_object_flattens_to_key_path_value_lines(tmp_path: Path):
+    """R2-5: a JSON object is flattened to 'key.path: value' lines instead of
+    raising "Unsupported mime type" (the upload UI already advertises JSON)."""
+    path = tmp_path / "facts.json"
+    path.write_text('{"company": {"name": "Northwind", "founded": 2015}, "active": true}')
+    pages = await load(path, "application/json")
+
+    assert len(pages) == 1
+    lines = pages[0]["text"].splitlines()
+    assert "company.name: Northwind" in lines
+    assert "company.founded: 2015" in lines
+    assert "active: True" in lines
+    assert pages[0]["page_number"] is None
+
+
+@pytest.mark.asyncio
+async def test_load_json_array_is_one_page_per_item(tmp_path: Path):
+    """R2-5: a JSON array of records gets the same per-row retrievability as
+    CSV -- one page per item, so a single record stays independently findable."""
+    path = tmp_path / "rows.json"
+    path.write_text(
+        '[{"project": "Aurora", "status": "construction"},'
+        ' {"project": "Kestrel Ridge", "status": "commissioned"}]'
+    )
+    pages = await load(path, "application/json")
+
+    assert len(pages) == 2
+    assert pages[0]["text"] == "project: Aurora\nstatus: construction"
+    assert pages[1]["text"] == "project: Kestrel Ridge\nstatus: commissioned"
+
+
+@pytest.mark.asyncio
+async def test_load_json_invalid_raises_value_error(tmp_path: Path):
+    """R2-5: malformed JSON fails ingestion with a clear error, not a bare
+    "Unsupported mime type" or an unhandled exception."""
+    path = tmp_path / "bad.json"
+    path.write_text("{not valid json")
+    with pytest.raises(ValueError, match="Invalid JSON"):
+        await load(path, "application/json")
+
+
+@pytest.mark.asyncio
+async def test_load_json_empty_object_returns_no_pages(tmp_path: Path):
+    path = tmp_path / "empty.json"
+    path.write_text("{}")
+    pages = await load(path, "application/json")
+    assert pages == []
+
+
+@pytest.mark.asyncio
 async def test_load_pdf_reverses_ligature_glyphs():
     """PyMuPDF's `Story` HTML layout (used to build the demo corpus PDFs) can
     substitute a single ligature glyph for an "fi"/"fl" letter pair (e.g.
