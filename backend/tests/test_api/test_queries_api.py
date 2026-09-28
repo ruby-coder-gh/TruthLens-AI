@@ -11,6 +11,7 @@ from app.api.queries import MAX_PAGE_SIZE
 from app.core.auth import create_access_token
 from app.models.query import Query
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 
 
 @pytest.fixture
@@ -56,6 +57,39 @@ async def seeded_query(
 
 
 # ── List ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_list_all_queries_mine_true_filters_to_caller(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """C3: GET /api/queries?mine=true returns only the caller's own queries,
+    not every workspace member's (BUG-59: the sidebar "Recent" list implies
+    "your recent chats")."""
+    owner = User(email="mine-owner@example.com", username="mineowner", password_hash="x", role="user", is_active=True)
+    other = User(email="mine-other@example.com", username="mineother", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, other])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(other)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Mine WS"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=other.id, role="viewer"))
+    test_db.add(Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question"))
+    test_db.add(Query(workspace_id=ws_id, user_id=other.id, query_text="Other member question"))
+    await test_db.commit()
+
+    resp = await client.get("/api/queries?mine=true", headers=owner_headers)
+    assert resp.status_code == 200
+    texts = [row["query_text"] for row in resp.json()["data"]]
+    assert texts == ["Owner question"]
+
+    # Without mine=true, the endpoint still lists every accessible query.
+    resp_all = await client.get("/api/queries", headers=owner_headers)
+    assert len(resp_all.json()["data"]) == 2
+
 
 @pytest.mark.asyncio
 async def test_list_queries(
