@@ -61,3 +61,35 @@ class InvestigationResponse(BaseModel):
     _serialize_created_at = field_serializer("created_at")(utc_iso)
     _serialize_updated_at = field_serializer("updated_at")(utc_iso)
     _serialize_reviewed_at = field_serializer("reviewed_at")(utc_iso)
+
+
+class InvestigationStartResponse(BaseModel):
+    """Returned immediately by `POST .../investigate` (202, BUG-10) — the
+    graph now runs in a tracked background task; poll `.../progress` for the
+    rest."""
+
+    id: str
+    workspace_id: str
+    status: Literal["running"] = "running"
+
+
+class InvestigationSubQuestionProgress(BaseModel):
+    text: str
+    status: Literal["pending", "running", "done"]
+
+
+class InvestigationProgressResponse(BaseModel):
+    """Polled while a background investigation run is in flight (BUG-10).
+
+    `report` is populated once `status` is no longer `running`."""
+
+    id: str
+    query: str
+    status: Literal["running", "done", "failed"]
+    step: str
+    done_steps: int
+    total_steps: int
+    sub_questions: list[InvestigationSubQuestionProgress] = Field(default_factory=list)
+    elapsed_ms: int
+    error: str | None = None
+    report: InvestigationResponse | None = None
