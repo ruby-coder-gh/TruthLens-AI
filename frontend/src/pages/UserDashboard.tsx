@@ -135,8 +135,11 @@ export default function UserDashboard() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm text-text-muted">Avg Trust Score</p>
+                      {/* BUG-50 / C8: trust displays 0-100 everywhere, matching
+                          the Claim Ledger — this used to show the raw 0-1
+                          score (e.g. "0.47") next to the ledger's "86/100". */}
                       <p className="mt-1 text-2xl font-bold tabular-nums" style={{ color: getTrustColorVar(avgTrustScore) }}>
-                        {avgTrustScore.toFixed(2)}
+                        {Math.round(avgTrustScore * 100)}/100
                       </p>
                     </div>
                     <Badge color={getTrustBadgeColor(avgTrustScore)}>{getTrustStatusLabel(avgTrustScore)}</Badge>
@@ -206,7 +209,7 @@ export default function UserDashboard() {
                           </div>
                         </div>
                         {chat.trust_score !== undefined && (
-                          <Badge color={getTrustBadgeColor(chat.trust_score)}>{chat.trust_score.toFixed(2)}</Badge>
+                          <Badge color={getTrustBadgeColor(chat.trust_score)}>{Math.round(chat.trust_score * 100)}/100</Badge>
                         )}
                       </div>
                     </Card>

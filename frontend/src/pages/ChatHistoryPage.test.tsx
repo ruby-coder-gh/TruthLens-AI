@@ -19,6 +19,7 @@ const normalChat: QuerySummary = {
   workspace_id: 'ws1',
   query_text: 'What was 2025 revenue?',
   model_used: 'gpt-4o-mini',
+  trust_score: 0.86,
   is_pinned: false,
   review_status: 'reviewed',
   created_at: '2026-01-01T00:00:00Z',
@@ -48,6 +49,15 @@ describe('ChatHistoryPage', () => {
     expect(screen.getByText('gpt-4o-mini')).toBeInTheDocument();
     expect(screen.getByText('Abstained')).toBeInTheDocument();
     expect(screen.queryByText('abstain')).not.toBeInTheDocument();
+  });
+
+  it('shows the trust score on a 0-100 scale, matching the ledger (BUG-50 / C8)', async () => {
+    renderWithProviders(<ChatHistoryPage />);
+
+    expect(
+      await screen.findByText((_content, el) => el?.textContent?.replace(/\s+/g, '') === 'Score:86/100'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0\.86/)).not.toBeInTheDocument();
   });
 
   it('requires confirmation before deleting a chat, then invalidates the sidebar Recent cache (BUG-12)', async () => {
