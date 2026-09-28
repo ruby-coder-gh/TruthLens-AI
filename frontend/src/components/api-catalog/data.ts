@@ -6,7 +6,8 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Authentication',
     description: 'User registration, login, token management, and session handling',
     icon: 'LogIn',
-    color: '#6366f1',
+    // Mid-tone accent blues: ≥3:1 as an icon on both themes' surfaces.
+    color: '#4F74D9',
     endpoints: [
       {
         method: 'POST',
@@ -73,7 +74,7 @@ export const API_GROUPS: ApiGroup[] = [
     name: 'Users',
     description: 'User management and administration — admin only',
     icon: 'Users',
-    color: '#4f46e5',
+    color: '#3F63C4',
     endpoints: [
       {
         method: 'GET',
@@ -428,10 +429,10 @@ export const CATALOG_STATS: CatalogStats = {
 };
 
 export const METHOD_COLORS: Record<string, string> = {
-  GET: 'bg-green-500/15 text-green-400 border-green-500/30',
-  POST: 'bg-primary/15 text-primary border-primary/30',
-  PUT: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  PATCH: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  DELETE: 'bg-red-500/15 text-red-400 border-red-500/30',
+  GET: 'bg-green/12 text-green border-green/28',
+  POST: 'bg-primary/12 text-primary border-primary/28',
+  PUT: 'bg-orange/12 text-orange border-orange/28',
+  PATCH: 'bg-orange/12 text-orange border-orange/28',
+  DELETE: 'bg-red/10 text-red border-red/28',
   WS: 'bg-accent/15 text-accent border-accent/30',
 };

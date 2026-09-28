@@ -112,7 +112,7 @@ function LiveStatus() {
   return (
     <div className="rounded-xl glass border border-glass-border p-4">
       <div className="flex items-center gap-2 mb-3">
-        <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-green-500/15 border border-green-500/30">
+        <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-green/12 border border-green/28">
           <span className="w-2 h-2 rounded-full bg-green animate-pulse" />
         </div>
         <span className="text-xs font-semibold uppercase tracking-wider text-text-dim">System Status</span>

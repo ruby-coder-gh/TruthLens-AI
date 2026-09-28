@@ -1,107 +1,49 @@
-import { motion } from 'framer-motion';
+import { clsx } from 'clsx';
 
 interface LogoProps {
   size?: number;
+  /** Accepted for existing call sites; the mark no longer animates. */
   animated?: boolean;
-  showText?: boolean;
-  textSize?: 'sm' | 'md';
-  variant?: 'default' | 'compact' | 'gradient-bg';
+  /** `gradient-bg` (name kept for call sites) = the mark on a flat accent tile. */
+  variant?: 'default' | 'gradient-bg';
   className?: string;
 }
 
-const sizes = { sm: 'text-sm', md: 'text-base' };
-
 /**
- * TruthLens eye logo — geometric iris + lens flare.
- * Represents "truth" (clarity) + "lens" (focus).
+ * TruthLens mark — a lens with a check inside it. Stroked in `currentColor`,
+ * so the caller sets the ink: `text-primary` on a surface, `text-on-primary`
+ * on an accent fill. The `gradient-bg` variant brings its own tile and ink.
  */
-export default function Logo({
-  size = 24,
-  animated = true,
-  showText = false,
-  textSize = 'sm',
-  variant = 'default',
-  className = '',
-}: LogoProps) {
-  const icon = (
+export default function Logo({ size = 24, variant = 'default', className }: LogoProps) {
+  const mark = (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 24 24"
       fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
       className="shrink-0"
     >
-      {/* Outer eye shape */}
-      <ellipse cx="16" cy="16" rx="14" ry="10" stroke="url(#logoGrad)" strokeWidth="1.8" fill="none" />
-      {/* Iris */}
-      <circle cx="16" cy="16" r="6" fill="url(#logoGrad)" opacity="0.85" />
-      {/* Pupil */}
-      <circle cx="16" cy="16" r="3" fill="#0b0f17" />
-      {/* Specular highlight (lens flare) */}
-      <ellipse cx="13" cy="12.5" rx="2.5" ry="1.5" fill="white" opacity="0.6" transform="rotate(-20 13 12.5)" />
-      {/* Subtle inner glow ring */}
-      <circle cx="16" cy="16" r="6" stroke="white" strokeWidth="0.4" opacity="0.15" fill="none" />
-
-      {/* Lens crosshair lines (subtle) */}
-      <line x1="16" y1="6" x2="16" y2="8" stroke="url(#logoGrad)" strokeWidth="0.8" opacity="0.5" />
-      <line x1="16" y1="24" x2="16" y2="26" stroke="url(#logoGrad)" strokeWidth="0.8" opacity="0.5" />
-      <line x1="2" y1="16" x2="4.5" y2="16" stroke="url(#logoGrad)" strokeWidth="0.8" opacity="0.5" />
-      <line x1="27.5" y1="16" x2="30" y2="16" stroke="url(#logoGrad)" strokeWidth="0.8" opacity="0.5" />
-
-      <defs>
-        <linearGradient id="logoGrad" x1="2" y1="4" x2="30" y2="28" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#a5b4fc" />
-          <stop offset="0.5" stopColor="#6366f1" />
-          <stop offset="1" stopColor="#34d399" />
-        </linearGradient>
-      </defs>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="M15.5 15.5L20 20" />
+      <path d="M7.75 10.75l2 2 3.5-3.75" />
     </svg>
   );
 
-  const wrapped = variant === 'gradient-bg' ? (
-    <div
-      className={`flex items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent text-white shadow-lg shadow-primary/30 ${className}`}
-      style={{ width: size + 12, height: size + 12 }}
-    >
-      {icon}
-    </div>
-  ) : (
-    <span className={className}>{icon}</span>
-  );
-
-  if (!showText) {
-    if (animated) {
-      return (
-        <motion.span
-          whileHover={{ scale: 1.1, rotate: -5 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 10 }}
-          className="inline-flex items-center"
-        >
-          {wrapped}
-        </motion.span>
-      );
-    }
-    return <span className="inline-flex items-center">{wrapped}</span>;
+  if (variant === 'gradient-bg') {
+    return (
+      <span
+        className={clsx('inline-flex shrink-0 items-center justify-center rounded-control bg-primary text-on-primary', className)}
+        style={{ width: size + 12, height: size + 12 }}
+      >
+        {mark}
+      </span>
+    );
   }
 
-  return (
-    <motion.div
-      className={`inline-flex items-center gap-2 ${className}`}
-      whileHover="hover"
-    >
-      {animated ? (
-        <motion.span
-          variants={{ hover: { scale: 1.1, rotate: -5 } }}
-          transition={{ type: 'spring', stiffness: 300, damping: 10 }}
-        >
-          {wrapped}
-        </motion.span>
-      ) : wrapped}
-      <span className="font-bold text-text">
-        <span className={sizes[textSize]}>TruthLens</span>
-        <span className="block text-[10px] uppercase tracking-widest text-text-dim font-normal">AI Platform</span>
-      </span>
-    </motion.div>
-  );
+  return <span className={clsx('inline-flex shrink-0', className)}>{mark}</span>;
 }

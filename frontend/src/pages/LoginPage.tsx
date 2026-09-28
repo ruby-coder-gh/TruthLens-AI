@@ -93,7 +93,7 @@ export default function LoginPage() {
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.1 }}
           >
-            <div className="flex h-16 w-16 items-center justify-center rounded-panel bg-primary shadow-e1">
+            <div className="flex h-16 w-16 items-center justify-center rounded-panel bg-primary text-on-primary shadow-e1">
               <Logo size={36} animated={false} />
             </div>
           </motion.div>

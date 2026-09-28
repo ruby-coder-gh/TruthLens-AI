@@ -40,20 +40,20 @@ const BADGE_COLORS: Record<RelevanceTier, 'green' | 'orange' | 'red'> = {
 const RELEVANCE_COLORS: Record<RelevanceTier, RelevanceColorMap> = {
   high: {
     text: 'text-green',
-    bar: 'bg-gradient-to-r from-green-400 to-emerald-500',
-    glow: 'bg-green-400/40',
+    bar: 'bg-trust-high',
+    glow: 'bg-trust-high/40',
     badge: 'text-green border-green/30 bg-green/10',
   },
   medium: {
     text: 'text-orange',
-    bar: 'bg-gradient-to-r from-orange-400 to-amber-500',
-    glow: 'bg-orange-400/40',
+    bar: 'bg-trust-mid',
+    glow: 'bg-trust-mid/40',
     badge: 'text-orange border-orange/30 bg-orange/10',
   },
   low: {
     text: 'text-red',
-    bar: 'bg-gradient-to-r from-red-400 to-rose-500',
-    glow: 'bg-red-400/40',
+    bar: 'bg-trust-low',
+    glow: 'bg-trust-low/40',
     badge: 'text-red border-red/30 bg-red/10',
   },
 };

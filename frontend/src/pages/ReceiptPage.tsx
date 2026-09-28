@@ -247,10 +247,10 @@ export default function ReceiptPage() {
         {/* Header */}
         <header className="flex flex-wrap items-center justify-between gap-3 break-inside-avoid">
           <div className="flex items-center gap-2.5">
-            <Logo size={26} />
+            <Logo size={26} className="text-primary" />
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">Verified Answer Receipt</p>
-              <p className="font-quote text-lg italic text-text">TruthLens</p>
+              <p className="text-[17px] font-semibold tracking-[-0.01em] text-text">TruthLens</p>
             </div>
           </div>
           <Button variant="secondary" size="sm" className="print:hidden" onClick={() => window.print()}>

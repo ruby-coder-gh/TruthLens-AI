@@ -162,3 +162,10 @@ async def test_load_pdf_rejoins_words_hyphenated_across_lines(tmp_path: Path):
     pages = await load(path, "application/pdf")
 
     assert pages[0]["text"] == "Turbine foundation fabrication began in the fourth quarter."
+
+
+def test_block_paragraph_keeps_hyphen_of_compound_split_before_capital():
+    from app.ingestion.loader import _block_paragraph
+
+    assert _block_paragraph("Reports Fourth-\nQuarter and Full-Year") == "Reports Fourth-Quarter and Full-Year"
+    assert _block_paragraph("fabri-\ncation of Q4-\n2025 results") == "fabrication of Q4-2025 results"
