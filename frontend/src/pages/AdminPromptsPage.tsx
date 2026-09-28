@@ -273,6 +273,13 @@ export default function AdminPromptsPage() {
   const [gateConfirming, setGateConfirming] = useState(false);
   const [diffTarget, setDiffTarget] = useState<PromptVersion | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PromptVersion | null>(null);
+  // BUG-39: rollback shipped a prompt to every user with one click and no
+  // confirmation — it now stops at a modal first. Promote already stops at
+  // the eval-gate dialog (with its own "Force promote" confirm step) for any
+  // version that hasn't cleared its eval; a version that already passed
+  // keeps promoting in one click, matching the existing BUG-4-regression
+  // test coverage for that flow.
+  const [rollbackTarget, setRollbackTarget] = useState<PromptVersion | null>(null);
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const promptsQuery = useQuery({
@@ -412,6 +419,7 @@ export default function AdminPromptsPage() {
   const rollbackMutation = useMutation({
     mutationFn: (version: PromptVersion) => adminApi.prompts.rollback(version.id),
     onSuccess: (updated) => {
+      setRollbackTarget(null);
       invalidatePrompts();
       addToast(`Rolled back to ${updated.name} v${updated.version}.`, 'success');
     },
@@ -460,11 +468,12 @@ export default function AdminPromptsPage() {
     setGateConfirming(false);
   }
 
-  // Line-level colouring is computed client-side from the two prompt bodies —
-  // but only when the loaded active prompt is the *same* prompt name as the
-  // row. For any other name the server's unified diff is the only correct
-  // baseline (it resolves that name's own active row).
-  const diffLinesForTarget = diffTarget && activePrompt && activePrompt.name === diffTarget.name
+  // BUG-40. Line-level colouring computed client-side from the two prompt
+  // bodies (`diff` package, already a dependency) — this page only ever
+  // manages `PROMPT_NAME` ("answer"), so `activePrompt` is always that same
+  // prompt's active row; no name-match guard needed. Falls back to the
+  // server's raw unified diff only while `activePrompt` hasn't loaded yet.
+  const diffLinesForTarget = diffTarget && activePrompt
     ? toDiffLines(activePrompt.content, diffTarget.content)
     : null;
 
@@ -666,7 +675,7 @@ export default function AdminPromptsPage() {
                               variant="secondary"
                               aria-label={`Roll back to ${label}`}
                               loading={rollingBack}
-                              onClick={() => rollbackMutation.mutate(version)}
+                              onClick={() => setRollbackTarget(version)}
                             >
                               <RotateCcw size={13} />
                               Rollback
@@ -864,6 +873,32 @@ export default function AdminPromptsPage() {
                 >
                   <Trash2 size={14} />
                   Delete version
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
+
+        {/* ── Rollback confirmation (BUG-39) ────────────────────────────── */}
+        <Modal open={rollbackTarget !== null} onClose={() => setRollbackTarget(null)} title="Roll back prompt">
+          {rollbackTarget ? (
+            <div className="space-y-4">
+              <p className="text-sm text-text-muted">
+                Roll back to {rollbackTarget.name} v{rollbackTarget.version} ({rollbackTarget.content_hash})?
+                This retires whatever is active now and reactivates this version for every user immediately.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setRollbackTarget(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={rollbackMutation.isPending}
+                  onClick={() => rollbackMutation.mutate(rollbackTarget)}
+                >
+                  <RotateCcw size={14} />
+                  Roll back
                 </Button>
               </div>
             </div>

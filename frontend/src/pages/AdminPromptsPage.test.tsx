@@ -94,6 +94,13 @@ const activeVersion = makeVersion({
   promoted_at: '2026-09-02T18:00:00Z',
 });
 
+const retiredVersion = makeVersion({
+  id: 'p-retired',
+  version: 0,
+  status: 'retired',
+  content_hash: 'ggg777hhh888',
+});
+
 const activePrompt: ActivePrompt = {
   name: 'answer',
   content: ACTIVE_CONTENT,
@@ -217,6 +224,23 @@ describe('AdminPromptsPage', () => {
 
     await user.click(within(dialog).getByRole('button', { name: /confirm force promote/i }));
     await waitFor(() => expect(promote).toHaveBeenLastCalledWith('p-staged', true));
+  });
+
+  // BUG-39: rollback used to fire on a single click with no confirmation.
+  it('confirms before rolling back a retired version', async () => {
+    const user = userEvent.setup();
+    list.mockResolvedValue({ data: [draftVersion, stagedVersion, activeVersion, retiredVersion] });
+    rollback.mockResolvedValueOnce({ ...retiredVersion, status: 'active' });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: 'Roll back to answer v0' }));
+    expect(rollback).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('dialog', { name: /roll back prompt/i });
+    await user.click(within(dialog).getByRole('button', { name: /^roll back$/i }));
+
+    await waitFor(() => expect(rollback).toHaveBeenCalledWith('p-retired'));
   });
 
   it('queues a smoke eval for the selected row', async () => {
