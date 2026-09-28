@@ -1,6 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo, type FormEvent, type KeyboardEvent } from 'react';
-import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,8 +35,11 @@ import { feedbackApi, queryApi } from '../api/client';
 import EvidenceSidebar from '../components/EvidenceSidebar';
 import { QueryWebSocket, WS_RECONNECT_MAX } from '../api/websocket';
 import type { QueryCompleteResult } from '../api/websocket';
-import type { QueryEdgeCase, Source, SufficiencyVerdict } from '../api/types';
+import type { Claim, QueryEdgeCase, Source, SufficiencyVerdict } from '../api/types';
 import AbstentionCard from '../components/AbstentionCard';
+import { AnswerBody } from '../components/truth-lens/AnswerBody';
+import { SealReceiptButton } from '../components/SealReceiptButton';
+import { SuggestedQuestions } from '../components/SuggestedQuestions';
 import { getRelevanceMeta, getTrustBadgeColor, relevancePercent } from '../utils/relevance';
 import { useMediaQuery } from '../utils/useMediaQuery';
 import { downloadBlob } from '../utils/download';
@@ -95,6 +96,8 @@ interface ChatMessage {
   queryId: string | null;
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
+  // Truth Lens (L1/L2) — per-claim verdicts, arriving on the `guardrail` frame.
+  claims: Claim[] | null;
   /** 1-based reconnect attempt currently in flight, or null when connected. */
   reconnectAttempt: number | null;
   // F7c — set from the `complete` frame when the sufficiency gate abstained.
@@ -270,6 +273,7 @@ export default function ChatPage() {
         error: null,
         status: 'complete',
         reconnectAttempt: null,
+        claims: null,
       };
 
       // Add pending assistant message
@@ -290,6 +294,7 @@ export default function ChatPage() {
         error: null,
         status: 'pending',
         reconnectAttempt: null,
+        claims: null,
       };
 
       setMessages((prev) => {
@@ -337,10 +342,16 @@ export default function ChatPage() {
           );
         },
 
-        onGuardrail: (result: { passed: boolean; score: number; details: string }) => {
+        onGuardrail: (result: { passed: boolean; score: number; details: string; claims: Claim[] }) => {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, guardrail: result } : m,
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    guardrail: { passed: result.passed, score: result.score, details: result.details },
+                    claims: result.claims,
+                  }
+                : m,
             ),
           );
         },
@@ -450,6 +461,7 @@ export default function ChatPage() {
                     content: '',
                     sources: [],
                     guardrail: null,
+                    claims: null,
                     trustScore: null,
                     trustComponents: {},
                     servedFromCache: false,
@@ -627,16 +639,6 @@ export default function ChatPage() {
     },
   });
 
-  // ─── Click example question ───────────────────────────────────────────────
-  const handleExampleClick = useCallback(
-    (question: string) => {
-      setInputValue(question);
-      // Focus textarea
-      textareaRef.current?.focus();
-    },
-    [],
-  );
-
   // ─── Compute active message (for sidebar context) ─────────────────────────
   // Include 'cancelled' so a stopped message's already-streamed sources/guardrail/
   // trust score still populate the Evidence sidebar instead of going blank.
@@ -776,7 +778,7 @@ export default function ChatPage() {
           {/* ─── Messages Area ───────────────────────────────────────────── */}
           <div className="flex-1 overflow-y-auto px-4 py-4 lg:px-6">
             {messages.length === 0 ? (
-              <EmptyChatState onExampleClick={handleExampleClick} />
+              <EmptyChatState workspaceId={workspaceId} onPick={(q) => startQuery(q)} />
             ) : (
               <motion.div
                 className="mx-auto max-w-3xl space-y-6"
@@ -1067,7 +1069,13 @@ export default function ChatPage() {
 //  EMPTY CHAT STATE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExampleClick: (q: string) => void }) {
+const EmptyChatState = memo(function EmptyChatState({
+  workspaceId,
+  onPick,
+}: {
+  workspaceId?: string;
+  onPick: (q: string) => void;
+}) {
   return (
     <motion.div
       className="flex h-full flex-col items-center justify-center py-16 text-center"
@@ -1108,20 +1116,9 @@ const EmptyChatState = memo(function EmptyChatState({ onExampleClick }: { onExam
         initial="initial"
         animate="animate"
       >
-        {EXAMPLE_QUESTIONS.map((q) => (
-          <motion.button
-            key={q}
-            type="button"
-            onClick={() => onExampleClick(q)}
-            className="inline-flex items-center gap-2 rounded-full glass px-4 py-2 text-sm text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-text hover:shadow-e2"
-            variants={staggerItem}
-            whileHover={{ scale: 1.04, y: -2 }}
-            whileTap={{ scale: 0.97 }}
-          >
-            <Sparkles size={14} className="text-primary-soft" />
-            {q}
-          </motion.button>
-        ))}
+        {workspaceId && (
+          <SuggestedQuestions workspaceId={workspaceId} onPick={onPick} fallback={EXAMPLE_QUESTIONS} />
+        )}
       </motion.div>
 
       <motion.div
@@ -1330,10 +1327,15 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   )}
                 </div>
 
-                {/* MIDDLE: Markdown content with citations */}
-                <div className="text-sm text-text leading-relaxed">
-                  {renderMessageWithCitations(message.id, message.content, message.sources, onSourceClick)}
-                </div>
+                {/* MIDDLE: Markdown content with citations + Truth Lens */}
+                <AnswerBody
+                  messageId={message.id}
+                  content={message.content}
+                  sources={message.sources}
+                  claims={message.claims}
+                  workspaceId={workspaceId}
+                  onSourceClick={onSourceClick}
+                />
 
                 {/* BOTTOM: Footer — latency, model, actions */}
                 <div className="flex items-center justify-between pt-2 border-t border-border-light text-xs text-text-dim">
@@ -1415,6 +1417,10 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                         >
                           <Download size={14} />
                         </motion.button>
+                        <SealReceiptButton
+                          queryId={message.queryId}
+                          className="flex h-10 w-10 items-center justify-center rounded-md text-text-dim transition-colors hover:bg-card-2 hover:text-primary-soft"
+                        />
                       </>
                     )}
                   </div>
@@ -1497,165 +1503,6 @@ const TypingIndicator = memo(function TypingIndicator() {
     </div>
   );
 });
-
-// ─── Citation Hover Card — shows source excerpt on hover ─────────────────────
-
-const CitationHoverCard = memo(function CitationHoverCard({ source, children }: { source: Source; children: ReactNode }) {
-  const [show, setShow] = useState(false);
-  const triggerRef = useRef<HTMLSpanElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const relevancePct = relevancePercent(source.relevance_score);
-  const docName = source.document_name || 'Source';
-
-  const showCard = () => {
-    hoverTimer.current = setTimeout(() => {
-      if (triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        setPos({
-          top: rect.bottom + 8,
-          left: Math.min(rect.left, window.innerWidth - 360),
-        });
-        setShow(true);
-      }
-    }, 300); // small delay to avoid flicker
-  };
-
-  const hideCard = () => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    setShow(false);
-  };
-
-  useEffect(() => () => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-  }, []);
-
-  return (
-    <>
-      <span
-        ref={triggerRef}
-        onMouseEnter={showCard}
-        onMouseLeave={hideCard}
-        className="relative inline-flex"
-      >
-        {children}
-      </span>
-      {show && createPortal(
-        <motion.div
-          initial={{ opacity: 0.99, y: -4, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0.99, y: -4, scale: 0.97 }}
-          transition={{ duration: 0.15, ease: 'easeOut' }}
-          onMouseEnter={showCard}
-          onMouseLeave={hideCard}
-          // Carries a quoted excerpt, so it is an opaque card, not a third blur.
-          className="fixed z-[70] w-80 overflow-hidden rounded-card border border-border bg-solid shadow-e3"
-          style={{ top: pos.top, left: pos.left }}
-        >
-          {/* Header */}
-          <div className="px-4 pt-3 pb-2 border-b border-border-light">
-            <div className="flex items-center gap-2">
-              <FileText size={14} className="text-primary-soft shrink-0" />
-              <span className="truncate font-mono text-sm font-medium text-primary-soft">{docName}</span>
-              <span className="ml-auto font-mono text-[10px] text-text-dim tabular-nums">{relevancePct}%</span>
-            </div>
-          </div>
-
-          {/* Excerpt */}
-          <div className="px-4 py-3 max-h-28 overflow-y-auto">
-            <p className="font-quote line-clamp-4 text-[13px] leading-relaxed text-text">
-              {source.excerpt || 'No excerpt available'}
-            </p>
-          </div>
-
-          {/* Score bar */}
-          <div className="px-4 pb-3">
-            <div className="h-1 rounded-full bg-card-2 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-primary transition-all duration-700"
-                style={{ width: `${relevancePct}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Click hint */}
-          <div className="px-4 pb-3 flex items-center gap-1.5 text-[10px] text-text-dim border-t border-border-light pt-2">
-            <Brain size={10} />
-            Click to locate in sidebar
-          </div>
-        </motion.div>,
-        document.body
-      )}
-    </>
-  );
-});
-
-// ─── Render message with clickable citation markers ──────────────────────────
-
-function renderMessageWithCitations(
-  messageId: string,
-  content: string,
-  sources: Source[],
-  onSourceClick: (source: Source, e: React.MouseEvent, msgId: string, index: number) => void,
-): React.ReactNode {
-  // Backend cites sources inline as literal `[source:N]` markers (1-indexed —
-  // see backend/app/generation/citer.py / generator.py). Split on that exact
-  // token so each citation renders as a real, clickable footnote instead of
-  // leaking through ReactMarkdown as raw bracketed text.
-  const parts = content.split(/(\[source:\d+\])/gi);
-  // No citation markers — render full markdown untouched (raw-text fallback).
-  if (parts.length <= 1) {
-    return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
-    );
-  }
-
-  // Has citations — render text parts as markdown, citation parts as footnote buttons.
-  return (
-    <>
-      {parts.map((part, i) => {
-        const match = part.match(/\[source:(\d+)\]/i);
-        if (match) {
-          const idx = parseInt(match[1], 10) - 1;
-          const source = sources[idx];
-          if (source) {
-            const docName = source.document_name || `Source ${idx + 1}`;
-            return (
-              <CitationHoverCard key={i} source={source}>
-                <motion.button
-                  id={`cite-${messageId}-${idx}`}
-                  type="button"
-                  onClick={(e) => onSourceClick(source, e, messageId, idx)}
-                  aria-label={`View source ${idx + 1}: ${docName}`}
-                  className="inline-flex items-center bg-transparent border-0 p-0 m-0 align-baseline rounded-sm cursor-pointer transition-[filter] duration-150 hover:brightness-125 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
-                  whileHover={{ scale: 1.15 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <sup className="footnote-ref">{idx + 1}</sup>
-                </motion.button>
-              </CitationHoverCard>
-            );
-          }
-          // Citation number has no matching retrieved source (e.g. still mid-stream) —
-          // keep a marker in place, just dimmed since it isn't clickable yet.
-          return (
-            <sup key={i} className="footnote-ref !text-text-dim" title="Source unavailable">
-              {idx + 1}
-            </sup>
-          );
-        }
-        return (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
-            {part}
-          </ReactMarkdown>
-        );
-      })}
-    </>
-  );
-}
 
 // ─── Guardrail badge ─────────────────────────────────────────────────────────
 
