@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -23,7 +24,13 @@ from app.core.deps import (
     get_current_user,
     get_db,
 )
-from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
+from app.core.exceptions import (
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    TooLargeException,
+    UnsupportedTypeException,
+)
 from app.ingestion.locate import locate_in_pdf
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
@@ -125,6 +132,7 @@ async def upload_document(
     file_path = upload_dir / server_filename
 
     file_size = 0
+    hasher = hashlib.sha256()
     try:
         with open(file_path, "wb") as f:
             while True:
@@ -134,11 +142,41 @@ async def upload_document(
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
+                hasher.update(chunk)
                 f.write(chunk)
     except TooLargeException:
         if file_path.exists():
             file_path.unlink()
         raise
+    content_hash = hasher.hexdigest()
+
+    # BUG-60: reject an exact-content duplicate already in this workspace.
+    # Pre-filter on the existing file_size/mime_type columns (no schema
+    # change — content_hash isn't persisted) before reading candidate files
+    # back off disk to confirm a true byte-for-byte match.
+    candidates = (await db.execute(
+        select(Document).where(
+            Document.workspace_id == workspace_id,
+            Document.file_size == file_size,
+            Document.mime_type == mime_type,
+        )
+    )).scalars().all()
+    for candidate in candidates:
+        candidate_path = upload_dir / candidate.filename
+        if not candidate_path.is_file():
+            continue
+        candidate_hasher = hashlib.sha256()
+        with open(candidate_path, "rb") as f:
+            while True:
+                chunk = f.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                candidate_hasher.update(chunk)
+        if candidate_hasher.hexdigest() == content_hash:
+            file_path.unlink(missing_ok=True)
+            raise ConflictException(
+                f"An identical file is already uploaded as '{candidate.original_filename}'"
+            )
 
     # Create document record
     doc = Document(
