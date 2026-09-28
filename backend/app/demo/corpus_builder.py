@@ -10,6 +10,7 @@ audit in a diff.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ import markdown
 from docx import Document as DocxDocument
 
 CORPUS_DIR = Path(__file__).parent / "corpus"
+_NUMBERED_ITEM = re.compile(r"\d+\. ")
 
 MIME_TYPES = {
     "pdf": "application/pdf",
@@ -60,24 +62,43 @@ def build_pdf(markdown_path: Path, dest_path: Path) -> None:
 def build_docx(markdown_path: Path, dest_path: Path) -> None:
     """Render a markdown source file to a DOCX at *dest_path*.
 
-    Naive line-based mapping (headings / bullets / paragraphs) — good enough
-    fidelity for a demo corpus; not a general markdown-to-DOCX converter.
+    Naive line-based mapping (headings / bullets / numbered items / paragraphs,
+    `**bold**` as bold runs) — good enough fidelity for a demo corpus; not a
+    general markdown-to-DOCX converter. Hard-wrapped source lines rejoin into
+    one DOCX paragraph; a line opening with `**` (a memo's "**To:** ..." header)
+    starts its own.
     """
-    doc = DocxDocument()
+    blocks: list[tuple[str | None, list[str]]] = []  # (paragraph style, source lines)
+    open_block = False
     for raw_line in markdown_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.rstrip()
+        line = raw_line.strip()
+        numbered = _NUMBERED_ITEM.match(line)
         if not line:
-            continue
-        if line.startswith("# "):
-            doc.add_heading(line[2:], level=1)
-        elif line.startswith("## "):
-            doc.add_heading(line[3:], level=2)
+            open_block = False
+        elif line.startswith("#"):
+            level = len(line) - len(line.lstrip("#"))
+            blocks.append((f"Heading {level}", [line[level:].strip()]))
+            open_block = False
         elif line.startswith("- "):
-            doc.add_paragraph(line[2:], style="List Bullet")
-        elif line.split(". ", 1)[0].isdigit():
-            doc.add_paragraph(line.split(". ", 1)[1], style="List Number")
+            blocks.append(("List Bullet", [line[2:]]))
+            open_block = True
+        elif numbered:
+            blocks.append(("List Number", [line[numbered.end():]]))
+            open_block = True
+        elif open_block and not line.startswith("**"):
+            blocks[-1][1].append(line)
         else:
-            doc.add_paragraph(line)
+            blocks.append((None, [line]))
+            open_block = True
+
+    doc = DocxDocument()
+    for style, lines in blocks:
+        paragraph = doc.add_paragraph(style=style)
+        for k, part in enumerate(" ".join(lines).split("**")):
+            if part:
+                run = paragraph.add_run(part)
+                if k % 2:
+                    run.bold = True
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(dest_path))
