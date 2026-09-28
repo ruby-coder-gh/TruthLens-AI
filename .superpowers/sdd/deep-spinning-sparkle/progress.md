@@ -48,8 +48,14 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | Fix F2 shell/pages | merged | 27 bugs; integrated FE gate: 319 tests, tsc/lint/build green |
 | Investigation async (BUG-10) | merged | lane H + 5a210ca (G's cached-trust test fake). FE gate 321 green; full BE suite running |
 | Full gates | pass | BE 1113 passed / 2 skipped, ruff clean; FE 321 passed, tsc/lint/build clean |
-| Playwright QA round 2 | running | fresh seed ws b728acaf-…; CSV 12 row chunks; 4 contradictions. Reports → reports/QA2-verification.md + QA2-new-bugs.md |
-| Next | — | QA2 → fix any S1/S2 → PR + merge to main (merge commit) |
+| Playwright QA round 2 | FAIL | 46/62 fixed, 3 broken (7,16,53), 12 partial, 21 new (S1 1: viewer deletes others' chats; S2 6). Admin: all 14 routes load, most flows work |
+| Fix round 2 | running | brief FIX-round2.md (K1–K6), base 1de316f; lanes B2, F2a, F2b; demo stopped |
+| B2 merged | done | 5de6c7a — 14 commits (agent stalled at final cleanup, work complete, 632 passed in lane); local .env APP_NAME=TruthLens AI. FE gate 380 green; full BE suite running |
+| F2a merged | done | 6e49931 — R2-3/29 conflict pairing+figures, 8, 10, 17, 53, R2-1 UI, R2-6, 8, 16, 17, 20, 21, 50 residual; FE gate 380 green |
+| F2b merged | done | R2-2/33 tour → top bar, 15/R2-9 member roles, 36/38/R2-18 names, 39 confirms, 50 /100, R2-10/11/13/14/15/19 (343 tests). BUG-40 missed by lane → CEO 6be2967 sentence diff |
+| Gates after round 2 | pass | BE 1170 passed / 2 skipped, ruff clean; FE 380 passed, tsc/lint/build clean; fresh seed radar = exactly 4 planted, 0 FP |
+| QA round 3 | running | ws ceb28089-…; verify open items + all-route smoke (1280/375) + admin deep + demo path; report reports/QA3-report.md |
+| Next | — | QA3 PASS → PR + merge to main (merge commit); else fix round 3 |
 | Playwright QA round 1 (detail) | done | fresh demo seed ws ae7efa84-…; backend bound to localhost (sec fix confirmed); reports → reports/QA-playwright-{bugs,report}.md |
 | Merge + gates | in progress | next: full suite → restart demo → Playwright QA → fix → re-sweep → PR+merge; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
 | Security + review | pending | |
