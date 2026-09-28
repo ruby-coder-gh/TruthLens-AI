@@ -20,8 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chroma_client import delete_workspace_collection
 from app.config import settings
 from app.core.auth import hash_password
-from app.database import async_session_factory
+from app.database import async_session_factory, engine
 from app.demo.corpus_builder import build_corpus_files, load_manifest
+from app.models.base import DeclarativeBase
 from app.models.document import Document
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
@@ -86,6 +87,13 @@ async def seed(reset: bool = False) -> dict[str, Any]:
     """Seed (or re-seed) the demo workspace. Returns `{"workspace_id": ...}`."""
     if not settings.DEMO_PASSWORD:
         raise DemoPasswordMissing()
+
+    # Seed runs before the app has ever started, so build what the app's
+    # lifespan would: data dirs and tables.
+    for path in (Path(settings.DATA_DIR), settings.upload_path, settings.bm25_path, settings.chroma_path):
+        path.mkdir(parents=True, exist_ok=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(DeclarativeBase.metadata.create_all)
 
     manifest = load_manifest()
     marker = _marker_path()

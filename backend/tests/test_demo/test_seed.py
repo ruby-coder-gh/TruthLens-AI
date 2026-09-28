@@ -31,8 +31,8 @@ async def seed_engine():
         poolclass=NullPool,
         connect_args={"check_same_thread": False},
     )
-    async with engine.begin() as conn:
-        await conn.run_sync(DeclarativeBase.metadata.create_all)
+    # No create_all here: seed() runs before the app ever starts, so it must
+    # build the schema itself (run.sh --demo crashed on "no such table: users").
     yield engine
     async with engine.begin() as conn:
         await conn.run_sync(DeclarativeBase.metadata.drop_all)
@@ -44,6 +44,7 @@ def _seed_env(monkeypatch: pytest.MonkeyPatch, seed_engine, tmp_path: Path):
     """Point seed.py's DB access + data paths at isolated test resources."""
     factory = async_sessionmaker(seed_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(seed_module, "async_session_factory", factory)
+    monkeypatch.setattr(seed_module, "engine", seed_engine)
     monkeypatch.setattr(settings, "DEMO_PASSWORD", "test-demo-password")
     monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "data" / "uploads"))
