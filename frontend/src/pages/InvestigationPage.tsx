@@ -157,12 +157,14 @@ export default function InvestigationPage() {
   // Elapsed time is the one honest, purely-client-side signal available.
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const elapsedTimerRef = useRef<number | undefined>(undefined);
+  // The effect only subscribes to/tears down the interval — resetting the
+  // counter to 0 happens in handleSubmit below (a direct response to the
+  // user's action), not as a synchronous setState here.
   useEffect(() => {
     if (!isLoading) {
       window.clearInterval(elapsedTimerRef.current);
       return undefined;
     }
-    setElapsedSeconds(0);
     elapsedTimerRef.current = window.setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     return () => window.clearInterval(elapsedTimerRef.current);
   }, [isLoading]);
@@ -175,6 +177,7 @@ export default function InvestigationPage() {
     if (!query.trim() || !workspaceId || isLoading) return;
     setResult(null);
     setRunError(null);
+    setElapsedSeconds(0);
     runMutation.mutate();
   }, [isLoading, query, runMutation, workspaceId]);
 

@@ -14,7 +14,8 @@ import {
   Check,
   AlertCircle,
 } from 'lucide-react';
-import { Button, Card, Badge, buttonClassName } from '../components/ui';
+import { Button, Card, Badge } from '../components/ui';
+import { buttonClassName } from '../components/button-classes';
 import Logo from '../components/Logo';
 import { useReady } from '../hooks/useReady';
 import { useAuth } from '../context/auth-context';

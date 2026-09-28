@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Home } from 'lucide-react';
-import { buttonClassName, Card } from '../components/ui';
+import { Card } from '../components/ui';
+import { buttonClassName } from '../components/button-classes';
 
 export default function NotFoundPage() {
   return (

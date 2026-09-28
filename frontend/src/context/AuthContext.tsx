@@ -45,23 +45,22 @@ function hadSessionBefore(): boolean {
 // ─── Provider ───────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Lazy initializer, not a synchronous setState in the effect below —
+  // never logged in on this browser (or explicitly logged out) means there
+  // is nothing to restore, so `isLoading` starts already-false and no
+  // `/auth/me` call happens at all.
+  // ponytail: if localStorage is cleared independently of the HttpOnly
+  // cookie (rare — different storage-clearing scope), a still-valid session
+  // won't auto-restore until the next explicit login. Upgrade: have the
+  // backend set a small non-HttpOnly "has session" cookie alongside the
+  // real one, and read that instead of localStorage.
+  const [isLoading, setIsLoading] = useState(() => hadSessionBefore());
 
   // Restore session on mount from HttpOnly cookie session
   useEffect(() => {
     let cancelled = false;
 
-    if (!hadSessionBefore()) {
-      // Never logged in on this browser (or explicitly logged out) — there is
-      // nothing to restore, so don't ask.
-      // ponytail: if localStorage is cleared independently of the HttpOnly
-      // cookie (rare — different storage-clearing scope), a still-valid
-      // session won't auto-restore until the next explicit login. Upgrade:
-      // have the backend set a small non-HttpOnly "has session" cookie
-      // alongside the real one, and read that instead of localStorage.
-      setIsLoading(false);
-      return undefined;
-    }
+    if (!hadSessionBefore()) return undefined;
 
     api.auth
       .me()
