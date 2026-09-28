@@ -34,7 +34,6 @@ export interface WebSocketStage {
   name: string;
   description: string;
   icon: string;
-  duration: string;
   status: 'idle' | 'active' | 'completed';
 }
 

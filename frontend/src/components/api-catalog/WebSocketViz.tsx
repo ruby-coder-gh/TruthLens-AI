@@ -58,7 +58,6 @@ function PipelineNode({ stage }: { stage: WebSocketStage }) {
           )}>
             {stage.name}
           </span>
-          <span className="block text-[10px] text-text-dim font-mono">{stage.duration}</span>
         </div>
       </div>
     </div>

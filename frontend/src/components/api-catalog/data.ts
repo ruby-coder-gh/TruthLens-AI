@@ -1242,15 +1242,19 @@ export const API_GROUPS: ApiGroup[] = [
   },
 ];
 
+// R2-19. This app tracks no real per-stage timing (only an overall answer
+// latency), so these used to carry made-up numbers ("Generation ~2s",
+// "Rerank ~150ms") next to real answers that take 8-25s — worse than no
+// number. Stage names only.
 export const WS_PIPELINE_STAGES: WebSocketStage[] = [
-  { id: 'auth', name: 'Auth', description: 'WebSocket authentication', icon: 'Lock', duration: '~50ms', status: 'idle' },
-  { id: 'rewrite', name: 'Query Rewrite', description: 'Query expansion & reformulation', icon: 'Edit3', duration: '~100ms', status: 'active' },
-  { id: 'search', name: 'Hybrid Search', description: 'Vector + keyword hybrid retrieval', icon: 'Search', duration: '~200ms', status: 'idle' },
-  { id: 'rerank', name: 'Rerank', description: 'Cross-encoder relevance scoring', icon: 'ArrowUpDown', duration: '~150ms', status: 'idle' },
-  { id: 'generate', name: 'Generation', description: 'LLM answer generation with citations', icon: 'Brain', duration: '~2s', status: 'idle' },
-  { id: 'guardrail', name: 'Guardrail', description: 'Safety & hallucination check', icon: 'Shield', duration: '~100ms', status: 'idle' },
-  { id: 'trust', name: 'Trust Score', description: 'Confidence & citation quality scoring', icon: 'Gauge', duration: '~50ms', status: 'idle' },
-  { id: 'persist', name: 'Persist', description: 'Save query result to database', icon: 'Database', duration: '~50ms', status: 'idle' },
+  { id: 'auth', name: 'Auth', description: 'WebSocket authentication', icon: 'Lock', status: 'idle' },
+  { id: 'rewrite', name: 'Query Rewrite', description: 'Query expansion & reformulation', icon: 'Edit3', status: 'active' },
+  { id: 'search', name: 'Hybrid Search', description: 'Vector + keyword hybrid retrieval', icon: 'Search', status: 'idle' },
+  { id: 'rerank', name: 'Rerank', description: 'Cross-encoder relevance scoring', icon: 'ArrowUpDown', status: 'idle' },
+  { id: 'generate', name: 'Generation', description: 'LLM answer generation with citations', icon: 'Brain', status: 'idle' },
+  { id: 'guardrail', name: 'Guardrail', description: 'Safety & hallucination check', icon: 'Shield', status: 'idle' },
+  { id: 'trust', name: 'Trust Score', description: 'Confidence & citation quality scoring', icon: 'Gauge', status: 'idle' },
+  { id: 'persist', name: 'Persist', description: 'Save query result to database', icon: 'Database', status: 'idle' },
 ];
 
 // BUG-44. Endpoint counts are derived from `API_GROUPS` itself so this can
