@@ -254,6 +254,14 @@ class TestCheckClaims:
         assert claim["verdict"] == "unsupported"
         assert claim["evidence"] is None  # no sentence shares a word with the claim
 
+    async def test_possessive_s_does_not_make_a_chunk_related(self):
+        result, _ = await _run(
+            "None of the sources mention Northwind's Tokyo office.",
+            [_ctx(0, "Northwind's operating assets generated 131 GWh in 2025.")],
+            [("Northwind's operating", "Tokyo", (0.0, 0.1, 0.9))],
+        )
+        assert result.claims[0]["verdict"] == "unsupported"
+
     async def test_unsupported_claim_falls_back_to_the_cited_source(self):
         contexts = [_ctx(0, "Office text one here."), _ctx(1, "Office text two here.")]
         result, _ = await _run("The company will open a Tokyo office next year [source:2].", contexts, [])

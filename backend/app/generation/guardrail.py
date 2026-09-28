@@ -142,7 +142,8 @@ def _sentences(text: str) -> list[str]:
 
 
 def _words(text: str) -> set[str]:
-    return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOPWORDS}
+    # Single letters are possessive/contraction debris ("Northwind's" -> "s"), except digits.
+    return {w for w in _WORD_RE.findall(text.lower()) if w not in _STOPWORDS and (len(w) > 1 or w.isdigit())}
 
 
 def _numbers(text: str) -> set[str]:
