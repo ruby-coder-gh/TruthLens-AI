@@ -37,8 +37,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 // `text-on-primary` is the theme-aware ink for text sitting ON the accent
-// fill — white on light's #4F46E5, near-black on dark's #8B85FF. A literal
-// `text-white` here would be 3.04:1 in dark mode.
+// fill — white on light's #2350B5, near-black on dark's #8FB0FF. A literal
+// `text-white` here would be 2.1:1 in dark mode.
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
     'border border-transparent bg-primary text-on-primary shadow-e1 hover:bg-primary-dark hover:shadow-e2',
@@ -401,7 +401,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         >
           {/* Overlay */}
           <motion.div
-            className="absolute inset-0 bg-black/45 backdrop-blur-[6px]"
+            className="absolute inset-0 bg-scrim"
             onClick={onClose}
             aria-hidden="true"
             initial={{ opacity: 0.99 }}
@@ -433,7 +433,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-colors duration-150 hover:bg-card-2 hover:text-text"
+                  className="-mr-2 flex h-10 w-10 items-center justify-center rounded-control text-text-muted transition-colors duration-150 hover:bg-card-2 hover:text-text"
                   aria-label="Close modal"
                 >
                   <X size={18} />
@@ -635,7 +635,7 @@ export function ProgressBar({ value, className, size = 'md', label }: ProgressBa
         aria-valuemax={100}
       >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary to-accent-2 transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
           style={{ width: `${clamped}%` }}
         />
       </div>

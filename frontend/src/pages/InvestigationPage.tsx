@@ -192,7 +192,7 @@ export default function InvestigationPage() {
         <PageShell className="space-y-6">
           <motion.div variants={fadeInUp}>
             <PageHeader
-              title={<span className="inline-flex items-center gap-2"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-accent/20"><Network size={16} className="text-primary-soft" /></span><span className="gradient-text">Investigation workspace</span></span>}
+              title={<span className="inline-flex items-center gap-2"><span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary-tint"><Network size={16} className="text-primary-soft" /></span><span>Investigation workspace</span></span>}
               description="Create a reviewable, evidence-backed case file for complex questions across your governed workspace."
               actions={result ? <Badge color={reviewColor(result.review_status)}>{reviewLabel(result.review_status)}</Badge> : undefined}
             />
@@ -214,7 +214,7 @@ export default function InvestigationPage() {
           </motion.div>
 
           <AnimatePresence mode="wait">
-            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit" className="space-y-4"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file</p><p className="text-xs text-text-muted">Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-gradient-to-r from-primary via-accent to-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card><ReasoningTimeline isLoading /></motion.div>}
+            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit" className="space-y-4"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file</p><p className="text-xs text-text-muted">Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card><ReasoningTimeline isLoading /></motion.div>}
           </AnimatePresence>
 
           {runError && <Card className="border-red/30 bg-red/5 p-5"><p className="text-sm font-medium text-red">Investigation failed</p><p className="mt-1 text-sm text-text-muted">{runError}</p><Button className="mt-4" variant="secondary" size="sm" onClick={() => runMutation.mutate()}><Search size={14} /> Retry investigation</Button></Card>}

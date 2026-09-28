@@ -33,7 +33,7 @@ export default function LegalPageLayout({ title, icon, children }: LegalPageLayo
 
         <Card className="p-6 sm:p-8">
           <div className="mb-6 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-accent/20">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-tint">
               {icon}
             </div>
             <h1 className="text-3xl font-bold text-text">{title}</h1>

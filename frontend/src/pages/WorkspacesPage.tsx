@@ -279,7 +279,7 @@ export default function WorkspacesPage() {
               initial={{ opacity: 0.99, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.4, delay: 0.15, ease: [0.16, 1, 0.3, 1] as const }}
-              className="text-2xl font-bold gradient-text sm:text-3xl"
+              className="text-2xl font-bold text-text sm:text-3xl"
             >
               Workspaces
             </motion.h1>
@@ -314,7 +314,7 @@ export default function WorkspacesPage() {
         initial={{ scaleX: 0 }}
         animate={{ scaleX: 1 }}
         transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-        className="h-px origin-left bg-gradient-to-r from-primary/40 via-accent/20 to-transparent"
+        className="h-px origin-left bg-border"
       />
 
       {/* ── Workspace Grid ── */}
@@ -348,15 +348,9 @@ export default function WorkspacesPage() {
               }}
               aria-label={`Open workspace ${ws.name}`}
             >
-              {/* Gradient border glow on hover */}
-              <div className="absolute -inset-[1px] rounded-2xl bg-gradient-to-br from-primary/40 via-accent/20 to-accent-2/40 opacity-0 blur-sm transition-opacity duration-500 group-hover:opacity-100" />
-
               <Card
-                className="relative h-full border border-border bg-card backdrop-blur-xl transition-all duration-300 group-hover:border-primary/30 group-hover:shadow-e2"
+                className="relative h-full border border-border bg-card transition-all duration-300 group-hover:border-primary/30 group-hover:shadow-e2"
               >
-                {/* Top accent line */}
-                <div className="absolute inset-x-0 top-0 h-[2px] rounded-t-2xl bg-gradient-to-r from-primary/50 via-accent/30 to-accent-2/50 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <motion.div

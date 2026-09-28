@@ -925,19 +925,6 @@ function EvaluationTab({
   );
 }
 
-// ─── Background ambient blobs ─────────────────────────────────────────────────
-
-function AmbientBlobs() {
-  return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-      <div className="absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-primary/5 blur-[120px]" />
-      <div className="absolute top-1/3 -right-40 h-[400px] w-[400px] rounded-full bg-accent/5 blur-[100px]" />
-      <div className="absolute -bottom-40 left-1/3 h-[450px] w-[450px] rounded-full bg-accent-2/5 blur-[110px]" />
-      <div className="absolute top-2/3 left-1/4 h-[300px] w-[300px] rounded-full bg-gold/5 blur-[90px]" />
-    </div>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -1052,7 +1039,6 @@ export default function AdminDashboard() {
 
   return (
     <>
-      <AmbientBlobs />
       <motion.div
         className="relative z-0"
         variants={pageTransition}

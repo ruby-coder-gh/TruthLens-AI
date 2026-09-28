@@ -10,7 +10,7 @@ function highlight(text: string, query: string) {
   const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'));
   return parts.map((part, index) => (
     part.toLowerCase() === query.toLowerCase()
-      ? <mark key={index} className="rounded bg-gold/25 px-0.5 text-text">{part}</mark>
+      ? <mark key={index} className="rounded bg-mark px-0.5 text-text">{part}</mark>
       : <span key={index}>{part}</span>
   ));
 }
@@ -22,6 +22,18 @@ export default function GlobalSearch() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [workspaceCount, setWorkspaceCount] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // ⌘K / Ctrl+K opens search from anywhere — the trigger advertises it.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
+        event.preventDefault();
+        setOpen(true);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!open || !query.trim()) {
@@ -68,15 +80,17 @@ export default function GlobalSearch() {
 
   return (
     <>
+      {/* Icon-only 44px target on phones; a bordered field with the key hint from sm up. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full max-w-md items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.03] px-3 py-2 text-left text-sm text-text-dim transition-colors hover:border-primary/35 hover:text-text"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 rounded-control text-text-dim transition-colors duration-150 hover:bg-card-2 hover:text-text-muted sm:h-9 sm:w-auto sm:min-w-[220px] sm:justify-start sm:border sm:border-border sm:pl-3 sm:pr-2 sm:hover:border-border-strong sm:hover:bg-transparent"
         aria-label="Search all accessible workspaces"
+        aria-keyshortcuts="Meta+K Control+K"
       >
-        <Search size={16} />
-        <span className="flex-1">Search all workspaces…</span>
-        <kbd className="rounded border border-white/[0.1] px-1.5 py-0.5 text-[10px]">⌘K</kbd>
+        <Search size={18} strokeWidth={1.75} aria-hidden="true" />
+        <span className="text-sm max-sm:hidden">Search</span>
+        <kbd className="ml-auto rounded border border-border px-1.5 py-0.5 font-sans text-xs font-medium leading-none text-text-dim max-sm:hidden">⌘K</kbd>
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Search all workspaces" className="max-w-3xl">
         <Input

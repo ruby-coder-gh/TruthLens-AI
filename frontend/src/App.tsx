@@ -5,7 +5,6 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, Skeleton } from './components/ui';
 import Layout from './components/Layout'
-import CursorGlow from './components/CursorGlow'
 import { ProtectedRoute, AdminRoute } from './components/RouteGuards'
 
 // Route-level code splitting — chunks load on demand
@@ -144,8 +143,6 @@ export default function App() {
           <ToastProvider>
             <AuthProvider>
               <AppRoutes />
-              <CursorGlow />
-              <div className="noise-overlay" aria-hidden="true" />
             </AuthProvider>
           </ToastProvider>
         </BrowserRouter>

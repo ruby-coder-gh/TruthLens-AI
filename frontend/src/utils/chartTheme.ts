@@ -81,38 +81,38 @@ const ROLES = Object.keys(TOKENS) as Role[];
 
 /** Mirrors the `@theme` block in index.css. */
 export const LIGHT_CHART_PALETTE: ChartPalette = {
-  accent: '#4F46E5',
-  accentSoft: '#4338CA',
+  accent: '#2350B5',
+  accentSoft: '#1C4299',
   good: '#16A34A',
   warning: '#D97706',
   danger: '#DC2626',
-  neutral: '#666D78',
-  grid: 'rgba(0, 0, 0, 0.06)',
-  axis: 'rgba(0, 0, 0, 0.10)',
-  axisText: '#666D78',
+  neutral: '#5F6B78',
+  grid: '#E4E9EC',
+  axis: '#D6DDE2',
+  axisText: '#5F6B78',
   surface: '#FFFFFF',
   tooltipBg: '#FFFFFF',
-  tooltipBorder: 'rgba(0, 0, 0, 0.10)',
-  tooltipText: '#1F2328',
-  tooltipLabel: '#5A6069',
+  tooltipBorder: '#D6DDE2',
+  tooltipText: '#15202B',
+  tooltipLabel: '#4A5663',
 };
 
 /** Mirrors the `[data-theme="dark"]` block in index.css. */
 export const DARK_CHART_PALETTE: ChartPalette = {
-  accent: '#8B85FF',
-  accentSoft: '#A9A5FF',
+  accent: '#8FB0FF',
+  accentSoft: '#AFC6FF',
   good: '#34D399',
   warning: '#FBBF24',
   danger: '#F87171',
-  neutral: '#BFC5CF',
-  grid: 'rgba(255, 255, 255, 0.10)',
-  axis: 'rgba(255, 255, 255, 0.16)',
-  axisText: '#BFC5CF',
-  surface: '#191D24',
-  tooltipBg: '#191D24',
-  tooltipBorder: 'rgba(255, 255, 255, 0.16)',
-  tooltipText: '#EDEEF0',
-  tooltipLabel: '#CFD4DD',
+  neutral: '#93A2AA',
+  grid: '#202B32',
+  axis: '#26333B',
+  axisText: '#93A2AA',
+  surface: '#141D22',
+  tooltipBg: '#141D22',
+  tooltipBorder: '#26333B',
+  tooltipText: '#E4EAEC',
+  tooltipLabel: '#B4C0C6',
 };
 
 function fallbackFor(theme: Theme): ChartPalette {
