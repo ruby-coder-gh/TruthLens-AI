@@ -348,23 +348,16 @@ async def _run_query_pipeline(
         ]
 
         # 5. Send sources
+        # K1: route through the shared `_source_payload` shaper (same one the
+        # cached-replay path uses) so the live frame also carries page_number
+        # from chunk metadata (BUG-8) instead of a hand-rolled dict missing it.
         conflicts = await _source_conflicts([ctx["chunk_id"] for ctx in contexts])
         await sink.emit(
             "sources",
             {
                 "query_id": query_id,
                 "sources": [
-                    {
-                        "chunk_id": ctx["chunk_id"],
-                        "document_id": ctx["document_id"],
-                        "document_name": ctx.get("document_name", ""),
-                        "excerpt": ctx["content"][:300],
-                        "relevance_score": ctx.get("score", 0),
-                        "rerank_score": ctx.get("rerank_score"),
-                        "matched_chunks": 1,
-                        "confidence": min(1.0, ctx.get("score", 0) * 1.5 + 0.3),
-                        "conflicts": conflicts.get(ctx["chunk_id"], 0),
-                    }
+                    {**_source_payload(ctx), "conflicts": conflicts.get(ctx["chunk_id"], 0)}
                     for ctx in contexts
                 ],
             },

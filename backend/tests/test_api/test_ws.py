@@ -447,6 +447,95 @@ class TestPipelineResolvesActivePrompt:
         assert captured["save_kwargs"]["prompt_version"] == registry.compute_hash(content)
 
 
+class TestSourcesFramePageNumber:
+    """K1/BUG-8: the live "sources" WS frame carries page_number from chunk
+    metadata. Stored `response_sources` already exposed it (`_source_response`
+    reads `metadata.get("page_number")`); the live frame built its own dict
+    without that field."""
+
+    async def test_sources_frame_includes_page_number_from_chunk_metadata(
+        self, monkeypatch, ws_session_factory
+    ):
+        import sys
+        import types
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k, filters=None):
+            return [
+                SimpleNamespace(
+                    chunk_id="chunk-1",
+                    document_id="doc-1",
+                    content="source content",
+                    score=0.9,
+                    final_score=0.9,
+                    rerank_score=0.9,
+                    metadata={"document_name": "Doc 1", "page_number": 3},
+                )
+            ]
+
+        async def fake_rerank(query, results, top_k):
+            return list(results)
+
+        async def fake_stream_tokens(gen_input, query_id, token_sender):
+            return "final answer", 1, "mock-model", None, "hash"
+
+        async def fake_guardrail_check(answer, contexts):
+            return SimpleNamespace(passed=True, score=0.95, details="ok")
+
+        async def fake_compute_trust(*args, **kwargs):
+            return SimpleNamespace(
+                overall=0.9, retrieval_quality=0.9, faithfulness=0.95,
+                relevance=0.9, source_authority=0.8,
+            )
+
+        async def fake_save_query(**kwargs):
+            return None
+
+        async def fake_document_version(*args, **kwargs):
+            return 0
+
+        async def fake_cache_lookup(*args, **kwargs):
+            return None
+
+        for name, attr, fn in (
+            ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
+            ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
+            ("app.retrieval.reranker", "rerank", fake_rerank),
+            ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
+            ("app.generation.guardrail", "check", fake_guardrail_check),
+            ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
+        ):
+            module = types.ModuleType(name)
+            setattr(module, attr, fn)
+            monkeypatch.setitem(sys.modules, name, module)
+
+        monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
+        monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
+        monkeypatch.setattr(ws_api, "lookup_cached_query", fake_cache_lookup)
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What is policy?",
+            workspace_id="ws-1",
+            user_id="user-1",
+            query_id="query-page",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(_send, query_id="query-page"),
+        )
+
+        sources_frame = next(m["payload"] for m in sent if m["type"] == "sources")
+        assert sources_frame["sources"][0]["page_number"] == 3
+
 
 class TestCacheRespectsPromotedPrompt:
     """A promoted prompt invalidates answers written by the previous one.
