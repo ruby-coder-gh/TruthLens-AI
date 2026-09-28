@@ -48,7 +48,32 @@ describe('SealReceiptButton', () => {
 
     const expectedLink = `${window.location.origin}${created.url_path}`;
     expect(await screen.findByDisplayValue(expectedLink)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(created.seal.slice(0, 12)))).toBeInTheDocument();
+    // R3-11: the just-sealed receipt's short seal now shows twice — once in
+    // the "Receipt sealed" success card, once in the "Existing receipts"
+    // list below it (see the next test) — not zero times.
+    expect(screen.getAllByText(new RegExp(created.seal.slice(0, 12)))).toHaveLength(2);
+  });
+
+  // R3-11: `activeExisting` used to filter the just-created token *out* of
+  // the "Existing receipts" list — the only place with a Revoke control — so
+  // a receipt sealed this session couldn't be revoked until the dialog was
+  // closed and reopened.
+  it('can revoke a receipt immediately after sealing it, in the same dialog (R3-11)', async () => {
+    const user = userEvent.setup();
+    mockCreate.mockResolvedValue(created);
+    mockRevoke.mockResolvedValue(undefined);
+
+    renderWithProviders(<SealReceiptButton queryId="q-1" />);
+    await user.click(screen.getByRole('button', { name: /seal receipt/i }));
+    await user.click(await screen.findByRole('button', { name: /create public receipt/i }));
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledWith('q-1'));
+
+    expect(await screen.findByText(/existing receipts for this answer/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /revoke this receipt/i }));
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith(created.token));
+    expect(await screen.findByText(/revoked/i)).toBeInTheDocument();
   });
 
   it('lists existing receipts for the query and revokes one after confirming (R2-17)', async () => {
