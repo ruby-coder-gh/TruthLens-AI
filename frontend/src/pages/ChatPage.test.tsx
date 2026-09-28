@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -44,13 +45,16 @@ function makeClaim(overrides: Partial<Claim> = {}): Claim {
 vi.mock('../api/client', () => ({
   feedbackApi: { submit: vi.fn() },
   queryApi: { exportMarkdown: vi.fn().mockResolvedValue({ blob: new Blob(['#']), filename: 'a.md' }) },
+  // Empty suggestions → SuggestedQuestions falls back to EXAMPLE_QUESTIONS.
+  demoApi: { suggestions: vi.fn().mockResolvedValue({ questions: [] }) },
+  receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
 }));
 
-// AnswerBody's "View in document" calls useSourceViewer() — the real context
-// (SourceViewerProvider, lane L8) isn't mounted by renderWithProviders, so
-// stub the hook the same way every lane's tests will need to.
+// AnswerBody and EvidenceSidebar call useSourceViewer(); stub the hook so tests
+// can assert on open(), and make the provider a passthrough.
 const mockOpenSourceViewer = vi.fn();
 vi.mock('../context/SourceViewerContext', () => ({
+  SourceViewerProvider: ({ children }: { children: ReactNode }) => children,
   useSourceViewer: () => ({ open: mockOpenSourceViewer, close: vi.fn(), target: null }),
 }));
 
