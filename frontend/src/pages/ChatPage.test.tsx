@@ -74,6 +74,7 @@ interface MockQueryWebSocketInstance {
   conversationId?: string;
   topK?: number;
   forceRefresh?: boolean;
+  replacesQueryId?: string;
   connect: typeof mockConnect;
   disconnect: typeof mockDisconnect;
   cancel: typeof mockCancel;
@@ -87,6 +88,7 @@ vi.mock('../api/websocket', () => {
     conversationId?: string;
     topK?: number;
     forceRefresh?: boolean;
+    replacesQueryId?: string;
     connect = mockConnect;
     disconnect = mockDisconnect;
     cancel = mockCancel;
@@ -98,6 +100,7 @@ vi.mock('../api/websocket', () => {
       conversationId?: string,
       topK?: number,
       forceRefresh?: boolean,
+      replacesQueryId?: string,
     ) {
       this.workspaceId = workspaceId;
       this.query = query;
@@ -105,6 +108,7 @@ vi.mock('../api/websocket', () => {
       this.conversationId = conversationId;
       this.topK = topK;
       this.forceRefresh = forceRefresh;
+      this.replacesQueryId = replacesQueryId;
       instances.push(this);
     }
   }
@@ -241,6 +245,11 @@ describe('ChatPage', () => {
       callbacks.onComplete?.({ query_id: 'q-fresh', latency_ms: 500, model_used: 'qwen3:4b', token_count: 9, from_cache: false });
     });
 
+    // Copy reads the completed answer (BUG-9) — checked before Regenerate,
+    // which replaces this bubble with a fresh pending one in place (R2-21).
+    await user.click(screen.getByLabelText('Copy response'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Revenue was €412M [1].');
+
     // Regenerate shows up on a fresh (non-cached) complete answer, not just a
     // cached one (BUG-31).
     const regenerate = screen.getByLabelText('Regenerate with fresh retrieval');
@@ -248,9 +257,37 @@ describe('ChatPage', () => {
     await user.click(regenerate);
     expect(instances).toHaveLength(2);
     expect(instances[1].forceRefresh).toBe(true);
+  });
 
-    await user.click(screen.getByLabelText('Copy response'));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Revenue was €412M [1].');
+  it('regenerates the turn in place and sends K4 replaces_query_id instead of duplicating it (R2-21)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'What was installed capacity?');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onToken?.('1.8 GW installed.');
+      instances[0].callbacks.onComplete?.({ query_id: 'q-old', latency_ms: 500, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    expect(screen.getAllByText('What was installed capacity?')).toHaveLength(1);
+
+    await user.click(screen.getByLabelText('Regenerate with fresh retrieval'));
+
+    // The second run tells the backend which saved query it replaces (K4).
+    expect(instances).toHaveLength(2);
+    expect(instances[1].replacesQueryId).toBe('q-old');
+
+    act(() => {
+      instances[1].callbacks.onToken?.('1.9 GW installed.');
+      instances[1].callbacks.onComplete?.({ query_id: 'q-new', latency_ms: 400, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    // Still one question turn and one answer — not a second copy appended.
+    expect(screen.getAllByText('What was installed capacity?')).toHaveLength(1);
+    expect(screen.getByText('1.9 GW installed.')).toBeInTheDocument();
+    expect(screen.queryByText('1.8 GW installed.')).not.toBeInTheDocument();
   });
 
   it('shows the sidebar-consistent two-word initials on the question avatar (BUG-32)', async () => {

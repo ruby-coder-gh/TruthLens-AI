@@ -101,6 +101,8 @@ interface StartQueryOptions {
   topK?: number;
   forceRefresh?: boolean;
   replaceAssistantId?: string;
+  /** K4: query id this run replaces once it saves (Regenerate — R2-21). */
+  replacesQueryId?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -201,7 +203,7 @@ function ChatPageForConversation() {
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
     (queryText: string, options: StartQueryOptions = {}) => {
-      const { topK, forceRefresh = false, replaceAssistantId } = options;
+      const { topK, forceRefresh = false, replaceAssistantId, replacesQueryId } = options;
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       wsRef.current?.disconnect();
@@ -370,7 +372,7 @@ function ChatPageForConversation() {
             ),
           );
         },
-      }, convId, topK, forceRefresh);
+      }, convId, topK, forceRefresh, replacesQueryId);
 
       wsRef.current = ws;
       ws.connect();
@@ -439,7 +441,15 @@ function ChatPageForConversation() {
       if (idx <= 0 || isStreaming) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content, { forceRefresh: true });
+      // R2-21: replace this turn in place (same as Retry) instead of
+      // appending a second copy — and tell the backend which saved query
+      // this run replaces (K4) so /chats and the sidebar don't end up with
+      // a duplicate entry per regeneration.
+      startQuery(precedingUser.content, {
+        forceRefresh: true,
+        replaceAssistantId: assistantMsgId,
+        replacesQueryId: messages[idx].queryId ?? undefined,
+      });
     },
     [isStreaming, messages, startQuery],
   );
