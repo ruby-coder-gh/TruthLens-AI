@@ -271,6 +271,104 @@ class TestSaveQueryProvenance:
         assert row.prompt_tokens is None
 
 
+class TestSaveQueryReplacesQueryId:
+    """K4: Regenerate replaces the previous turn in place instead of piling
+    up duplicate history rows (R2-21) -- `_save_query(replaces_query_id=...)`
+    deletes the old row only when it's the caller's own and unreceipted."""
+
+    @staticmethod
+    async def _save_new(ws_api, *, workspace_id, user_id, replaces_query_id, query_id="q-new"):
+        await ws_api._save_query(
+            query_id=query_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            query_text="new q",
+            rewritten_query=None,
+            response_text="new a",
+            response_sources=[],
+            trust_score=0.9,
+            trust_components={},
+            guardrail_score=0.9,
+            guardrail_passed=True,
+            model_used="m",
+            latency_ms=1,
+            token_count=1,
+            normalized_query="new q",
+            document_version=0,
+            replaces_query_id=replaces_query_id,
+        )
+
+    async def test_deletes_the_old_row_when_owned_and_unreceipted(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        workspace, user = ws_workspace
+        test_db.add(Query(id="q-old-1", workspace_id=workspace.id, user_id=user.id, query_text="old q"))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-1", query_id="q-new-1",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-1" not in ids
+        assert "q-new-1" in ids
+
+    async def test_keeps_the_old_row_when_it_belongs_to_someone_else(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.core.auth import hash_password
+        from app.models.query import Query
+        from app.models.user import User
+
+        workspace, user = ws_workspace
+        other = User(
+            email="ws-other@example.com", username="wsother",
+            password_hash=hash_password("TestPass1"), role="user", is_active=True,
+        )
+        test_db.add(other)
+        await test_db.commit()
+        await test_db.refresh(other)
+        test_db.add(Query(id="q-old-2", workspace_id=workspace.id, user_id=other.id, query_text="old q"))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-2", query_id="q-new-2",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-2" in ids
+
+    async def test_keeps_the_old_row_when_it_has_a_receipt(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+        from app.models.receipt import Receipt
+
+        workspace, user = ws_workspace
+        test_db.add(Query(id="q-old-3", workspace_id=workspace.id, user_id=user.id, query_text="old q"))
+        await test_db.commit()
+        test_db.add(Receipt(
+            token="tok-replace-test", query_id="q-old-3", workspace_id=workspace.id,
+            payload="{}", canonical="{}", seal="s" * 64, signature="g" * 64,
+        ))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-3", query_id="q-new-3",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-3" in ids
+
+
 class TestPipelineResolvesActivePrompt:
     """The WS pipeline threads the registry's active prompt through generation."""
 

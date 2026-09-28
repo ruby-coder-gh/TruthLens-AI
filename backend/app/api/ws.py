@@ -23,6 +23,7 @@ from app.database import async_session_factory
 from app.api.queries import stored_claims
 from app.models.query import Query
 from app.models.query_claims import QueryClaims
+from app.models.receipt import Receipt
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
@@ -222,8 +223,14 @@ async def _run_query_pipeline(
     filters: dict[str, Any] | None,
     sink: StreamSink,
     force_refresh: bool = False,
+    replaces_query_id: str | None = None,
 ) -> None:
     """Run the full query pipeline and stream results through `sink`.
+
+    K4: `replaces_query_id` (Regenerate) is threaded through to `_save_query`,
+    which deletes that older turn once the new answer is saved -- so
+    regenerating replaces the turn in place instead of growing history
+    (R2-21). Both the abstention save and the normal save honour it.
 
     Every frame is emitted with `await sink.emit(type, payload)`, which stamps a
     monotonic `seq` and buffers the frame for resume. Delivery failures detach
@@ -330,6 +337,7 @@ async def _run_query_pipeline(
                 # exactly like a generated answer. No LLM ran, so there are no
                 # prompt tokens to account for.
                 prompt_version=resolved_prompt.hash, prompt_tokens=None,
+                replaces_query_id=replaces_query_id,
                 **abstention.save_fields,
             )
             return
@@ -489,6 +497,7 @@ async def _run_query_pipeline(
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
             claims=claims,
+            replaces_query_id=replaces_query_id,
         )
 
     except asyncio.CancelledError:
@@ -532,8 +541,15 @@ async def _save_query(
     prompt_tokens: int | None = None,
     prompt_version: str | None = None,
     claims: list[dict[str, Any]] | None = None,
+    replaces_query_id: str | None = None,
 ) -> None:
-    """Save query result (and its Truth Lens claims, if any) in one transaction."""
+    """Save query result (and its Truth Lens claims, if any) in one transaction.
+
+    K4: `replaces_query_id` (Regenerate) deletes that older query row in the
+    same transaction — but only if it belongs to this caller and carries no
+    sealed receipt (a receipt must keep pointing at real history). Otherwise
+    it's left alone; the new answer is still saved either way.
+    """
     import json as json_mod
 
     async with async_session_factory() as db:
@@ -561,6 +577,18 @@ async def _save_query(
             query_claims=QueryClaims(claims=json_mod.dumps(claims)) if claims else None,
         )
         db.add(query)
+
+        if replaces_query_id and replaces_query_id != query_id:
+            old = (await db.execute(
+                select(Query).where(Query.id == replaces_query_id, Query.user_id == user_id)
+            )).scalar_one_or_none()
+            if old is not None:
+                has_receipt = (await db.execute(
+                    select(Receipt.id).where(Receipt.query_id == replaces_query_id).limit(1)
+                )).scalar_one_or_none()
+                if has_receipt is None:
+                    await db.delete(old)
+
         await db.commit()
 
 
@@ -732,6 +760,9 @@ async def websocket_query(websocket: WebSocket):
                 top_k = msg_payload.get("top_k", 5)
                 filters = msg_payload.get("filters")
                 force_refresh = bool(msg_payload.get("force_refresh", False))
+                # K4: Regenerate passes the turn it's replacing so the saved
+                # answer takes its place instead of piling up a duplicate.
+                replaces_query_id = msg_payload.get("replaces_query_id")
 
                 if not workspace_id or not query_text:
                     await send_json({
@@ -769,6 +800,7 @@ async def websocket_query(websocket: WebSocket):
                         filters=filters,
                         sink=current_sink,
                         force_refresh=force_refresh,
+                        replaces_query_id=replaces_query_id,
                     )
                 )
                 # The buffer keeps the task reachable (and alive) across a
