@@ -40,7 +40,6 @@ export default function AdminSettingsPage() {
   const [maxUploadMb, setMaxUploadMb] = useState(50);
   const [trustHigh, setTrustHigh] = useState(0.7);
   const [trustLow, setTrustLow] = useState(0.4);
-  const [rateLimitEnabled, setRateLimitEnabled] = useState(true);
 
   const [savingSection, setSavingSection] = useState<string | null>(null);
 
@@ -50,7 +49,6 @@ export default function AdminSettingsPage() {
     setMaxUploadMb(remote.max_upload_size_mb);
     setTrustHigh(remote.trust_score_high_threshold);
     setTrustLow(remote.trust_score_low_threshold);
-    setRateLimitEnabled(remote.rate_limit_enabled);
   }, [remote]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -233,40 +231,23 @@ export default function AdminSettingsPage() {
           </Card>
         </motion.div>
 
-        {/* Rate limiting */}
+        {/* Rate limiting — R2-14: fully read-only. It used to render a live
+            checkbox + Save button right next to copy that says "set via
+            server config, not editable here", which contradicted itself. */}
         <motion.div variants={staggerItem}>
           <Card className="p-5 lg:p-6">
             <h2 className="text-base font-semibold text-text mb-4 flex items-center gap-2">
               <Gauge size={16} className="text-primary-soft" />
               Rate Limiting
             </h2>
-            <div className="space-y-4">
-              <label className="flex items-center gap-2.5 text-sm text-text">
-                <input
-                  type="checkbox"
-                  checked={rateLimitEnabled}
-                  onChange={(e) => setRateLimitEnabled(e.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-                Rate limiting enabled
-              </label>
-              {/* Not on `AdminSettingsUpdate` — the server computes these from
-                  config, not per-request overrides, so they render as fact,
-                  not as inputs that would silently no-op on save. */}
-              <div className="flex flex-wrap items-center gap-2 text-xs text-text-dim">
-                <Badge color="gray">{remote.rate_limit_requests} requests</Badge>
-                <span>per</span>
-                <Badge color="gray">{remote.rate_limit_window_seconds}s window</Badge>
-                <span>— set via server config, not editable here.</span>
-              </div>
-              <Button
-                size="sm"
-                loading={savingSection === 'Rate limiting'}
-                onClick={() => handleSave('Rate limiting', { rate_limit_enabled: rateLimitEnabled })}
-              >
-                <Save size={14} />
-                Save
-              </Button>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-text-dim">
+              <Badge color={remote.rate_limit_enabled ? 'green' : 'gray'}>
+                {remote.rate_limit_enabled ? 'Enabled' : 'Disabled'}
+              </Badge>
+              <Badge color="gray">{remote.rate_limit_requests} requests</Badge>
+              <span>per</span>
+              <Badge color="gray">{remote.rate_limit_window_seconds}s window</Badge>
+              <span>— set via server config, not editable here.</span>
             </div>
           </Card>
         </motion.div>

@@ -62,6 +62,19 @@ describe('AdminSettingsPage', () => {
     await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ max_upload_size_mb: 80 }));
   });
 
+  // R2-14: the card had a live checkbox + Save button sitting right next to
+  // copy that says "set via server config, not editable here" — pick one.
+  it('renders the Rate Limiting card fully read-only, with no checkbox or dead Save', async () => {
+    renderWithProviders(<AdminSettingsPage />);
+
+    const heading = await screen.findByRole('heading', { name: /rate limiting/i });
+    const card = heading.closest('.glass') as HTMLElement;
+
+    expect(within(card).getByText('Enabled')).toBeInTheDocument();
+    expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it('saves trust thresholds under the backend field names', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminSettingsPage />);

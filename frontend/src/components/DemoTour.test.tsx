@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/utils';
-import { DemoTour } from './DemoTour';
+import { DemoTourWarmup, DemoTourButton } from './DemoTour';
 import { useReady } from '../hooks/useReady';
 import type { UseReadyResult } from '../hooks/useReady';
 import type { User } from '../api/types';
@@ -17,10 +17,22 @@ const demoUser: User = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
+const adminDemoUser: User = {
+  id: 'demo-2',
+  email: 'admin@truthlens.dev',
+  username: 'demo_admin',
+  role: 'admin',
+  is_active: true,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+};
+
+// R2-2/BUG-33: a QA account on the same @truthlens.dev domain as the seeded
+// personas, but not one of the two seeded emails itself.
 const qaUser: User = {
   id: 'qa-1',
-  email: 'viewer.qa@example.com',
-  username: 'viewer_qa',
+  email: 'viewer2_qa@truthlens.dev',
+  username: 'viewer2_qa',
   role: 'viewer',
   is_active: true,
   created_at: '2026-01-01T00:00:00Z',
@@ -31,9 +43,9 @@ vi.mock('../hooks/useReady', () => ({ useReady: vi.fn() }));
 
 // This jsdom run has no usable `window.localStorage` — Node's experimental
 // global shadows jsdom's implementation and is inert without
-// `--localstorage-file` (see ThemeContext.test.tsx). DemoTour tolerates that
-// (every access is try/caught), but persistence is what's under test here, so
-// install a minimal in-memory Storage for these tests only.
+// `--localstorage-file` (see ThemeContext.test.tsx). DemoTourButton tolerates
+// that (every access is try/caught), but persistence is what's under test
+// here, so install a minimal in-memory Storage for these tests only.
 function installMemoryStorage() {
   const store = new Map<string, string>();
   const storage: Storage = {
@@ -65,7 +77,7 @@ function mockReady(overrides: Partial<UseReadyResult> = {}) {
   });
 }
 
-describe('DemoTour', () => {
+describe('DemoTourWarmup', () => {
   beforeEach(() => {
     vi.mocked(useReady).mockReset();
     installMemoryStorage();
@@ -73,13 +85,13 @@ describe('DemoTour', () => {
 
   it('renders nothing outside demo mode', () => {
     mockReady({ demoMode: false });
-    const { container } = renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    const { container } = renderWithProviders(<DemoTourWarmup />, { authValue: { isAuthenticated: true } });
     expect(container).toBeEmptyDOMElement();
   });
 
   it('renders nothing when not authenticated, even in demo mode', () => {
     mockReady({ demoMode: true, warm: true });
-    const { container } = renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: false } });
+    const { container } = renderWithProviders(<DemoTourWarmup />, { authValue: { isAuthenticated: false } });
     expect(container).toBeEmptyDOMElement();
   });
 
@@ -92,7 +104,7 @@ describe('DemoTour', () => {
     });
     // The warm-up status is for any authenticated user on a demo-mode
     // deployment, not just the demo personas — no `user` needed here.
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    renderWithProviders(<DemoTourWarmup />, { authValue: { isAuthenticated: true } });
 
     expect(screen.getByText(/warming up models/i)).toBeInTheDocument();
     expect(screen.getByText('Embedder')).toBeInTheDocument();
@@ -107,75 +119,109 @@ describe('DemoTour', () => {
 
   it('hides the warm-up toast once warm', () => {
     mockReady({ demoMode: true, warm: true });
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    renderWithProviders(<DemoTourWarmup />, { authValue: { isAuthenticated: true } });
     expect(screen.queryByText(/warming up models/i)).not.toBeInTheDocument();
   });
+});
 
-  it('shows the presenter checklist pill and persists a checked step across remounts', async () => {
+describe('DemoTourButton', () => {
+  beforeEach(() => {
+    vi.mocked(useReady).mockReset();
+    installMemoryStorage();
+  });
+
+  it('renders nothing outside demo mode', () => {
+    mockReady({ demoMode: false });
+    const { container } = renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('shows the "Tour n/5" trigger and persists a checked step across remounts', async () => {
     mockReady({ demoMode: true, warm: true, demoWorkspaceId: 'ws-demo-1' });
     const user = userEvent.setup();
 
-    const { unmount } = renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
-    expect(screen.getByRole('button', { name: /demo tour 0\/5/i })).toBeInTheDocument();
+    const { unmount } = renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    expect(screen.getByRole('button', { name: /tour 0\/5/i })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
+    await user.click(screen.getByRole('button', { name: /tour 0\/5/i }));
     await user.click(screen.getByLabelText(/ask a suggested question/i));
 
-    expect(await screen.findByRole('button', { name: /demo tour 1\/5/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /tour 1\/5/i })).toBeInTheDocument();
 
     unmount();
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
-    expect(await screen.findByRole('button', { name: /demo tour 1\/5/i })).toBeInTheDocument();
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    expect(await screen.findByRole('button', { name: /tour 1\/5/i })).toBeInTheDocument();
   });
 
-  // BUG-33: viewer_qa/editor_qa-style accounts are signed into a demo-mode
-  // deployment for QA, but aren't running the demo.
-  it('hides the presenter checklist (but not the warm-up toast) for a non-demo account', () => {
-    mockReady({ demoMode: true, warm: false });
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: qaUser } });
+  it('also shows for the seeded demo admin account', () => {
+    mockReady({ demoMode: true, warm: true });
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: adminDemoUser } });
+    expect(screen.getByRole('button', { name: /tour 0\/5/i })).toBeInTheDocument();
+  });
 
-    expect(screen.queryByRole('button', { name: /demo tour/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/warming up models/i)).toBeInTheDocument();
+  // R2-2/BUG-33: `isDemoAccount` used to match every `@truthlens.dev`
+  // address, so QA accounts invited on a demo-mode deployment saw the tour
+  // too, even though they aren't running the demo.
+  it('hides for a non-seeded @truthlens.dev account', () => {
+    mockReady({ demoMode: true, warm: true });
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: qaUser } });
+    expect(screen.queryByRole('button', { name: /tour/i })).not.toBeInTheDocument();
   });
 
   it('collapses (never hides entirely) so the tour is always re-openable', async () => {
     mockReady({ demoMode: true, warm: true });
     const user = userEvent.setup();
 
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
-    await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    await user.click(screen.getByRole('button', { name: /tour 0\/5/i }));
     await user.click(screen.getByRole('button', { name: /collapse tour/i }));
 
-    // The pill itself is still there — collapsing is not a dead end.
-    const pill = screen.getByRole('button', { name: /demo tour 0\/5/i });
-    expect(pill).toBeInTheDocument();
-    expect(pill).toHaveAttribute('aria-expanded', 'false');
+    // The trigger itself is still there — collapsing is not a dead end.
+    const trigger = screen.getByRole('button', { name: /tour 0\/5/i });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
-    await user.click(pill);
+    await user.click(trigger);
     expect(screen.getByText('Presenter tour')).toBeInTheDocument();
   });
 
-  it('closes on Escape and returns focus to the toggle pill', async () => {
+  it('closes on Escape and returns focus to the trigger', async () => {
     mockReady({ demoMode: true, warm: true });
     const user = userEvent.setup();
 
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
-    const pill = screen.getByRole('button', { name: /demo tour 0\/5/i });
-    await user.click(pill);
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    const trigger = screen.getByRole('button', { name: /tour 0\/5/i });
+    await user.click(trigger);
     expect(screen.getByText('Presenter tour')).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
 
     expect(screen.queryByText('Presenter tour')).not.toBeInTheDocument();
-    expect(pill).toHaveFocus();
+    expect(trigger).toHaveFocus();
+  });
+
+  // R2-2/BUG-33: previously there was no outside-click handling at all — a
+  // real click anywhere else on the page left the panel open, floating over
+  // whatever the user navigated to or clicked next.
+  it('closes on an outside click', async () => {
+    mockReady({ demoMode: true, warm: true });
+    const user = userEvent.setup();
+
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    await user.click(screen.getByRole('button', { name: /tour 0\/5/i }));
+    expect(screen.getByText('Presenter tour')).toBeInTheDocument();
+
+    await user.click(document.body);
+
+    expect(screen.queryByText('Presenter tour')).not.toBeInTheDocument();
   });
 
   it('collapses the panel after "Go" navigates to a step', async () => {
     mockReady({ demoMode: true, warm: true, demoWorkspaceId: 'ws-demo-1' });
     const user = userEvent.setup();
 
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
-    await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
+    renderWithProviders(<DemoTourButton />, { authValue: { isAuthenticated: true, user: demoUser } });
+    await user.click(screen.getByRole('button', { name: /tour 0\/5/i }));
     await user.click(screen.getAllByRole('link', { name: /^go$/i })[0]);
 
     expect(screen.queryByText('Presenter tour')).not.toBeInTheDocument();

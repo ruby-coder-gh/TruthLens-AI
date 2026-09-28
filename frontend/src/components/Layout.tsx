@@ -35,7 +35,7 @@ import GlobalSearch from './GlobalSearch';
 import { FOCUSABLE_SELECTOR } from './ui';
 import { queryApi, reviewQueueApi, workspaceApi } from '../api/client';
 import { SourceViewerProvider } from '../context/SourceViewerContext';
-import { DemoTour } from './DemoTour';
+import { DemoTourWarmup, DemoTourButton } from './DemoTour';
 
 // Icon-button geometry (the prototype's .icon-btn): 40px, 44px below lg where
 // the shell is touch-first. No display or hover colour here — call sites add
@@ -356,7 +356,7 @@ export default function Layout() {
 
   return (
     <SourceViewerProvider>
-    <DemoTour />
+    <DemoTourWarmup />
     <div className="flex h-dvh flex-col overflow-hidden bg-bg">
       <a
         href="#main-content"
@@ -439,7 +439,11 @@ export default function Layout() {
           </>
         )}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* R2-2: the presenter tour trigger lives in the top bar itself,
+              not as a viewport-fixed pill, so it can never sit on top of a
+              page's own header action buttons. */}
+          <DemoTourButton />
           <GlobalSearch />
           <ThemeToggle />
         </div>

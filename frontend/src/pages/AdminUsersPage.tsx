@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Search, UserPlus, User, Ban, ChevronDown, ChevronRight, Clock } from 'lucide-react';
-import { Button, Badge, Input, EmptyState } from '../components/ui';
+import { Users, Search, UserPlus, User, Ban, ChevronDown, ChevronRight, Clock, AlertTriangle } from 'lucide-react';
+import { Button, Badge, Input, EmptyState, Modal } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
@@ -32,6 +32,11 @@ export default function AdminUsersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  // BUG-39: the inline role select and Deactivate button used to fire
+  // instantly with no confirmation — same fix as the user-detail page's
+  // "pending" pattern: hold the intended change until it's confirmed.
+  const [pendingRoleChange, setPendingRoleChange] = useState<{ userId: string; username: string; role: string } | null>(null);
+  const [pendingStatusChange, setPendingStatusChange] = useState<{ userId: string; username: string; isActive: boolean } | null>(null);
 
   const usersQuery = useQuery({
     queryKey: ['admin', 'users', page],
@@ -58,6 +63,7 @@ export default function AdminUsersPage() {
     onSuccess: (_data, variables) => {
       addToast(`User role updated to ${variables.role}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setPendingRoleChange(null);
     },
     onError: () => {
       addToast('Failed to update role', 'error');
@@ -70,6 +76,7 @@ export default function AdminUsersPage() {
     onSuccess: (_data, variables) => {
       addToast(`User ${variables.isActive ? 'activated' : 'deactivated'}`, 'info');
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setPendingStatusChange(null);
     },
     onError: () => {
       addToast('Failed to update status', 'error');
@@ -181,7 +188,10 @@ export default function AdminUsersPage() {
                     <div className="relative inline-flex" onClick={(e) => e.stopPropagation()}>
                       <select
                         value={user.role}
-                        onChange={(e) => roleMutation.mutate({ userId: user.id, role: e.target.value })}
+                        onChange={(e) => {
+                          const role = e.target.value;
+                          if (role !== user.role) setPendingRoleChange({ userId: user.id, username: user.username, role });
+                        }}
                         className={`appearance-none rounded-chip border py-1 pl-2 pr-7 text-xs font-medium transition-colors ${
                           user.role === 'admin'
                             ? 'border-primary/30 bg-primary/12 text-primary-soft'
@@ -214,7 +224,7 @@ export default function AdminUsersPage() {
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={() => statusMutation.mutate({ userId: user.id, isActive: !user.is_active })}
+                        onClick={() => setPendingStatusChange({ userId: user.id, username: user.username, isActive: !user.is_active })}
                         className={`flex items-center gap-1 rounded-chip px-2 py-1 text-xs font-medium transition-colors ${
                           user.is_active
                             ? 'text-orange hover:bg-orange/12'
@@ -277,6 +287,75 @@ export default function AdminUsersPage() {
           Showing {filtered.length} of {total} users
         </motion.p>
       )}
+
+      {/* BUG-39: role change confirmation — same pattern as the user-detail
+          page, since promoting to admin from this list ran instantly. */}
+      <Modal open={pendingRoleChange !== null} onClose={() => setPendingRoleChange(null)} title="Change role">
+        {pendingRoleChange && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-card border border-orange/30 bg-orange/10 p-4">
+              <AlertTriangle size={20} className="text-orange shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-orange">
+                  Change {pendingRoleChange.username}&apos;s role to {pendingRoleChange.role}?
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  {pendingRoleChange.role === 'admin'
+                    ? 'This grants full administrative access, including user management and system settings.'
+                    : 'This removes administrative access.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="danger"
+                size="sm"
+                loading={roleMutation.isPending}
+                onClick={() => roleMutation.mutate({ userId: pendingRoleChange.userId, role: pendingRoleChange.role })}
+              >
+                Change role
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setPendingRoleChange(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* BUG-39: Deactivate/Activate confirmation — it used to fire instantly. */}
+      <Modal open={pendingStatusChange !== null} onClose={() => setPendingStatusChange(null)} title="Confirm Action">
+        {pendingStatusChange && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-card border border-red/30 bg-red/10 p-4">
+              <AlertTriangle size={20} className="text-red shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red">
+                  {pendingStatusChange.isActive ? 'Activate' : 'Deactivate'} {pendingStatusChange.username}?
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  {pendingStatusChange.isActive
+                    ? `Activating will allow ${pendingStatusChange.username} to access the platform.`
+                    : `Deactivating will prevent ${pendingStatusChange.username} from accessing the platform.`}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="danger"
+                size="sm"
+                loading={statusMutation.isPending}
+                onClick={() => statusMutation.mutate({ userId: pendingStatusChange.userId, isActive: pendingStatusChange.isActive })}
+              >
+                {pendingStatusChange.isActive ? 'Activate' : 'Deactivate'}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setPendingStatusChange(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       </PageShell>
     </motion.div>
   );

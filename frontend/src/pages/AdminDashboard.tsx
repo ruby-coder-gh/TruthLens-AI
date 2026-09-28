@@ -1163,8 +1163,10 @@ export default function AdminDashboard() {
                 className="text-xl font-bold tabular-nums"
                 style={{ color: getTrustColorVar(stats.avg_trust_score) }}
               >
+                {/* BUG-50/C8: trust is 0-100 everywhere in the UI — this was
+                    the one place still showing the raw 0-1 score. */}
                 {stats.avg_trust_score != null
-                  ? stats.avg_trust_score.toFixed(2)
+                  ? `${Math.round(stats.avg_trust_score * 100)}/100`
                   : 'N/A'}
               </span>
               <Badge color={stats.avg_trust_score == null ? 'gray' : getTrustBadgeColor(stats.avg_trust_score)}>

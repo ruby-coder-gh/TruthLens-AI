@@ -192,6 +192,25 @@ describe('AdminAuditLogPage — filters and export', () => {
     expect(screen.getByText('IP address').nextElementSibling).toHaveTextContent('—');
   });
 
+  // K3/BUG-36: the USER column showed a raw, truncated UUID.
+  it('shows user_name over the truncated raw id when the backend sends it', async () => {
+    mockedAdminApi.logs.mockResolvedValue({
+      data: [
+        { ...SAMPLE_LOGS.data[0], id: 'log-named', user_id: 'user-1', user_name: 'demo_admin' },
+        { ...SAMPLE_LOGS.data[0], id: 'log-unnamed', user_id: 'user-legacy-id-without-a-name' },
+      ],
+      meta: { total: 2, page: 1, page_size: 10 },
+    });
+
+    renderWithProviders(<AdminAuditLogPage />);
+
+    expect(await screen.findByText('demo_admin')).toBeInTheDocument();
+    expect(screen.queryByText('user-1')).not.toBeInTheDocument();
+    // No `user_name` on the second row — falls back to the truncated id
+    // (16 chars + an ellipsis, matching `truncateId`).
+    expect(screen.getByText('user-legacy-id-w…')).toBeInTheDocument();
+  });
+
   it('sends an end-of-day date_to on export as well as on the list query', async () => {
     mockedAdminApi.exportLogs.mockResolvedValue({
       blob: new Blob(['id,action'], { type: 'text/csv' }),

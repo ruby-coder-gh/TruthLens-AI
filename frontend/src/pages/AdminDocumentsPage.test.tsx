@@ -132,6 +132,21 @@ describe('AdminDocumentsPage — bulk document ops', () => {
     });
   });
 
+  // K3/BUG-36/BUG-38: the "Uploaded By" column showed a raw uploader UUID.
+  it('shows uploaded_by_name when the backend sends it, falling back to the raw id', async () => {
+    mockListAll.mockResolvedValue({
+      data: [
+        { ...baseDoc, id: 'doc-1', original_filename: 'Contract.pdf', tags: [], uploaded_by: 'u-1', uploaded_by_name: 'demo_analyst' },
+        { ...baseDoc, id: 'doc-2', original_filename: 'Invoice.pdf', tags: [], uploaded_by: 'u-legacy-id' },
+      ],
+      meta: { page: 1, page_size: 20, total: 2 },
+    });
+    renderWithProviders(<AdminDocumentsPage />);
+
+    expect(await screen.findByText('demo_analyst')).toBeInTheDocument();
+    expect(screen.getByText('u-legacy-id')).toBeInTheDocument();
+  });
+
   it('regression: typed search text is passed to documentApi.listAll', async () => {
     const user = userEvent.setup();
     await renderPage();

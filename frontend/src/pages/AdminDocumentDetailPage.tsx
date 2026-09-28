@@ -14,18 +14,21 @@ import type { Document, DocumentDetail } from '../api/types';
 // `DocumentDetailResponse` server-side — it has `chunks` but no `uploaded_by`
 // or `tags`. Those two only come back on the list shape (`Document`, from
 // `listAll`), which the page already fetches to resolve the workspace id.
-// Merge them instead of asking for a backend field that doesn't exist.
-type DocumentWithDetail = DocumentDetail & Pick<Document, 'uploaded_by' | 'tags'>;
+// Merge them instead of asking for a backend field that doesn't exist. K3
+// adds `uploaded_by_name` to that same list shape.
+type DocumentWithDetail = DocumentDetail & Pick<Document, 'uploaded_by' | 'uploaded_by_name' | 'tags'>;
 
-const STATUS_ORDER = ['uploaded', 'parsing', 'chunking', 'embedding', 'indexing', 'indexed'] as const;
+// R2-10. The real values `backend/app/api/documents.py` ever sets are
+// pending/processing/ready/failed/quarantined (see `statusBadgeColor` below)
+// — the old uploaded/parsing/chunking/embedding/indexing/indexed pipeline
+// names never matched any of them, so `currentIdx` was always -1 and every
+// step rendered grey, even for a fully `ready` document.
+const STATUS_ORDER = ['pending', 'processing', 'ready'] as const;
 
 const STATUS_LABELS: Record<string, string> = {
-  uploaded: 'Uploaded',
-  parsing: 'Parsing',
-  chunking: 'Chunking',
-  embedding: 'Embedding',
-  indexing: 'Indexing',
-  indexed: 'Indexed',
+  pending: 'Pending',
+  processing: 'Processing',
+  ready: 'Ready',
 };
 
 function formatDate(iso: string | null | undefined): string {
@@ -109,7 +112,12 @@ export default function AdminDocumentDetailPage() {
       // for what it actually returns — `chunks` included — instead of the
       // list shape, which silently dropped the chunk array from the type.
       const detail = await documentApi.getDetail(found.workspace_id, docId!);
-      return { ...detail, uploaded_by: found.uploaded_by, tags: found.tags } satisfies DocumentWithDetail;
+      return {
+        ...detail,
+        uploaded_by: found.uploaded_by,
+        uploaded_by_name: found.uploaded_by_name,
+        tags: found.tags,
+      } satisfies DocumentWithDetail;
     },
     enabled: !!docId,
   });
@@ -254,8 +262,8 @@ export default function AdminDocumentDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-border">
             <div>
               <p className="text-xs text-text-dim">Uploaded by</p>
-              <p className="text-sm font-mono text-text-dim text-xs" title={doc.uploaded_by ?? undefined}>
-                {doc.uploaded_by ?? '—'}
+              <p className="text-sm text-text-dim text-xs" title={doc.uploaded_by ?? undefined}>
+                {doc.uploaded_by_name ?? doc.uploaded_by ?? '—'}
               </p>
             </div>
             <div>

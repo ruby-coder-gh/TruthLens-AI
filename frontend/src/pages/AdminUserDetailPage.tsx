@@ -84,7 +84,10 @@ export default function AdminUserDetailPage() {
     setActionLoading(true);
     try {
       const updated = await adminApi.updateUserStatus(userId!, !user.is_active);
-      setUser(updated as AdminUser);
+      // R2-11: `PUT .../status` (like `.../role`) returns the slimmer
+      // `UserResponse`, which has no `last_login_at` — replacing the whole
+      // object wiped it back to "Never" until the next reload. Merge instead.
+      setUser((prev) => (prev ? { ...prev, ...updated } : (updated as AdminUser)));
       setConfirmModal(null);
       addToast(`User ${(updated as AdminUser).is_active ? 'activated' : 'deactivated'}`, 'success');
     } catch (err) {
@@ -99,7 +102,11 @@ export default function AdminUserDetailPage() {
     setRoleLoading(true);
     try {
       const updated = await adminApi.updateUserRole(user.id, pendingRole);
-      setUser(updated as AdminUser);
+      // R2-11: `PUT .../role` returns `UserResponse`, which has no
+      // `last_login_at` — merge the response into the existing user instead
+      // of replacing it wholesale, so fields the slimmer response omits
+      // (like `last_login_at`) survive.
+      setUser((prev) => (prev ? { ...prev, ...updated } : (updated as AdminUser)));
       addToast(`Role changed to ${pendingRole}`, 'success');
       setPendingRole(null);
     } catch (err) {
