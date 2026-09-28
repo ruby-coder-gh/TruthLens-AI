@@ -18,11 +18,13 @@ describe('shortDocTitle', () => {
     expect(shortDocTitle(CORPUS[2], siblings)).toBe('2025 Sustainability Report');
   });
 
-  it('leaves a name alone when no separator-terminated prefix is shared by all siblings', () => {
-    // CORPUS[1] has no " — " (it uses a different construction), so no
-    // prefix is common to all three — every title keeps its full text.
+  it('strips a word-prefix shared by most siblings even without a common separator (BUG-8)', () => {
+    // CORPUS[1] has no " — " (it uses a different construction), but it still
+    // starts with the "Northwind Renewables" words the other two share, so
+    // that much comes off — it no longer reads identically to the others
+    // once truncated ("Northwind Renewab…") the way it did before the fix.
     expect(shortDocTitle(CORPUS[1], CORPUS)).toBe(
-      'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results',
+      'Reports Fourth-Quarter and Full-Year 2025 Results',
     );
   });
 
@@ -40,5 +42,20 @@ describe('shortDocTitle', () => {
 
   it('never returns an empty string when a name strips down to only the prefix', () => {
     expect(shortDocTitle('Northwind Renewables — ', CORPUS)).toBe('Northwind Renewables —');
+  });
+
+  it('leaves a name with no shared words at all fully alone (real demo corpus, BUG-8)', () => {
+    // The full six-document demo manifest: the board memo shares no words
+    // with the other five, so it keeps its own full (still distinct) title
+    // instead of being mangled by a prefix meant for its siblings.
+    const manifest = [
+      ...CORPUS.map((n) => n.replace(/\.pdf$/, '')),
+      'Board Memorandum: Aurora Offshore Wind Project Update',
+      'Northwind Renewables — Leadership Team',
+      'Northwind Renewables — Project Pipeline',
+    ];
+    expect(shortDocTitle(manifest[3], manifest)).toBe('Board Memorandum: Aurora Offshore Wind Project Update');
+    expect(shortDocTitle(manifest[4], manifest)).toBe('Leadership Team');
+    expect(shortDocTitle(manifest[0], manifest)).toBe('Annual Report 2025');
   });
 });

@@ -4,23 +4,40 @@
 // in the design brief). Strip the extension and any prefix shared by every
 // sibling name in the list; keep the full name available for a `title` tooltip.
 const EXT_RE = /\.[a-z0-9]{1,5}$/i;
-const PREFIX_SEPS = [' — ', ' – ', ': ', ' - '];
+// Leading separator punctuation left dangling once a shared prefix is
+// stripped off the front of a name (an em/en dash, colon or hyphen, plus
+// whatever whitespace surrounds it).
+const LEADING_SEP_RE = /^[\s:–—-]+/;
 
 function stripExt(name: string): string {
   return name.replace(EXT_RE, '').trim();
 }
 
-/** Longest separator-terminated prefix shared by every name (2+ names only). */
+/**
+ * Longest word-prefix shared by the most names in the list (BUG-8: the old
+ * version required *every* name to share one exact separator-terminated
+ * prefix, so a single differently-worded title — "Northwind Renewables
+ * Reports …" has no " — " — made the whole corpus fall back to unshortened
+ * names, even though "Northwind Renewables" is still a real shared prefix
+ * for the rest). Ties broken by the longer prefix.
+ */
 function sharedPrefix(names: string[]): string {
   if (names.length < 2) return '';
-  const [first, ...rest] = names;
-  for (const sep of PREFIX_SEPS) {
-    const idx = first.indexOf(sep);
-    if (idx === -1) continue;
-    const candidate = first.slice(0, idx + sep.length);
-    if (candidate && rest.every((n) => n.startsWith(candidate))) return candidate;
+  let best = '';
+  let bestCount = 0;
+  for (const candidate of names) {
+    const words = candidate.split(/\s+/);
+    for (let len = 1; len <= words.length; len += 1) {
+      const prefix = words.slice(0, len).join(' ');
+      const count = names.filter((n) => n.startsWith(prefix)).length;
+      if (count < 2) continue;
+      if (count > bestCount || (count === bestCount && prefix.length > best.length)) {
+        best = prefix;
+        bestCount = count;
+      }
+    }
   }
-  return '';
+  return best;
 }
 
 /**
@@ -41,7 +58,7 @@ export function shortDocTitle(name: string | null | undefined, allNames?: string
 
   const prefix = sharedPrefix(allNames.map(stripExt));
   if (prefix && stripped.startsWith(prefix)) {
-    const rest = stripped.slice(prefix.length).trim();
+    const rest = stripped.slice(prefix.length).replace(LEADING_SEP_RE, '').trim();
     if (rest) return rest;
   }
   return stripped || name.trim();
