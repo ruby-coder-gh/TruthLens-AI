@@ -42,5 +42,7 @@ export interface CatalogStats {
   httpEndpoints: number;
   webSocketCount: number;
   backgroundJobs: number;
-  uptime: number;
+  /** BUG-44: replaces a fabricated "uptime %" this app never tracked with a
+   *  real, derived count of endpoint groups. */
+  groups: number;
 }

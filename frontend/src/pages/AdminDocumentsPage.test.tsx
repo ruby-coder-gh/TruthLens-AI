@@ -336,4 +336,34 @@ describe('AdminDocumentsPage — BUG-9 fully quarantined document is legible', (
       expect(screen.queryByText('Unsearchable')).not.toBeInTheDocument();
     },
   );
+
+  // BUG-37: after a bulk reindex the row showed "pending" for 30+ s with no
+  // polling — the list never refetched on its own.
+  it('polls while a document is pending, and stops once it settles', async () => {
+    vi.useFakeTimers();
+    mockListAll.mockResolvedValue({
+      data: [{ ...baseDoc, id: 'doc-1', original_filename: 'Reindexing.pdf', tags: [], status: 'pending' }],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderWithProviders(<AdminDocumentsPage />);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByText('Reindexing.pdf')).toBeInTheDocument();
+    const callsWhilePending = mockListAll.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(mockListAll.mock.calls.length).toBeGreaterThan(callsWhilePending);
+
+    // Settles to "ready" — the next poll tick must not fire again.
+    mockListAll.mockResolvedValue({
+      data: [{ ...baseDoc, id: 'doc-1', original_filename: 'Reindexing.pdf', tags: [], status: 'ready' }],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    await vi.advanceTimersByTimeAsync(3100);
+    await vi.advanceTimersByTimeAsync(0);
+    const callsAfterReady = mockListAll.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(mockListAll.mock.calls.length).toBe(callsAfterReady);
+  });
 });

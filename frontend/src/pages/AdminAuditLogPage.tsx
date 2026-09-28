@@ -16,6 +16,9 @@ import type { AuditLogExportFormat, AuditLogFilters } from '../api/types';
 // Backend audit-log actions are exact-match dotted strings like `user.login`,
 // `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
 // anything the API records, so every filter previously returned 0 rows.
+// BUG-36. Kept in sync with every `action="…"` string actually written across
+// `backend/app/api/*.py` — a filter for an action the backend never records
+// permanently returns 0 rows.
 const ACTION_FILTERS = [
   { value: '', label: 'All actions' },
   { value: 'user.login', label: 'User login' },
@@ -35,8 +38,40 @@ const ACTION_FILTERS = [
   { value: 'document.upload', label: 'Document upload' },
   { value: 'document.delete', label: 'Document delete' },
   { value: 'document.reindex', label: 'Document reindex' },
+  { value: 'document.quarantine', label: 'Document quarantine' },
+  { value: 'document.bulk_delete', label: 'Document bulk delete' },
+  { value: 'document.bulk_reindex', label: 'Document bulk reindex' },
+  { value: 'document.bulk_tag', label: 'Document bulk tag' },
+  { value: 'document.bulk_untag', label: 'Document bulk untag' },
+  { value: 'chunk.dismiss', label: 'Chunk dismiss' },
+  { value: 'chunk.release', label: 'Chunk release' },
   { value: 'collection.create', label: 'Collection create' },
   { value: 'collection.delete', label: 'Collection delete' },
+  { value: 'query.pin', label: 'Query pin' },
+  { value: 'query.unpin', label: 'Query unpin' },
+  { value: 'query.compare', label: 'Query compare' },
+  { value: 'query.review_update', label: 'Query review update' },
+  { value: 'query.promote_golden', label: 'Query promote to golden' },
+  { value: 'investigation.create', label: 'Investigation create' },
+  { value: 'investigation.review_update', label: 'Investigation review update' },
+  { value: 'investigation.audit_export', label: 'Investigation audit export' },
+  { value: 'annotation.create', label: 'Annotation create' },
+  { value: 'annotation.update', label: 'Annotation update' },
+  { value: 'annotation.delete', label: 'Annotation delete' },
+  { value: 'receipt.create', label: 'Receipt create' },
+  { value: 'receipt.revoke', label: 'Receipt revoke' },
+  { value: 'radar.scan', label: 'Radar scan' },
+  { value: 'radar.update', label: 'Radar update' },
+  { value: 'golden.approve', label: 'Golden approve' },
+  { value: 'golden.delete', label: 'Golden delete' },
+  { value: 'prompt.promote', label: 'Prompt promote' },
+  { value: 'prompt.rollback', label: 'Prompt rollback' },
+  { value: 'prompt.delete', label: 'Prompt delete' },
+  { value: 'auth.demo_login', label: 'Demo login' },
+  { value: 'auth.refresh_rotate', label: 'Refresh token rotate' },
+  { value: 'auth.refresh_reuse_detected', label: 'Refresh token reuse detected' },
+  { value: 'audit.export', label: 'Audit export' },
+  { value: 'usage.export', label: 'Usage export' },
 ];
 
 const RESOURCE_TYPE_FILTERS = [
@@ -45,10 +80,15 @@ const RESOURCE_TYPE_FILTERS = [
   { value: 'workspace', label: 'Workspace' },
   { value: 'workspace_member', label: 'Workspace member' },
   { value: 'document', label: 'Document' },
+  { value: 'chunk_quarantine', label: 'Chunk quarantine' },
   { value: 'collection', label: 'Collection' },
   { value: 'query', label: 'Query' },
   { value: 'investigation', label: 'Investigation' },
   { value: 'annotation', label: 'Annotation' },
+  { value: 'receipt', label: 'Receipt' },
+  { value: 'contradiction', label: 'Contradiction' },
+  { value: 'golden_entry', label: 'Golden entry' },
+  { value: 'prompt_version', label: 'Prompt version' },
   { value: 'audit_log', label: 'Audit log' },
   { value: 'usage_report', label: 'Usage report' },
 ];

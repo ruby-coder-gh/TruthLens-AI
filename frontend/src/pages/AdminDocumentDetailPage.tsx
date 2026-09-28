@@ -8,7 +8,14 @@ import { pageTransition, fadeInUp } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
 import { documentApi } from '../api/client';
-import type { Document } from '../api/types';
+import type { Document, DocumentDetail } from '../api/types';
+
+// BUG-38. `GET /workspaces/{id}/documents/{docId}` (the detail endpoint) is
+// `DocumentDetailResponse` server-side — it has `chunks` but no `uploaded_by`
+// or `tags`. Those two only come back on the list shape (`Document`, from
+// `listAll`), which the page already fetches to resolve the workspace id.
+// Merge them instead of asking for a backend field that doesn't exist.
+type DocumentWithDetail = DocumentDetail & Pick<Document, 'uploaded_by' | 'tags'>;
 
 const STATUS_ORDER = ['uploaded', 'parsing', 'chunking', 'embedding', 'indexing', 'indexed'] as const;
 
@@ -34,9 +41,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+// `backend/app/api/documents.py` only ever sets pending/processing/ready/
+// failed/quarantined — 'indexed' kept as a harmless legacy alias.
 function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
   switch (status) {
-    case 'indexed': return 'green';
+    case 'indexed':
+    case 'ready': return 'green';
     case 'pending': return 'orange';
     case 'failed': return 'red';
     case 'processing': return 'blue';
@@ -51,17 +61,21 @@ function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' |
  * derived server-side from the live chunk counts, so it self-heals once a
  * chunk is released; absent on rows predating the fix, hence the `=== false`.
  */
-function isUnsearchableReady(doc: Document): boolean {
+function isUnsearchableReady(doc: Pick<Document, 'is_searchable' | 'status' | 'quarantined_chunk_count'>): boolean {
   return doc.is_searchable === false && doc.status === 'ready' && (doc.quarantined_chunk_count ?? 0) > 0;
 }
 
 const UNSEARCHABLE_TOOLTIP =
   'Every chunk of this document is held in quarantine — it returns no search results until a chunk is released.';
 
+// BUG-38. Matches `SUPPORTED_MIME_TYPES` in `backend/app/api/documents.py`.
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
-  if (mime.includes('docx') || mime.includes('document')) return 'DOCX';
-  if (mime.includes('txt')) return 'TXT';
+  if (mime.includes('wordprocessingml') || mime.includes('docx')) return 'DOCX';
+  if (mime.includes('csv')) return 'CSV';
+  if (mime.includes('json')) return 'JSON';
+  if (mime === 'text/markdown' || mime.includes('markdown')) return 'MD';
+  if (mime.includes('plain') || mime.includes('txt')) return 'TXT';
   return 'FILE';
 }
 
@@ -91,7 +105,11 @@ export default function AdminDocumentDetailPage() {
         (res) => res.data.find((d) => d.id === docId),
       );
       if (!found) throw new Error('Document not found.');
-      return documentApi.get(found.workspace_id, docId!);
+      // `getDetail` hits the same route as the old `get` call but is typed
+      // for what it actually returns — `chunks` included — instead of the
+      // list shape, which silently dropped the chunk array from the type.
+      const detail = await documentApi.getDetail(found.workspace_id, docId!);
+      return { ...detail, uploaded_by: found.uploaded_by, tags: found.tags } satisfies DocumentWithDetail;
     },
     enabled: !!docId,
   });
@@ -236,7 +254,9 @@ export default function AdminDocumentDetailPage() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-border">
             <div>
               <p className="text-xs text-text-dim">Uploaded by</p>
-              <p className="text-sm text-text">{doc.uploaded_by}</p>
+              <p className="text-sm font-mono text-text-dim text-xs" title={doc.uploaded_by ?? undefined}>
+                {doc.uploaded_by ?? '—'}
+              </p>
             </div>
             <div>
               <p className="text-xs text-text-dim">Created</p>
@@ -250,6 +270,18 @@ export default function AdminDocumentDetailPage() {
               <p className="text-xs text-text-dim">Workspace ID</p>
               <p className="text-sm font-mono text-text-dim text-xs">{doc.workspace_id}</p>
             </div>
+          </div>
+
+          {/* BUG-38 — tags weren't rendered anywhere on the detail page. */}
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-xs text-text-dim mb-1.5">Tags</p>
+            {(doc.tags ?? []).length === 0 ? (
+              <p className="text-xs text-text-dim">No tags.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {doc.tags.map((tag) => <Badge key={tag} color="purple">{tag}</Badge>)}
+              </div>
+            )}
           </div>
         </Card>
       </motion.div>
@@ -289,10 +321,31 @@ export default function AdminDocumentDetailPage() {
           <h2 className="text-sm font-semibold text-text mb-3 flex items-center gap-2">
             <FileText size={14} className="text-primary-soft" />
             Chunks
+            {doc.chunk_count > doc.chunks.length && (
+              <span className="text-xs font-normal text-text-dim">
+                (showing first {doc.chunks.length} of {doc.chunk_count})
+              </span>
+            )}
           </h2>
-          <p className="text-sm text-text-muted">
-            Chunks are loaded on demand from the document viewer.
-          </p>
+          {doc.chunks.length === 0 ? (
+            <p className="text-sm text-text-muted">
+              {doc.status === 'ready' || doc.status === 'indexed'
+                ? 'No chunks were indexed for this document.'
+                : 'Chunks appear here once processing finishes.'}
+            </p>
+          ) : (
+            <ul className="max-h-96 space-y-2 overflow-y-auto">
+              {doc.chunks.map((chunk) => (
+                <li key={chunk.id} className="rounded-control border border-border bg-card-2 p-3">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-xs font-medium text-text-muted">Passage {chunk.index + 1}</span>
+                    <span className="text-[11px] text-text-dim tabular-nums">{chunk.token_count} tokens</span>
+                  </div>
+                  <p className="text-xs text-text-dim leading-relaxed line-clamp-3">{chunk.content}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </motion.div>
 
