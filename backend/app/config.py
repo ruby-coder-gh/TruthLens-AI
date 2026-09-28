@@ -40,8 +40,8 @@ class Settings(BaseSettings):
 
     # ─── Ollama ────────────────────────────────
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_PRIMARY_MODEL: str = "qwen3:4b"
-    OLLAMA_FALLBACK_MODEL: str = "qwen3:4b"
+    OLLAMA_PRIMARY_MODEL: str = "qwen3:4b-instruct"
+    OLLAMA_FALLBACK_MODEL: str = "qwen3:4b-instruct"
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     OLLAMA_RERANK_MODEL: str = "nomic-embed-text"
     OLLAMA_VISION_MODEL: str = "llava:7b"

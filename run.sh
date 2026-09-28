@@ -156,7 +156,7 @@ if [ "${DEMO_MODE_FLAG}" = true ]; then
   # Read the configured primary model out of backend/.env (fall back to the
   # documented default) without ever echoing the rest of the file.
   DEMO_MODEL="$(grep '^OLLAMA_PRIMARY_MODEL=' "${BACKEND_DIR}/.env" 2>/dev/null | cut -d= -f2- || true)"
-  DEMO_MODEL="${DEMO_MODEL:-qwen3:4b}"
+  DEMO_MODEL="${DEMO_MODEL:-qwen3:4b-instruct}"
   ensure_model_pulled "${DEMO_MODEL}"
 
   mkdir -p "${DEMO_DATA_DIR}"

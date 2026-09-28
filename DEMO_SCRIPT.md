@@ -13,7 +13,7 @@ wind + solar developer), so nothing here depends on documents you'd have to uplo
 
 - Open the seeded workspace, click one of the **suggested questions** — e.g.
   *"What was Northwind Renewables' revenue in 2025?"*
-- Narrate while it streams: fully local generation (Ollama, qwen3:4b), no API keys,
+- Narrate while it streams: fully local generation (Ollama, qwen3:4b-instruct), no API keys,
   no cloud calls.
 
 ## 2. Truth Lens (40s)
