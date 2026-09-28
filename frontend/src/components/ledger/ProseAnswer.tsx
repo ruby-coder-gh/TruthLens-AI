@@ -3,7 +3,7 @@
 // icon after each claim. This is also the live streaming surface — the
 // answer always streams as prose, then settles into the Claim Ledger once
 // `guardrail.claims` arrive (design brief item 3).
-import type { ReactNode } from 'react';
+import type { AnchorHTMLAttributes, ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { clsx } from 'clsx';
 import ReactMarkdown from 'react-markdown';
@@ -38,15 +38,28 @@ function CitationChip({ index, source, workspaceId }: { index: number; source: S
   );
 }
 
-/** Block-level: non-citation segments keep full markdown (bold, lists, GFM). */
-function withCitationsBlock(text: string, sources: Source[], workspaceId: string | undefined, keySeed: string): ReactNode {
-  const parts = text.split(/(\[source:\d+\])/gi);
-  return parts.map((part, i) => {
-    const m = part.match(/\[source:(\d+)\]/i);
-    if (!m) return <ReactMarkdown key={`${keySeed}-t${i}`} remarkPlugins={[remarkGfm]}>{part}</ReactMarkdown>;
+const CITE_HREF_RE = /^#cite-(\d+)$/;
+
+/** Turns a raw `[source:N]` marker into standard markdown link syntax
+ * (`[N](#cite-N)`) so a *single* ReactMarkdown parse renders it as an inline
+ * element within its sentence's own paragraph — BUG-4's root cause was the
+ * opposite approach (splitting the text on the marker and feeding each
+ * fragment to its own `<ReactMarkdown>`, which wraps every fragment in a
+ * block `<p>`, so the citation — and the punctuation right after it — landed
+ * on its own line with an orphan period). */
+function encodeCitationLinks(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, (_m, n: string) => `[${n}](#cite-${n})`);
+}
+
+/** ReactMarkdown's `a` renderer: a `#cite-N` href (from `encodeCitationLinks`)
+ * renders the citation chip inline; anything else is a normal link. */
+function citationAwareLink(sources: Source[], workspaceId: string | undefined) {
+  return function CiteLink({ href }: AnchorHTMLAttributes<HTMLAnchorElement>): ReactNode {
+    const m = href ? CITE_HREF_RE.exec(href) : null;
+    if (!m) return <a href={href} target="_blank" rel="noreferrer">{href}</a>;
     const idx = parseInt(m[1], 10);
-    return <CitationChip key={`${keySeed}-c${i}`} index={idx} source={sources[idx - 1]} workspaceId={workspaceId} />;
-  });
+    return <CitationChip index={idx} source={sources[idx - 1]} workspaceId={workspaceId} />;
+  };
 }
 
 // ponytail: plain text, not markdown, for text sitting inline beside a claim's
@@ -79,11 +92,16 @@ export function ProseAnswer({ content, sources, claims, workspaceId, streaming =
   const claimList = claims ?? [];
 
   // No claims yet (streaming, or an answer that had none) — full markdown
-  // with clickable citation chips, same as before Truth Lens existed.
+  // with clickable citation chips, same as before Truth Lens existed. One
+  // ReactMarkdown pass over the whole answer (BUG-4) keeps citations inline
+  // within their own sentence instead of splitting the text into a
+  // paragraph-per-fragment.
   if (claimList.length === 0) {
     return (
       <div className="prose-answer text-[15px] leading-7 text-text">
-        {withCitationsBlock(content, sources, workspaceId, 'root')}
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: citationAwareLink(sources, workspaceId) }}>
+          {encodeCitationLinks(content)}
+        </ReactMarkdown>
         {streaming && (
           <motion.span
             className="ml-0.5 inline-block h-4 w-[3px] rounded-sm bg-primary-soft align-text-bottom"
