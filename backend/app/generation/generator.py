@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -13,6 +14,57 @@ from app.utils.logger import logger
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
+
+# provider.py omits the `reasoning` kwarg for OLLAMA_THINK=False rather than
+# passing reasoning=False (verified unreliable — see its comment), so a
+# <think> block should not normally appear. This is belt-and-braces cleanup
+# for a prompt that triggers thinking anyway; mirrors
+# app.retrieval.query_rewrite._strip_reasoning.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think(text: str) -> str:
+    """Remove a leaked ``<think>…</think>`` reasoning block, if any."""
+    stripped = _THINK_BLOCK_RE.sub("", text)
+    if "<think>" in stripped and "</think>" not in stripped:
+        # Never closed within the token budget — nothing after it is answer.
+        stripped = stripped.split("<think>", 1)[0]
+    elif "</think>" in stripped:
+        # An unpaired closing tag survived a boundary-parsing miss upstream —
+        # everything before it was reasoning, not answer.
+        stripped = stripped.rsplit("</think>", 1)[1]
+    return stripped.strip()
+
+
+class _ThinkStreamFilter:
+    """Suppress a live ``<think>…</think>`` block from a token stream.
+
+    Stateful across chunks so a block split mid-tag across multiple stream
+    chunks is still caught. Only used when ``OLLAMA_THINK`` is false.
+    """
+
+    def __init__(self) -> None:
+        self._in_think = False
+
+    def feed(self, text: str) -> str:
+        out: list[str] = []
+        while text:
+            if not self._in_think:
+                if "<think>" in text:
+                    before, _, text = text.partition("<think>")
+                    if before:
+                        out.append(before)
+                    self._in_think = True
+                    continue
+                out.append(text)
+                text = ""
+            else:
+                if "</think>" in text:
+                    _, _, text = text.partition("</think>")
+                    self._in_think = False
+                    continue
+                text = ""  # still inside reasoning — drop
+        return "".join(out)
 
 
 class GenerationInput:
@@ -188,6 +240,9 @@ async def generate(input: GenerationInput) -> GenerationResult:
             logger.error("fallback_generation_failed", error=str(e2))
             raise RuntimeError(f"Generation failed: {e}") from e
 
+    if not settings.OLLAMA_THINK:
+        answer = _strip_think(answer)
+
     elapsed_ms = int((time.time() - start_time) * 1000)
     # Prefer the provider's own accounting; fall back to a word-count estimate.
     prompt_tokens, output_tokens = usage_tokens(response)
@@ -270,11 +325,19 @@ async def stream(
         HumanMessage(content=f"Question: {query_text}"),
     ]
 
+    # See _ThinkStreamFilter / provider.py: OLLAMA_THINK=False never leaks a
+    # <think> block by design (reasoning kwarg omitted), but this filters any
+    # that a different prompt still triggers, live, before it reaches the WS.
+    think_filter = None if settings.OLLAMA_THINK else _ThinkStreamFilter()
+
     try:
         async for chunk in llm.astream(messages):
             capture_stream_metadata(chunk, metadata_sink)
-            if chunk.content:
-                yield chunk.content
+            content = chunk.content
+            if think_filter is not None:
+                content = think_filter.feed(content)
+            if content:
+                yield content
     except Exception as e:
         logger.error("stream_generation_failed", error=str(e))
         # Fallback model (Ollama)
@@ -285,10 +348,14 @@ async def stream(
                 timeout=settings.OLLAMA_TIMEOUT,
                 _fallback=True,
             )
+            fallback_think_filter = None if settings.OLLAMA_THINK else _ThinkStreamFilter()
             async for chunk in llm_fallback.astream(messages):
                 capture_stream_metadata(chunk, metadata_sink)
-                if chunk.content:
-                    yield chunk.content
+                content = chunk.content
+                if fallback_think_filter is not None:
+                    content = fallback_think_filter.feed(content)
+                if content:
+                    yield content
         except Exception as e2:
             logger.error("fallback_stream_failed", error=str(e2))
             yield f"\n\n[Error: Generation failed — {e}]"

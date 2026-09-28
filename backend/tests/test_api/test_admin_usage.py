@@ -107,6 +107,40 @@ async def test_usage_group_by_model_sums_and_cost(
 
 
 @pytest.mark.asyncio
+async def test_usage_excludes_abstained_queries_from_model_rows(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, pricing_configured
+):
+    """A sufficiency-gate abstention persists `model_used="abstain"` with no
+    LLM call behind it — it must never show up as a billable "model" row."""
+    seed = await _seed_usage_fixture(test_db)
+    test_db.add(Query(
+        workspace_id=seed["ws_a"].id,
+        user_id=seed["user_a"].id,
+        query_text="q-abstain",
+        model_used="abstain",
+        edge_case="insufficient_evidence",
+        token_count=0,
+        prompt_tokens=0,
+        latency_ms=10,
+        cache_hit_count=0,
+        created_at=datetime.now(timezone.utc),
+    ))
+    await test_db.commit()
+    date_from = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+    resp = await client.get(
+        "/api/admin/usage", params={"group_by": "model", "date_from": date_from}, headers=admin_headers
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    rows_by_key = {row["key"]: row for row in body["rows"]}
+
+    assert "abstain" not in rows_by_key
+    # The other rows' totals must be unaffected by the abstain row's presence.
+    assert body["totals"]["queries"] == 5
+
+
+@pytest.mark.asyncio
 async def test_usage_group_by_user_unattributed_bucket(
     client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, pricing_configured
 ):

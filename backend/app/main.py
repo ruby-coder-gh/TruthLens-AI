@@ -21,6 +21,7 @@ from app.core.exceptions import (
 )
 from app.core.security import RequestIDMiddleware, SecurityHeadersMiddleware
 from app.database import engine
+from app.demo import warmup
 from app.models.base import DeclarativeBase
 from app.utils.logger import logger, setup_logging
 
@@ -47,10 +48,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await conn.run_sync(DeclarativeBase.metadata.create_all)
     logger.info("database_tables_ready")
 
+    # Demo warmup (embedder/reranker/NLI + one tiny Ollama generate) runs in
+    # the background so it never delays startup or blocks a real request.
+    warmup_task = warmup.start_warmup()
+
     yield
 
     # Shutdown
     logger.info("app_shutting_down")
+    if warmup_task is not None and not warmup_task.done():
+        warmup_task.cancel()
     # A /ws/query client that disconnects no longer cancels its pipeline, so a
     # detached run may still be inside `_save_query`. Let those finish before the
     # engine goes away, otherwise a rolling restart loses the persisted answer.

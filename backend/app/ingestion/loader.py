@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,13 @@ def _load_pdf(path: Path) -> list[dict[str, Any]]:
     pages: list[dict[str, Any]] = []
     for page_num in range(len(doc)):
         page = doc[page_num]
-        text = page.get_text().strip()
+        # PyMuPDF's text layout substitutes ligature glyphs (e.g. "fi" -> the
+        # single U+FB01 codepoint) whenever the page's font supports them, so
+        # a name like "Whitfield" comes back as "Whitﬁeld". NFKC's
+        # compatibility decomposition reverses exactly that substitution,
+        # keeping BM25 tokenization and citation excerpts matching the plain
+        # ASCII the document actually says.
+        text = unicodedata.normalize("NFKC", page.get_text()).strip()
         if text:
             pages.append({
                 "text": text,
