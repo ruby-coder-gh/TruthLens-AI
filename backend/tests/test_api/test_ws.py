@@ -369,6 +369,41 @@ class TestPipelineResolvesActivePrompt:
         assert captured["save_kwargs"]["prompt_version"] == DEFAULT_PROMPT_HASH
         assert captured["save_kwargs"]["prompt_tokens"] == 120
 
+    async def test_empty_answer_is_an_error_not_a_verified_answer(
+        self, monkeypatch, ws_session_factory
+    ):
+        """A model that spends its whole budget thinking returns "" — that must
+        surface as a retryable error, never reach the guardrail or be saved."""
+        from app.api import ws as ws_api
+        from app.prompts.registry import DEFAULT_PROMPT_HASH
+
+        captured: dict = {}
+        sent: list[dict] = []
+        self._patch_pipeline(
+            monkeypatch, captured, ("  \n", 2048, "qwen3:4b", 120, DEFAULT_PROMPT_HASH)
+        )
+
+        async def record(msg: dict) -> None:
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was revenue?",
+            workspace_id="ws-1",
+            user_id="user-1",
+            query_id="query-1",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(record),
+        )
+
+        types_sent = [m["type"] for m in sent]
+        assert types_sent[-1] == "error"
+        assert sent[-1]["payload"]["code"] == "EMPTY_ANSWER"
+        assert "guardrail" not in types_sent and "complete" not in types_sent
+        assert "save_kwargs" not in captured
+        ranking = next(m["payload"] for m in sent if m["type"] == "progress" and m["payload"]["phase"] == "ranking")
+        assert ranking["found"] == 1 and "elapsed_ms" in ranking
+
     async def test_active_row_supplies_prompt_text_and_pinned_model(
         self, monkeypatch, test_db, ws_session_factory
     ):

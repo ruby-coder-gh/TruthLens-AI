@@ -21,8 +21,8 @@ from app.models.workspace import Workspace
 from tests.test_api.test_ws_resume import Recorder, _install_module
 
 # Index of the first frame the sufficiency gate emits: ack, progress(0.1),
-# progress(0.3) precede it.
-FIRST_ABSTAIN_FRAME = 3
+# progress(0.3), progress(ranking 0.4) precede it.
+FIRST_ABSTAIN_FRAME = 4
 
 
 def _hit(score: float, chunk_id: str = "chunk-1", document_id: str = "doc-1"):
@@ -120,7 +120,9 @@ async def test_thin_evidence_abstains_without_calling_the_model(pipeline):
 
     assert pipeline.state["stream_called"] is False
     types_sent = [message["type"] for message in pipeline.sent]
-    assert types_sent == ["ack", "progress", "progress", "progress", "token", "guardrail", "trust_score", "complete"]
+    assert types_sent == [
+        "ack", "progress", "progress", "progress", "progress", "token", "guardrail", "trust_score", "complete",
+    ]
     assert "sources" not in types_sent
     assert pipeline.sent[FIRST_ABSTAIN_FRAME]["payload"]["phase"] == "abstain"
 

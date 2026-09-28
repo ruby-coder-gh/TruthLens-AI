@@ -297,7 +297,14 @@ async def _run_query_pipeline(
             filters=filters,
         )
 
-        # 4. Rerank
+        # 4. Rerank — counts + timings feed the client's "how this was verified" trail.
+        await sink.emit(
+            "progress",
+            {
+                "query_id": query_id, "phase": "ranking", "progress": 0.4,
+                "found": len(results), "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
+        )
         reranked = await rerank(rewritten or sanitized_query, results, top_k=top_k)
 
         # 4.5 Evidence-sufficiency gate: abstain rather than generate on thin evidence.
@@ -360,7 +367,11 @@ async def _run_query_pipeline(
         # 6. Generate (stream)
         await sink.emit(
             "progress",
-            {"query_id": query_id, "phase": "generation", "progress": 0.6},
+            {
+                "query_id": query_id, "phase": "generation", "progress": 0.6,
+                "found": len(results), "kept": len(contexts),
+                "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
         )
 
         gen_input = GenerationInput(
@@ -376,10 +387,29 @@ async def _run_query_pipeline(
         )
         total_tokens = token_count
 
+        # An empty answer (e.g. a reasoning model spending its whole token budget
+        # thinking) has no claims to fail, so it would otherwise score as
+        # "verified". Fail it visibly and don't save it (nothing to cache).
+        if not full_text.strip():
+            logger.warning("empty_answer", query_id=query_id, token_count=token_count, model=model_used)
+            await sink.emit(
+                "error",
+                {
+                    "code": "EMPTY_ANSWER",
+                    "message": "The model returned no answer. Please try again.",
+                    "query_id": query_id,
+                },
+            )
+            return
+
         # 7. Guardrail check
         await sink.emit(
             "progress",
-            {"query_id": query_id, "phase": "guardrail", "progress": 0.8},
+            {
+                "query_id": query_id, "phase": "guardrail", "progress": 0.8,
+                "words": len(full_text.split()),
+                "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
         )
 
         guardrail_result = await guardrail_check(full_text, contexts)
