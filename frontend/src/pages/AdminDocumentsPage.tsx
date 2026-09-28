@@ -17,13 +17,23 @@ const ACTION_LABELS: Record<BulkDocumentAction, string> = {
   untag: 'Untag',
 };
 
+// BUG-38. Matches `SUPPORTED_MIME_TYPES` in `backend/app/api/documents.py` —
+// csv/md/json fell through to the generic "FILE" label because they weren't
+// checked at all.
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
-  if (mime.includes('docx') || mime.includes('document')) return 'DOCX';
-  if (mime.includes('sheet') || mime.includes('excel')) return 'XLSX';
-  if (mime.includes('txt')) return 'TXT';
+  if (mime.includes('wordprocessingml') || mime.includes('docx')) return 'DOCX';
+  if (mime.includes('csv')) return 'CSV';
+  if (mime.includes('json')) return 'JSON';
+  if (mime === 'text/markdown' || mime.includes('markdown')) return 'MD';
+  if (mime.includes('plain') || mime.includes('txt')) return 'TXT';
   return 'FILE';
 }
+
+// BUG-37. A bulk reindex leaves a document `pending` for real processing
+// time — poll while any row on the current page is still `pending` or
+// `processing`, same pattern as `RadarPanel`'s scan poll.
+const REINDEXING_STATUSES = new Set(['pending', 'processing']);
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -35,9 +45,12 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// `backend/app/api/documents.py` only ever sets pending/processing/ready/
+// failed/quarantined — 'indexed' kept as a harmless legacy alias.
 function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
   switch (status) {
-    case 'indexed': return 'green';
+    case 'indexed':
+    case 'ready': return 'green';
     case 'pending': return 'orange';
     case 'failed': return 'red';
     case 'processing': return 'blue';
@@ -82,6 +95,13 @@ export default function AdminDocumentsPage() {
       tags: tagFilter || undefined,
     }),
     placeholderData: (prev) => prev,
+    // BUG-37. Poll only while something on the current page is actually
+    // reindexing — react-query stops the interval itself the instant this
+    // returns `false` on a later render (same pattern as `RadarPanel`).
+    refetchInterval: (query) => {
+      const rows = query.state.data?.data ?? [];
+      return rows.some((doc) => REINDEXING_STATUSES.has(doc.status)) ? 3000 : false;
+    },
   });
 
   // Tracks the last `data` reference the selection was pruned against — lets
