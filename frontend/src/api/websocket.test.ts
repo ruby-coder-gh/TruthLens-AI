@@ -152,6 +152,79 @@ describe('api/websocket — QueryWebSocket reconnect + resume', () => {
     expect(cb.onReconnecting).not.toHaveBeenCalled();
   });
 
+  // Truth Lens (L1/L2) — the guardrail frame carries per-claim verdicts.
+  it('passes claims and unsupported_claims through onGuardrail', () => {
+    const { cb, socket } = startStream();
+
+    socket.serverSend({
+      type: 'guardrail',
+      seq: 3,
+      payload: {
+        passed: false,
+        score: 0.62,
+        details: '[]',
+        claims: [
+          {
+            text: 'Revenue grew 12%.',
+            start: 0,
+            end: 18,
+            verdict: 'supported',
+            entailment: 0.91,
+            contradiction: 0.02,
+            source_index: 1,
+            chunk_id: 'chunk-1',
+            document_id: 'doc-1',
+            document_name: 'Alpha Report',
+            page_number: 3,
+            evidence: 'Revenue increased by 12 percent year over year.',
+          },
+        ],
+        unsupported_claims: ['The sky is green.'],
+      },
+    });
+
+    expect(cb.onGuardrail).toHaveBeenCalledWith({
+      passed: false,
+      score: 0.62,
+      details: '[]',
+      claims: [
+        expect.objectContaining({ text: 'Revenue grew 12%.', verdict: 'supported' }),
+      ],
+      unsupportedClaims: ['The sky is green.'],
+    });
+  });
+
+  it('defaults claims and unsupported_claims to empty arrays when the frame omits them', () => {
+    const { cb, socket } = startStream();
+
+    socket.serverSend({ type: 'guardrail', seq: 3, payload: { passed: true, score: 0.95, details: '' } });
+
+    expect(cb.onGuardrail).toHaveBeenCalledWith({
+      passed: true,
+      score: 0.95,
+      details: '',
+      claims: [],
+      unsupportedClaims: [],
+    });
+  });
+
+  // Contradiction Radar (L5) — sources carry an open-conflict count.
+  it('passes conflicts through onSource', () => {
+    const { cb, socket } = startStream();
+
+    socket.serverSend({
+      type: 'sources',
+      seq: 3,
+      payload: {
+        sources: [
+          { chunk_id: 'chunk-2', document_id: 'doc-2', excerpt: 'x', score: 0.8, conflicts: 2 },
+        ],
+      },
+    });
+
+    expect(cb.onSource).toHaveBeenCalledWith(expect.objectContaining({ chunk_id: 'chunk-2', conflicts: 2 }));
+  });
+
   it('reconnects after a non-user close with the exact backoff schedule', async () => {
     const { cb } = startStream();
 
