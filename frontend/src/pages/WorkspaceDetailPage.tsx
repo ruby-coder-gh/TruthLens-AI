@@ -1,4 +1,4 @@
-import { useState, useRef, type FormEvent, type DragEvent } from 'react';
+import { useState, useRef, useEffect, type FormEvent, type DragEvent } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1135,8 +1135,31 @@ function MembersTab({
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Close action menu on outside click
+  // R2-9: the menu panel itself — used to scope the outside-click check
+  // below. Only one member's menu is ever mounted at a time (`actionMenuOpen`
+  // holds a single id), so one shared ref is enough.
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // R2-9: Esc closes the menu, and a click anywhere outside it closes it too
+  // — no full-screen blocking backdrop, so the rest of the tab stays
+  // clickable while the menu is open. Only attached while something is open.
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setActionMenuOpen(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActionMenuOpen(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [actionMenuOpen]);
 
   const addMemberMutation = useMutation({
     mutationFn: (data: { email: string; role?: string }) =>
@@ -1160,6 +1183,19 @@ function MembersTab({
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : 'Failed to remove member';
       addToast(msg, 'error');
+    },
+  });
+
+  // BUG-15: there was no role-change control on a member card at all.
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      workspaceApi.updateMemberRole(workspaceId, userId, role),
+    onSuccess: (_data, variables) => {
+      addToast(`Role changed to ${variables.role}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['workspace-members', workspaceId] });
+    },
+    onError: (err: unknown) => {
+      addToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
     },
   });
 
@@ -1314,50 +1350,69 @@ function MembersTab({
 
                         <AnimatePresence>
                           {isMenuOpen && (
-                            <>
-                              <motion.div
-                                className="fixed inset-0 z-30"
-                                onClick={() => setActionMenuOpen(null)}
-                              />
-                              <motion.div
-                                ref={menuRef}
-                                initial={{ opacity: 0.99, scale: 0.95, y: -4 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                                transition={{ duration: 0.15 }}
-                                className="absolute right-0 top-10 z-40 min-w-[160px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
-                              >
-                                <div className="py-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleCopyUserId(member.user_id);
-                                      setActionMenuOpen(null);
-                                    }}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
-                                  >
-                                    {copiedId === member.user_id ? (
-                                      <Check size={13} className="text-green" />
-                                    ) : (
-                                      <Copy size={13} />
-                                    )}
-                                    {copiedId === member.user_id ? 'Copied!' : 'Copy User ID'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      removeMemberMutation.mutate(member.user_id);
-                                      setActionMenuOpen(null);
-                                    }}
-                                    disabled={removeMemberMutation.isPending}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
-                                  >
-                                    <X size={13} />
-                                    Remove member
-                                  </button>
-                                </div>
-                              </motion.div>
-                            </>
+                            <motion.div
+                              ref={menuRef}
+                              initial={{ opacity: 0.99, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              className="absolute right-0 top-10 z-40 min-w-[170px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
+                            >
+                              {/* BUG-15: role-change control, using the
+                                  existing owner-only PUT endpoint. */}
+                              <div className="border-b border-border-light px-3 py-2">
+                                <label
+                                  htmlFor={`member-role-${member.id}`}
+                                  className="block text-[10px] font-semibold uppercase tracking-wider text-text-dim mb-1"
+                                >
+                                  Role
+                                </label>
+                                <select
+                                  id={`member-role-${member.id}`}
+                                  value={member.role}
+                                  disabled={roleMutation.isPending}
+                                  onChange={(e) => {
+                                    const role = e.target.value;
+                                    if (role !== member.role) roleMutation.mutate({ userId: member.user_id, role });
+                                    setActionMenuOpen(null);
+                                  }}
+                                  aria-label={`Change ${member.username}'s role`}
+                                  className="w-full appearance-none rounded-chip border border-border bg-solid px-2 py-1 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                >
+                                  <option value="editor">Editor</option>
+                                  <option value="viewer">Viewer</option>
+                                </select>
+                              </div>
+                              <div className="py-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleCopyUserId(member.user_id);
+                                    setActionMenuOpen(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
+                                >
+                                  {copiedId === member.user_id ? (
+                                    <Check size={13} className="text-green" />
+                                  ) : (
+                                    <Copy size={13} />
+                                  )}
+                                  {copiedId === member.user_id ? 'Copied!' : 'Copy User ID'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    removeMemberMutation.mutate(member.user_id);
+                                    setActionMenuOpen(null);
+                                  }}
+                                  disabled={removeMemberMutation.isPending}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
+                                >
+                                  <X size={13} />
+                                  Remove member
+                                </button>
+                              </div>
+                            </motion.div>
                           )}
                         </AnimatePresence>
                       </div>

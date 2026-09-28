@@ -12,6 +12,8 @@ vi.mock('../api/client', () => ({
     listMembers: vi.fn(),
     activity: vi.fn(),
     addMember: vi.fn(),
+    removeMember: vi.fn(),
+    updateMemberRole: vi.fn(),
   },
   documentApi: {
     list: vi.fn(),
@@ -215,5 +217,64 @@ describe('WorkspaceDetailPage — Members tab invite by email (BUG-15)', () => {
 
     expect(await screen.findByText(/email is required/i)).toBeInTheDocument();
     expect(workspaceApi.addMember).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkspaceDetailPage — Members tab actions menu (BUG-15/R2-9)', () => {
+  // A second, non-self, non-owner member so the actions menu (role change +
+  // remove) renders — it's gated to isOwner && !isSelf && role !== 'owner'.
+  const editorMember: WorkspaceMember = {
+    id: 'm2', workspace_id: 'ws-1', user_id: 'u2', role: 'editor', username: 'val', email: 'v@b.com', joined_at: '2024-01-01T00:00:00Z',
+  };
+  const membersWithEditor: WorkspaceMember[] = [...members, editorMember];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(workspaceApi.get).mockResolvedValue(workspace);
+    vi.mocked(workspaceApi.listMembers).mockResolvedValue({ data: membersWithEditor });
+    vi.mocked(workspaceApi.activity).mockResolvedValue({ data: [] });
+    vi.mocked(documentApi.list).mockResolvedValue({ data: [] });
+    vi.mocked(queryApi.list).mockResolvedValue({ data: [], meta: { page: 1, page_size: 1, total: 0 } });
+    vi.mocked(radarApi.get).mockResolvedValue(radarState());
+  });
+
+  it('changing the role select calls the existing PUT member-role endpoint', async () => {
+    vi.mocked(workspaceApi.updateMemberRole).mockResolvedValue({ ...editorMember, role: 'viewer' });
+    const testUser = userEvent.setup();
+
+    renderPage('/workspaces/ws-1');
+    await testUser.click(await screen.findByRole('tab', { name: /^Members$/i }));
+    await testUser.click(await screen.findByRole('button', { name: /member actions/i }));
+
+    const roleSelect = await screen.findByLabelText(/change val's role/i);
+    await testUser.selectOptions(roleSelect, 'viewer');
+
+    await waitFor(() => expect(workspaceApi.updateMemberRole).toHaveBeenCalledWith('ws-1', 'u2', 'viewer'));
+  });
+
+  it('closes the menu on Escape', async () => {
+    const testUser = userEvent.setup();
+    renderPage('/workspaces/ws-1');
+    await testUser.click(await screen.findByRole('tab', { name: /^Members$/i }));
+    await testUser.click(await screen.findByRole('button', { name: /member actions/i }));
+
+    expect(await screen.findByText('Remove member')).toBeInTheDocument();
+    await testUser.keyboard('{Escape}');
+    expect(screen.queryByText('Remove member')).not.toBeInTheDocument();
+  });
+
+  // R2-9: the old `fixed inset-0 z-30` backdrop blocked every other control
+  // on the page while the menu was open.
+  it('does not block other controls with a full-screen backdrop while open', async () => {
+    const testUser = userEvent.setup();
+    renderPage('/workspaces/ws-1');
+    await testUser.click(await screen.findByRole('tab', { name: /^Members$/i }));
+    await testUser.click(await screen.findByRole('button', { name: /member actions/i }));
+
+    expect(await screen.findByText('Remove member')).toBeInTheDocument();
+    // The Invite Member button is elsewhere on the same tab — with a
+    // blocking backdrop it would swallow the click instead of firing.
+    await testUser.click(screen.getByRole('button', { name: /invite member/i }));
+    expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
 });

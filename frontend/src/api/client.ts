@@ -374,6 +374,11 @@ export const workspaceApi = {
   addMember: (id: string, data: AddMemberRequest): Promise<WorkspaceMember> =>
     request(`/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // BUG-15: the member card had no role-change control at all — this is the
+  // existing owner-only `PUT /workspaces/{id}/members/{user_id}`.
+  updateMemberRole: (workspaceId: string, userId: string, role: string): Promise<WorkspaceMember> =>
+    request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+
   removeMember: (workspaceId: string, userId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
 
