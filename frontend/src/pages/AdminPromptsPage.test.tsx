@@ -314,6 +314,24 @@ describe('AdminPromptsPage', () => {
     expect(within(dialog).getByText('Line one').closest('li')).not.toHaveClass('text-green');
   });
 
+  it('diffs a one-line prompt by sentence instead of removing and re-adding it all', async () => {
+    const user = userEvent.setup();
+    const base = 'Answer only from the context. Cite every source.';
+    const edited = { ...draftVersion, content: `${base} Be concise.` };
+    list.mockResolvedValue({ data: [edited, stagedVersion, activeVersion] });
+    active.mockResolvedValue({ ...activePrompt, content: base });
+    get.mockResolvedValue(edited);
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: 'Diff answer v3 against active' }));
+    const dialog = await screen.findByRole('dialog', { name: /diff vs active/i });
+
+    const added = await within(dialog).findByText(/Be concise\./);
+    expect(added.closest('li')).toHaveClass('text-green');
+    const kept = within(dialog).getByText(/Answer only from the context\./);
+    expect(kept.closest('li')).not.toHaveClass('text-red');
+  });
+
   it('renders an error state with a retry when the list fails', async () => {
     const user = userEvent.setup();
     list.mockRejectedValueOnce(new Error('boom'));

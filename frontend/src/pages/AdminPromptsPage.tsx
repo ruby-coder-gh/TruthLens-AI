@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { diffLines } from 'diff';
+import { diffLines, diffSentences } from 'diff';
 import {
   CheckCircle2,
   ChevronDown,
@@ -142,11 +142,14 @@ interface DiffLine {
   text: string;
 }
 
-/** Line-level diff for display. Keys are position-derived, which is stable
- *  because the list is recomputed wholesale whenever either side changes. */
+/** Line-level diff for display (sentence-level when either side is a single
+ *  line, e.g. the one-line built-in prompt — a line diff would show it all as
+ *  removed + re-added). Keys are position-derived, which is stable because the
+ *  list is recomputed wholesale whenever either side changes. */
 function toDiffLines(from: string, to: string): DiffLine[] {
   const lines: DiffLine[] = [];
-  diffLines(from, to).forEach((part, partIndex) => {
+  const singleLine = !from.trim().includes('\n') || !to.trim().includes('\n');
+  (singleLine ? diffSentences(from, to) : diffLines(from, to)).forEach((part, partIndex) => {
     const kind = part.added ? 'added' : part.removed ? 'removed' : 'context';
     const parts = part.value.split('\n');
     // A trailing newline yields an empty final entry — not a real line.
