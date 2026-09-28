@@ -3,6 +3,7 @@ import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
+import { SourceViewerProvider } from '../context/SourceViewerContext';
 import ChatPage from './ChatPage';
 import { queryApi } from '../api/client';
 import type { QueryWebSocketCallbacks } from '../api/websocket';
@@ -80,9 +81,13 @@ vi.mock('../api/websocket', () => {
 
 function renderChatPage() {
   return renderWithProviders(
-    <Routes>
-      <Route path="/workspaces/:id/chat" element={<ChatPage />} />
-    </Routes>,
+    // L8 — EvidenceSidebar's "View in document" action needs the source
+    // viewer's context, same as the real app's Layout provides it.
+    <SourceViewerProvider>
+      <Routes>
+        <Route path="/workspaces/:id/chat" element={<ChatPage />} />
+      </Routes>
+    </SourceViewerProvider>,
     { route: '/workspaces/ws-1/chat' },
   );
 }

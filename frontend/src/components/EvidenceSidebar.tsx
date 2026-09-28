@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, memo, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Link, useParams } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   FileText,
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   Eye,
   Target,
   Upload,
@@ -41,6 +43,7 @@ import {
 import { useToast } from './toast-context';
 import { staggerContainer, staggerItem } from './motion';
 import { ReportBuilderWizard } from './ReportBuilderWizard';
+import { useSourceViewer } from '../context/SourceViewerContext';
 import type { Source } from '../api/types';
 import { getRelevanceMeta, relevancePercent } from '../utils/relevance';
 
@@ -65,6 +68,11 @@ interface EvidenceSidebarProps {
   abstained?: boolean;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
+  /** Source viewer (L8) — workspace the sources belong to, for "View in
+   *  document" and the Radar conflicts chip. Falls back to the `:id` route
+   *  param when the host page doesn't pass one (every current call site is
+   *  under `/workspaces/:id/...`). */
+  workspaceId?: string;
   pipelinePhase?: string | null;
   isMobile?: boolean;
   activeTab?: string;
@@ -260,6 +268,7 @@ const SourceCard = memo(function SourceCard({
   onToggle,
   isHighlighted,
   streaming,
+  workspaceId,
 }: {
   source: Source;
   index: number;
@@ -267,9 +276,11 @@ const SourceCard = memo(function SourceCard({
   onToggle: () => void;
   isHighlighted: boolean;
   streaming: boolean;
+  workspaceId?: string;
 }) {
   const { addToast } = useToast();
-  
+  const { open: openSourceViewer } = useSourceViewer();
+
   // Memoize computed values to avoid recalculation on every render
   const relevance = useMemo(() => getRelevanceLevel(source.relevance_score || 0), [source.relevance_score]);
   const evidence = useMemo(() => getEvidenceBadge(source.relevance_score || 0), [source.relevance_score]);
@@ -295,6 +306,17 @@ const SourceCard = memo(function SourceCard({
     } catch {
       addToast('Could not copy the evidence excerpt.', 'error');
     }
+  };
+
+  const handleViewInDocument = () => {
+    if (!workspaceId) return;
+    openSourceViewer({
+      workspaceId,
+      documentId: source.document_id,
+      chunkId: source.chunk_id,
+      documentName: source.document_name,
+      pageNumber: source.page_number ?? null,
+    });
   };
 
   return (
@@ -392,7 +414,7 @@ const SourceCard = memo(function SourceCard({
         </div>
 
         {/* Row 4: Evidence Badge + Score */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge color={evidence.color}>
             <span className="flex items-center gap-1">
               {evidence.icon} {evidence.label}
@@ -402,6 +424,18 @@ const SourceCard = memo(function SourceCard({
             <span className="font-mono text-[11px] text-text-dim tabular-nums">
               Score: {(source.rerank_score * 100).toFixed(0)}%
             </span>
+          )}
+          {/* Contradiction Radar (L5/L6) — this source's document has open
+              conflicts with another document; colour is never the only
+              signal, the label and icon carry the meaning too. */}
+          {workspaceId && (source.conflicts ?? 0) > 0 && (
+            <Link
+              to={`/workspaces/${workspaceId}?tab=radar`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-full border border-orange/32 bg-orange/13 px-2.5 py-0.5 text-[11px] font-semibold text-orange transition-colors hover:bg-orange/20"
+            >
+              <AlertTriangle size={10} /> Conflicts with another document
+            </Link>
           )}
         </div>
 
@@ -507,6 +541,11 @@ const SourceCard = memo(function SourceCard({
             <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); void handleCopyCitation(); }}>
               <Quote size={12} /> Cite
             </Button>
+            {workspaceId && (
+              <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleViewInDocument(); }}>
+                <ExternalLink size={12} /> View in document
+              </Button>
+            )}
           </motion.div>
         )}
       </div>
@@ -956,6 +995,7 @@ function SourcesPanel({
   onRephrase,
   onExpandScope,
   onBuildReport,
+  workspaceId,
 }: {
   sources: Source[];
   isLoading: boolean;
@@ -967,6 +1007,7 @@ function SourcesPanel({
   onRephrase?: () => void;
   onExpandScope?: () => void;
   onBuildReport: () => void;
+  workspaceId?: string;
 }) {
   // Skeletons while retrieving with nothing to show yet.
   if (isLoading && sources.length === 0) {
@@ -1019,6 +1060,7 @@ function SourcesPanel({
           }
           isHighlighted={highlightedSourceId === source.chunk_id}
           streaming={isStreaming}
+          workspaceId={workspaceId}
         />
       ))}
     </motion.div>
@@ -1052,10 +1094,13 @@ export default function EvidenceSidebar({
   onUploadDocuments,
   onRephrase,
   onExpandScope,
+  workspaceId,
 }: EvidenceSidebarProps) {
   const currentTab = activeTab ?? 'sources';
   const sourceCount = sources.length;
   const [reportBuilderOpen, setReportBuilderOpen] = useState(false);
+  const { id: routeWorkspaceId } = useParams<{ id: string }>();
+  const resolvedWorkspaceId = workspaceId ?? routeWorkspaceId;
 
   return (
     <>
@@ -1165,6 +1210,7 @@ export default function EvidenceSidebar({
                   onRephrase={onRephrase}
                   onExpandScope={onExpandScope}
                   onBuildReport={() => setReportBuilderOpen(true)}
+                  workspaceId={resolvedWorkspaceId}
                 />
               ) : (
                 <AIReasoningTab

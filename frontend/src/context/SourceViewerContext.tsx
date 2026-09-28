@@ -8,6 +8,7 @@
 // single-component-export rule here is deliberate, not an oversight.
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { SourceViewerDrawer } from '../components/source-viewer/SourceViewerDrawer';
 
 export interface SourceTarget {
   workspaceId: string;
@@ -33,7 +34,12 @@ export function SourceViewerProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SourceViewerContextValue>(() => ({ open, close, target }), [open, close, target]);
 
-  return <SourceViewerContext.Provider value={value}>{children}</SourceViewerContext.Provider>;
+  return (
+    <SourceViewerContext.Provider value={value}>
+      {children}
+      <SourceViewerDrawer target={target} onClose={close} />
+    </SourceViewerContext.Provider>
+  );
 }
 
 export function useSourceViewer(): SourceViewerContextValue {
