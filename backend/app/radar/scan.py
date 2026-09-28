@@ -51,11 +51,24 @@ MAX_SENTENCE_CHARS = 400
 MIN_SENTENCE_SIMILARITY = 0.6
 
 MIN_SENTENCE_WORDS = 4
-# Jaccard overlap of the two sentences' content words (numbers, dates and
-# stopwords removed). Tuned on the demo corpus: planted conflicts share their
-# subject (0.67-1.0); NLI's other >= 0.87 pairs were same-topic sentences about
-# something else (group capex guidance vs project capex estimate, 0.0-0.19).
-MIN_SUBJECT_OVERLAP = 0.34
+# Overlap coefficient (shared content words / the SMALLER sentence's word
+# count — not Jaccard's union) of the two sentences' content words (numbers,
+# dates and stopwords removed).
+#
+# BUG-16: Jaccard's union denominator silently dropped a fresh upload's
+# short, focused sentence ("Kestrel Ridge was commissioned in November
+# 2024.") against the corpus's long compound sentence that only mentions the
+# same fact in a subordinate clause — real-model repro measured Jaccard
+# 0.125 for a genuine conflict, diluted by the long sentence's unrelated
+# clauses. The overlap coefficient isn't diluted by the longer side's extra
+# words (0.50 for the same pair), fixing that recall gap.
+#
+# Threshold raised accordingly (was 0.34) to keep both known real-demo false
+# positives below it: "group capex guidance" vs "project capex estimate"
+# (0.18) and "Kestrel Ridge wind-output" vs "contract-retirement" (0.40) —
+# both same-topic sentences about a different specific claim, NLI 0.96-0.999.
+# See test_same_subject_keeps_numeric_conflicts_and_rejects_different_quantities.
+MIN_SUBJECT_OVERLAP = 0.45
 
 # A single line break inside a hard-wrapped sentence: the line ends on a
 # lowercase word or a comma, or the next opens with a lowercase letter, digit,
@@ -389,12 +402,15 @@ def _subject_words(sentence: str) -> set[str]:
 def _same_subject(a: str, b: str) -> bool:
     """Do two sentences talk about the same thing? NLI alone flags any two figures on one topic.
 
-    ponytail: bag-of-words Jaccard; misses paraphrases with no shared content
-    word ("sales" vs "revenue"). A lemmatiser/synonym map would lift recall.
+    ponytail: bag-of-words overlap coefficient; still misses paraphrases with
+    no shared content word at all ("sales" vs "revenue", "employees" vs
+    "headcount" — see BUG-16 report). A lemmatiser/synonym map would lift
+    recall further.
     """
     words_a, words_b = _subject_words(a), _subject_words(b)
-    union = words_a | words_b
-    return bool(union) and len(words_a & words_b) / len(union) >= MIN_SUBJECT_OVERLAP
+    if not words_a or not words_b:
+        return False
+    return len(words_a & words_b) / min(len(words_a), len(words_b)) >= MIN_SUBJECT_OVERLAP
 
 
 def _embed_sentences(sentences: list[str]) -> np.ndarray:

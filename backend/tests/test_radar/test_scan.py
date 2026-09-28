@@ -518,6 +518,14 @@ def test_sentences_drop_table_rows_and_short_fragments():
          "Onshore wind generation was broadly flat year over year on a same-asset basis, with growth "
          "coming entirely from the Kestrel Ridge expansion, which contributed a full twelve months of "
          "output in 2025 versus roughly nine months in 2024.", False),
+        # BUG-16: a short, freshly-uploaded note sentence conflicting with a fact buried inside a
+        # long compound sentence — real-model repro (see radar_repro notes) showed this pair
+        # clears MIN_SENTENCE_SIMILARITY (cosine 0.60) but Jaccard subject-overlap was only 0.125
+        # (union diluted by the long sentence's unrelated clauses), so it never reached NLI.
+        ("Revenue growth was driven by a full year of contribution from the Kestrel Ridge onshore "
+         "expansion (commissioned March 2024) and higher merchant power prices in our Nordic solar "
+         "assets during the second and third quarters.",
+         "Kestrel Ridge was commissioned in November 2024, later than the original schedule.", True),
     ],
 )
 def test_same_subject_keeps_numeric_conflicts_and_rejects_different_quantities(a, b, same):
