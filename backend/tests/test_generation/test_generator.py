@@ -20,6 +20,17 @@ def test_default_prompt_instructs_disagreement_over_a_pick():
     assert "[source:N]" in DEFAULT_SYSTEM_PROMPT
 
 
+def test_default_prompt_forbids_declaring_one_figure_correct_or_an_error():
+    """R2-4/BUG-24 follow-up: a live conflict answer still picked a side
+    ("...the correct revenue figure is €412 million"), so the instruction is
+    strengthened to explicitly forbid "correct"/"error" framing, not just
+    say "state both"."""
+    lowered = DEFAULT_SYSTEM_PROMPT.lower()
+    assert "error" in lowered
+    assert "correct" in lowered
+    assert "disagree" in lowered
+
+
 def test_build_context_text_empty():
     """Test building context from empty list."""
     text = _build_context_text([])

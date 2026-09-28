@@ -26,6 +26,27 @@ async def test_register(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_register_stamps_last_login_at(client: AsyncClient, test_db):
+    """R2-12: registering signs the user in immediately, so last_login_at
+    should be set -- not left "Never" until their first separate login."""
+    from sqlalchemy import select
+
+    from app.models.user import User
+
+    response = await client.post("/api/auth/register", json={
+        "email": "freshuser@example.com",
+        "username": "freshuser",
+        "password": "SecureP@ss1",
+    })
+    assert response.status_code == 201
+
+    user = (await test_db.execute(
+        select(User).where(User.email == "freshuser@example.com")
+    )).scalar_one()
+    assert user.last_login_at is not None
+
+
+@pytest.mark.asyncio
 async def test_register_duplicate_email(client: AsyncClient):
     """Test registering with duplicate email."""
     await client.post("/api/auth/register", json={

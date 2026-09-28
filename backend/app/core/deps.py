@@ -215,7 +215,11 @@ async def get_accessible_workspace_ids(db: AsyncSession, user: User) -> list[str
 
 
 async def require_workspace_editor(
-    *, workspace: Workspace, current_user: User, db: AsyncSession
+    *,
+    workspace: Workspace,
+    current_user: User,
+    db: AsyncSession,
+    message: str = "Viewer role cannot update workspace review state",
 ) -> None:
     """Require a workspace owner/editor (or global admin) for review actions."""
     if current_user.role == "admin" or workspace.owner_id == current_user.id:
@@ -227,7 +231,7 @@ async def require_workspace_editor(
         )
     )
     if result.scalar_one_or_none() not in {"owner", "editor"}:
-        raise ForbiddenException("Viewer role cannot update workspace review state")
+        raise ForbiddenException(message)
 
 
 async def is_workspace_owner_or_admin(

@@ -288,6 +288,27 @@ async def test_admin_can_list_and_delete_promoted_golden_entries(
 
 
 @pytest.mark.asyncio
+async def test_admin_golden_list_includes_workspace_name(
+    client: AsyncClient, auth_headers: dict[str, str], admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """K3/R2-18: a promoted golden entry carries the workspace's name, not
+    just its id (the admin UI showed a raw workspace UUID)."""
+    workspace_id = await _workspace(client, auth_headers, "Northwind Renewables")
+    query = await _query(test_db, workspace_id)
+    created = await client.post(
+        f"/api/workspaces/{workspace_id}/review-queue/{query.id}/promote-golden",
+        json={"category": "ambiguous"},
+        headers=auth_headers,
+    )
+    entry_id = created.json()["id"]
+
+    listing = await client.get("/api/admin/golden?source=promoted", headers=admin_headers)
+    assert listing.status_code == 200
+    row = next(item for item in listing.json()["data"] if item["id"] == entry_id)
+    assert row["workspace_name"] == "Northwind Renewables"
+
+
+@pytest.mark.asyncio
 async def test_admin_golden_list_can_include_builtin_entries(
     client: AsyncClient, admin_headers: dict[str, str]
 ):

@@ -31,7 +31,7 @@ from app.core.exceptions import (
     TooLargeException,
     UnsupportedTypeException,
 )
-from app.ingestion.locate import locate_in_pdf
+from app.ingestion.locate import find_text_offsets, locate_in_pdf
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.contradiction import Contradiction
@@ -46,6 +46,7 @@ from app.schemas.document import (
     DocumentDetailResponse,
     DocumentResponse,
     DocumentStatusResponse,
+    TextHighlight,
 )
 from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
@@ -67,6 +68,19 @@ SUPPORTED_MIME_TYPES = {
 # upload can't execute as HTML in the viewer's origin (stored XSS).
 TEXT_LIKE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json"}
 CONTEXT_CHARS = 600
+
+
+async def _uploader_names(db: AsyncSession, user_ids: set[str]) -> dict[str, str]:
+    """K3: map `uploaded_by` user ids to a display name (username, else email).
+
+    `username` is `nullable=False` in practice, so the email fallback is a
+    belt-and-braces default for the (unenforced-at-the-DB-layer) empty case.
+    """
+    user_ids.discard(None)
+    if not user_ids:
+        return {}
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return {u.id: (u.username or u.email) for u in result.scalars().all()}
 
 MAX_FILE_SIZE = 52_428_800  # 50 MB
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -261,6 +275,7 @@ async def list_documents(
     offset = (page - 1) * page_size
     result = await db.execute(query.order_by(Document.created_at.desc()).offset(offset).limit(page_size))
     docs = result.scalars().all()
+    uploader_names = await _uploader_names(db, {d.uploaded_by for d in docs})
 
     return PaginatedResponse(
         data=[
@@ -276,6 +291,7 @@ async def list_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                uploaded_by_name=uploader_names.get(d.uploaded_by),
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
                 collection_id=d.collection_id,
@@ -307,6 +323,7 @@ async def get_document(
         select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.index).limit(MAX_DETAIL_CHUNKS)
     )
     chunks = chunk_result.scalars().all()
+    uploader_names = await _uploader_names(db, {doc.uploaded_by})
 
     return DocumentDetailResponse(
         id=doc.id,
@@ -318,6 +335,8 @@ async def get_document(
         chunk_count=doc.chunk_count,
         status=doc.status,
         quarantined_chunk_count=doc.quarantined_chunk_count,
+        uploaded_by=doc.uploaded_by,
+        uploaded_by_name=uploader_names.get(doc.uploaded_by),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         chunks=[
@@ -474,6 +493,7 @@ async def list_all_documents(
     offset = (page - 1) * page_size
     result = await db.execute(query.order_by(Document.created_at.desc()).offset(offset).limit(page_size))
     docs = result.scalars().all()
+    uploader_names = await _uploader_names(db, {d.uploaded_by for d in docs})
 
     return PaginatedResponse(
         data=[
@@ -489,6 +509,7 @@ async def list_all_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                uploaded_by_name=uploader_names.get(d.uploaded_by),
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
                 collection_id=d.collection_id,
@@ -629,6 +650,15 @@ async def locate_chunk(
     )
     next_chunk = next_result.scalar_one_or_none()
 
+    # K2: text mode + `?text=` — mark only that span inside `content`
+    # (whitespace-insensitive), instead of the whole chunk (BUG-17).
+    highlight = None
+    narrow_text = text.strip() if text else ""
+    if narrow_text:
+        offsets = find_text_offsets(chunk.content, narrow_text)
+        if offsets is not None:
+            highlight = TextHighlight(start=offsets[0], end=offsets[1])
+
     return ChunkLocateResponse(
         mode="text",
         page_number=None,
@@ -639,6 +669,7 @@ async def locate_chunk(
         content=chunk.content,
         context_before=prev_chunk.content[-CONTEXT_CHARS:] if prev_chunk else None,
         context_after=next_chunk.content[:CONTEXT_CHARS] if next_chunk else None,
+        highlight=highlight,
     )
 
 

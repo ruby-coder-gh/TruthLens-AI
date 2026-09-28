@@ -22,7 +22,8 @@ from app.models.audit_log import AuditLog
 from app.models.query import Query
 from app.models.receipt import Receipt
 from app.models.user import User
-from app.receipts import build_payload, canonicalize, seal_and_sign, verify
+from app.radar import open_conflicts_for_chunks
+from app.receipts import build_payload, canonicalize, cited_chunk_ids, seal_and_sign, verify
 from app.schemas.common import ListResponse
 from app.schemas.receipt import ReceiptCreateResponse, ReceiptPublicResponse, ReceiptSummary
 
@@ -79,7 +80,12 @@ async def create_receipt(
         )
 
     claims = _load_claims(query)
-    payload = build_payload(query, claims, query.workspace)
+    # K5: open Radar contradictions touching the answer's cited chunks, so a
+    # reader of the public receipt learns the sources disagree (R2-16).
+    conflicts = await open_conflicts_for_chunks(
+        db, query.workspace_id, cited_chunk_ids(query, claims)
+    )
+    payload = build_payload(query, claims, query.workspace, conflicts=conflicts)
     canonical = canonicalize(payload)
     seal, signature = seal_and_sign(canonical)
 

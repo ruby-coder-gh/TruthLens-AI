@@ -12,7 +12,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import check_workspace_access, get_accessible_workspace_ids, get_current_user, get_db
+from app.core.deps import (
+    check_workspace_access,
+    get_accessible_workspace_ids,
+    get_current_user,
+    get_db,
+    require_workspace_editor,
+)
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.query import Query
@@ -392,15 +398,28 @@ async def delete_query(
     workspace_id: str,
     query_id: str,
     workspace: Workspace = Depends(check_workspace_access),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a query."""
+    """Delete a query.
+
+    K6/R2-1: the author can always delete their own query. Deleting someone
+    else's query requires workspace owner/editor (or global admin) — a
+    viewer gets 403.
+    """
     result = await db.execute(
         select(Query).where(Query.id == query_id, Query.workspace_id == workspace_id)
     )
     query = result.scalar_one_or_none()
     if not query:
         raise NotFoundException("Query", query_id)
+    if query.user_id != user.id:
+        await require_workspace_editor(
+            workspace=workspace,
+            current_user=user,
+            db=db,
+            message="You don't have permission to delete this query",
+        )
     await db.delete(query)
 
 

@@ -36,6 +36,17 @@ async def test_get_admin_settings_shape(client: AsyncClient, admin_headers: dict
 
 
 @pytest.mark.asyncio
+async def test_get_admin_settings_app_name_defaults_to_truthlens_ai(
+    client: AsyncClient, admin_headers: dict[str, str]
+):
+    """R2-14: the product was renamed; the About section's default (no
+    APP_NAME override in the environment) must not still say "VeritasRAG"."""
+    resp = await client.get("/api/admin/settings", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["app_name"] == "TruthLens AI"
+
+
+@pytest.mark.asyncio
 async def test_put_admin_settings_persists_max_upload_size(
     client: AsyncClient, admin_headers: dict[str, str]
 ):

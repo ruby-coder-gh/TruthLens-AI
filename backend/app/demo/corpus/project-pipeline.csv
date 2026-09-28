@@ -1,3 +1,4 @@
+# Northwind Renewables project pipeline: development-stage renewable energy projects and their construction/permitting status.
 name,technology,mw,country,status,expected_cod
 Aurora,offshore_wind,600,United Kingdom,construction,2027-Q3
 Fjellheim Repowering,onshore_wind,35,Norway,construction,2026-Q4

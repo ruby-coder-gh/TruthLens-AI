@@ -84,6 +84,11 @@ _EMPHASIS = re.compile(r"\*\*|__")
 # claim, and NLI calls two different titles a 0.99 contradiction.
 _TERMINATED = re.compile(r"[.!?][\"')\]]*$")
 _WORD = re.compile(r"[a-z]+")
+# BUG-16: the first clause-boundary marker a long/compound sentence can be
+# safely cut at -- a closing-paren comma, a coordinating conjunction, or a
+# comma-appositive -- to get its "core clause" for the NLI retry below.
+_CLAUSE_BREAK = re.compile(r"\), | and | but | while |, ")
+MIN_TRUNCATE_WORDS = 6
 # Function words, plus month names: a date is the value a conflict differs in
 # ("in March 2021" vs "in January 2022"), not part of its subject.
 _NOT_SUBJECT = frozenset(
@@ -413,6 +418,31 @@ def _same_subject(a: str, b: str) -> bool:
     return len(words_a & words_b) / min(len(words_a), len(words_b)) >= MIN_SUBJECT_OVERLAP
 
 
+def _truncate_to_core_clause(sentence: str) -> str | None:
+    """BUG-16: a sentence's first main clause, for the NLI retry in `_score_pairs`.
+
+    Real-model repro (the QA2 planted-conflict note) found that a long/
+    compound sentence ("X (fact) and Y" / "X, detail, more detail") scores
+    NLI contradiction confidently in only *one* direction against a short,
+    focused claim -- confident (>=0.93) when the compound sentence is the
+    premise, but neutral (~0.99) in reverse -- so `min` of both directions
+    never cleared `RADAR_MIN_CONTRADICTION` even though the pair is a real
+    conflict. Dropping the trailing clause fixed both directions in every
+    case tested. Returns None if the sentence is already short or has no
+    clause-boundary marker at or after `MIN_TRUNCATE_WORDS` (nothing to trim).
+    """
+    if len(sentence.split()) <= MIN_TRUNCATE_WORDS:
+        return None
+    for m in _CLAUSE_BREAK.finditer(sentence):
+        if len(sentence[:m.start()].split()) < MIN_TRUNCATE_WORDS:
+            continue
+        core = sentence[:m.end()].rstrip(", ")
+        if not core or core == sentence:
+            return None
+        return core if core[-1] in ".!?" else core + "."
+    return None
+
+
 def _embed_sentences(sentences: list[str]) -> np.ndarray:
     """Normalised sentence embeddings from the ingestion embedder (sync; worker thread only)."""
     from app.ingestion.embedder import _load_model
@@ -477,11 +507,36 @@ def _score_pairs(batch: list[tuple[float, _Chunk, _Chunk]], vectors: dict[str, n
 
     scores = nli_batch(nli_pairs)
     findings = []
+    # BUG-16: candidates whose full-sentence NLI didn't clear the bar, but
+    # have a trimmable clause worth a second look (see _truncate_to_core_clause).
+    retry: list[tuple[float, _Chunk, str, _Chunk, str, str, str]] = []
     for k, (similarity, a, sentence_a, b, sentence_b) in enumerate(candidates):
         (e_ab, _, c_ab), (e_ba, _, c_ba) = scores[2 * k], scores[2 * k + 1]
-        # Contradiction is symmetric: demo-corpus conflicts scored >= 0.998 both
-        # ways, while NLI's false alarms were one-way (0.98 vs 0.001).
+        # Both directions must agree: a same-topic, different-quantity false
+        # alarm scores one-way (0.98 vs 0.001, see
+        # test_one_directional_contradiction_is_not_a_finding) -- but so does
+        # a genuine conflict where one sentence is a long/compound one (see
+        # the core-clause retry below, which re-checks with that diluting
+        # clause dropped instead of loosening this rule).
         contradiction, entailment = min(c_ab, c_ba), max(e_ab, e_ba)
         if contradiction >= settings.RADAR_MIN_CONTRADICTION and contradiction > entailment:
             findings.append(_finding(a, sentence_a, b, sentence_b, contradiction, similarity))
+            continue
+        core_a, core_b = _truncate_to_core_clause(sentence_a), _truncate_to_core_clause(sentence_b)
+        if core_a or core_b:
+            retry.append((similarity, a, sentence_a, b, sentence_b, core_a or sentence_a, core_b or sentence_b))
+
+    if retry:
+        retry_pairs: list[tuple[str, str]] = []
+        for *_, core_a, core_b in retry:
+            retry_pairs += [(core_a, core_b), (core_b, core_a)]
+        retry_scores = nli_batch(retry_pairs)
+        for k, (similarity, a, sentence_a, b, sentence_b, _core_a, _core_b) in enumerate(retry):
+            (e_ab, _, c_ab), (e_ba, _, c_ba) = retry_scores[2 * k], retry_scores[2 * k + 1]
+            contradiction, entailment = min(c_ab, c_ba), max(e_ab, e_ba)
+            if contradiction >= settings.RADAR_MIN_CONTRADICTION and contradiction > entailment:
+                # Store the original (untruncated) sentences: truncation is
+                # an NLI-scoring aid only, never what the user sees.
+                findings.append(_finding(a, sentence_a, b, sentence_b, contradiction, similarity))
+
     return findings

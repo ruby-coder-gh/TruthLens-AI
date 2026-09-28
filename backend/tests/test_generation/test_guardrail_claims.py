@@ -331,6 +331,40 @@ class TestCheckClaims:
         pure, calls = await _run(refusal, [_ctx(0, "Revenue grew 12% in fiscal 2025.")], [])
         assert pure.claims == [] and pure.passed is True and calls == []
 
+    async def test_meta_disagreement_sentences_are_not_claims(self):
+        """R2-4: a sentence that only asserts sources disagree / a discrepancy
+        exists is a meta-statement, not a factual claim to verify against one
+        premise -- it must not be graded UNSUPPORTED/CONTRADICTED (the
+        guardrail must not fail an honest conflict answer)."""
+        answer = (
+            "The CEO started either March 2021 or January 2022, with the sources disagreeing "
+            "[source:1][source:2]. Revenue grew 12% in fiscal 2025 [source:1]."
+        )
+        result, _ = await _run(
+            answer,
+            [_ctx(0, "Revenue grew 12% in fiscal 2025.")],
+            [("Revenue", "Revenue", (0.9, 0.05, 0.05))],
+        )
+        assert [c["text"] for c in result.claims] == ["Revenue grew 12% in fiscal 2025."]
+
+    async def test_discrepancy_meta_statement_is_not_a_claim(self):
+        result, _ = await _run(
+            "Thus, there is a discrepancy: the official reports state Q3 2027, "
+            "while the internal board memorandum states Q1 2028 [source:1][source:2]. "
+            "Revenue grew 12% in fiscal 2025 [source:1].",
+            [_ctx(0, "Revenue grew 12% in fiscal 2025.")],
+            [("Revenue", "Revenue", (0.9, 0.05, 0.05))],
+        )
+        assert [c["text"] for c in result.claims] == ["Revenue grew 12% in fiscal 2025."]
+
+    async def test_sources_disagree_meta_statement_alone_passes(self):
+        pure, calls = await _run(
+            "The sources disagree on the exact reduction.",
+            [_ctx(0, "Emissions fell.")],
+            [],
+        )
+        assert pure.claims == [] and pure.passed is True and calls == []
+
     async def test_evidence_is_capped(self):
         long_sentence = "Revenue grew " + "strongly and steadily " * 40 + "in 2025."
         result, _ = await _run(

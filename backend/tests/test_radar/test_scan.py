@@ -535,6 +535,110 @@ def test_same_subject_keeps_numeric_conflicts_and_rejects_different_quantities(a
     assert _same_subject(b, a) is same
 
 
+# ─── BUG-16: core-clause NLI retry ────────────────────────────────────
+#
+# Real-model repro (QA2's exact planted-conflict note, cross-encoder/
+# nli-deberta-v3-base) found both "closed the year 2025 with 1,580
+# employees" vs "...1,240 employees, a net addition of 94 roles, almost all
+# of them in project engineering..." and the Kestrel Ridge commissioning-date
+# pair cleared neighbour-k, sentence similarity and _same_subject, then
+# failed at NLI: the long/compound corpus sentence scored contradiction
+# ~0.98-0.9998 as the *premise* against the short claim as hypothesis, but
+# neutral (~0.99) in the reverse direction -- so min(both directions) never
+# reached RADAR_MIN_CONTRADICTION. Retrying with each sentence's core clause
+# (dropping a trailing " and ..."/parenthetical clause) recovered >=0.93 both
+# ways for every genuine pair tested, while the existing one-directional
+# false positive (CEO quote vs "became CEO in March 2021") -- which has no
+# such clause to trim -- stayed correctly unflagged either way.
+
+
+@pytest.mark.parametrize(
+    ("sentence", "expected"),
+    [
+        (
+            "Revenue growth was driven by a full year of contribution from the Kestrel Ridge "
+            "onshore expansion (commissioned March 2024) and higher merchant power prices in "
+            "our Nordic solar assets during the second and third quarters.",
+            "Revenue growth was driven by a full year of contribution from the Kestrel Ridge "
+            "onshore expansion (commissioned March 2024) and.",
+        ),
+        (
+            "We closed the year with 1,240 employees, a net addition of 94 roles, almost "
+            "all of them in project engineering and operations.",
+            "We closed the year with 1,240 employees.",
+        ),
+        # Short, no clause-boundary marker: nothing to trim.
+        ("The Kestrel Ridge onshore wind expansion was commissioned in November 2024.", None),
+        # Below the minimum word floor even though it has a comma.
+        ("Revenue, up sharply.", None),
+    ],
+)
+def test_truncate_to_core_clause(sentence, expected):
+    from app.radar.scan import _truncate_to_core_clause
+
+    assert _truncate_to_core_clause(sentence) == expected
+
+
+def test_score_pairs_retries_with_core_clause_when_full_sentence_nli_is_asymmetric(monkeypatch):
+    """The exact QA2 Kestrel Ridge pair: full-sentence NLI is one-directional
+    (confused), the core-clause retry is confident both ways."""
+    from app.radar import scan as scan_mod
+    from app.radar.scan import _Chunk, _score_pairs
+
+    short = "The Kestrel Ridge onshore wind expansion was commissioned in November 2024."
+    long = (
+        "Revenue growth was driven by a full year of contribution from the Kestrel Ridge "
+        "onshore expansion (commissioned March 2024) and higher merchant power prices in "
+        "our Nordic solar assets during the second and third quarters."
+    )
+    chunk_a = _Chunk("chunk-a", "doc-a", short)
+    chunk_b = _Chunk("chunk-b", "doc-b", long)
+
+    monkeypatch.setattr(scan_mod, "_embed_sentences", lambda sentences: np.array([unit(1, 1) for _ in sentences]))
+
+    calls: list[list[tuple[str, str]]] = []
+
+    def fake_nli(pairs):
+        calls.append(list(pairs))
+        return [
+            (0.02, 0.9, 0.08) if premise == long or hypothesis == long else (0.01, 0.02, 0.97)
+            for premise, hypothesis in pairs
+        ]
+
+    monkeypatch.setattr(scan_mod, "nli_batch", fake_nli)
+
+    findings = _score_pairs([(0.9, chunk_a, chunk_b)], {})
+
+    assert len(findings) == 1
+    assert {findings[0].sentence_a, findings[0].sentence_b} == {short, long}
+    # First attempt (full sentences) then the core-clause retry.
+    assert len(calls) == 2
+
+
+def test_score_pairs_retry_does_not_flag_a_pair_that_is_confused_even_truncated(monkeypatch):
+    """A pair that's genuinely not a conflict must not be flagged just
+    because a retry was attempted -- the retry still requires both NLI
+    directions to agree, same as the first attempt."""
+    from app.radar import scan as scan_mod
+    from app.radar.scan import _Chunk, _score_pairs
+
+    short = "The Kestrel Ridge onshore wind expansion was commissioned in November 2024."
+    long = (
+        "Revenue growth was driven by a full year of contribution from the Kestrel Ridge "
+        "onshore expansion (commissioned March 2024) and higher merchant power prices in "
+        "our Nordic solar assets during the second and third quarters."
+    )
+    chunk_a = _Chunk("chunk-a", "doc-a", short)
+    chunk_b = _Chunk("chunk-b", "doc-b", long)
+
+    monkeypatch.setattr(scan_mod, "_embed_sentences", lambda sentences: np.array([unit(1, 1) for _ in sentences]))
+    monkeypatch.setattr(scan_mod, "nli_batch", lambda pairs: [(0.05, 0.9, 0.05) for _ in pairs])
+
+    findings = _score_pairs([(0.9, chunk_a, chunk_b)], {})
+
+    assert findings == []
+
+
 @pytest.mark.asyncio
 async def test_one_directional_contradiction_is_not_a_finding(seeded, radar, test_db):
     """Real demo seed: '"2025 was a year of steady execution," said Dana Whitfield, Chief Executive

@@ -472,6 +472,122 @@ async def test_locate_text_mode_with_neighbours(client: AsyncClient, auth_header
 
 
 @pytest.mark.asyncio
+async def test_locate_text_mode_with_text_param_returns_highlight_offsets(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """K2: text mode + `?text=` returns character offsets of that text inside
+    `content` (BUG-17: Radar "View in document" / DOCX-MD marks only that span,
+    not the whole chunk)."""
+    doc = await _make_document(
+        test_db,
+        workspace_id,
+        filename="locate2.txt",
+        original_filename="locate2.txt",
+        mime_type="text/plain",
+        write_bytes=b"whole document body",
+    )
+    chunk = Chunk(document_id=doc.id, index=0, content="The middle passage under test.", token_count=5)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+        params={"text": "middle passage"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "text"
+    start, end = body["highlight"]["start"], body["highlight"]["end"]
+    assert chunk.content[start:end] == "middle passage"
+
+
+@pytest.mark.asyncio
+async def test_locate_text_mode_text_param_is_whitespace_insensitive(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """K2: matching ignores whitespace differences (newlines/extra spaces) between
+    the query sentence and the stored chunk content."""
+    doc = await _make_document(
+        test_db,
+        workspace_id,
+        filename="locate3.txt",
+        original_filename="locate3.txt",
+        mime_type="text/plain",
+        write_bytes=b"whole document body",
+    )
+    content = "Revenue   in\n2025 was strong."
+    chunk = Chunk(document_id=doc.id, index=0, content=content, token_count=6)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+        params={"text": "Revenue in 2025"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    start, end = body["highlight"]["start"], body["highlight"]["end"]
+    assert content[start:end] == "Revenue   in\n2025"
+
+
+@pytest.mark.asyncio
+async def test_locate_text_mode_without_text_param_highlight_is_null(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """K2: no `text` query param -> `highlight` is null, not an empty match."""
+    doc = await _make_document(
+        test_db,
+        workspace_id,
+        filename="locate4.txt",
+        original_filename="locate4.txt",
+        mime_type="text/plain",
+        write_bytes=b"whole document body",
+    )
+    chunk = Chunk(document_id=doc.id, index=0, content="Only passage.", token_count=2)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["highlight"] is None
+
+
+@pytest.mark.asyncio
+async def test_locate_text_mode_text_param_no_match_highlight_is_null(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """K2: a `text` that isn't found in `content` returns highlight: null, not a 404/500."""
+    doc = await _make_document(
+        test_db,
+        workspace_id,
+        filename="locate5.txt",
+        original_filename="locate5.txt",
+        mime_type="text/plain",
+        write_bytes=b"whole document body",
+    )
+    chunk = Chunk(document_id=doc.id, index=0, content="Only passage.", token_count=2)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+        params={"text": "nothing like this here"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["highlight"] is None
+
+
+@pytest.mark.asyncio
 async def test_locate_text_mode_no_neighbours(client: AsyncClient, auth_headers, workspace_id, test_db):
     """Single-chunk document: context_before/after are null, not an error."""
     doc = await _make_document(

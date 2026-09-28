@@ -33,6 +33,13 @@ MAX_CONTEXTS = 8
 EVIDENCE_MAX_CHARS = 400
 
 _MARKER_RE = re.compile(r"\s*\[source:\s*(\d+)\]")
+# R2-4: a sentence that only asserts sources disagree / a discrepancy exists
+# (BUG-24's own instruction encourages exactly this phrasing) is a
+# meta-statement about the retrieval set, not a fact to verify against one
+# premise -- NLI has nothing single-source to entail it against, so it was
+# scored UNSUPPORTED/CONTRADICTED and failed otherwise-honest conflict
+# answers. Excluded from claim scoring like the refusal sentence below.
+_META_DISAGREEMENT_RE = re.compile(r"\b(?:disagree\w*|discrepanc\w*)\b", re.IGNORECASE)
 # A claim ends at .!? (keeping any [source:N] markers right after it) when the
 # next sentence starts with a capital/quote/paren, and always at a line break.
 _CLAIM_END_RE = re.compile(r"[.!?]+(?:\s*\[source:\s*\d+\])*(?=\s+[A-Z\"'(*]|\s*$)|\r?\n")
@@ -298,8 +305,13 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     if not scored:
         return GuardrailResult(passed=True, score=1.0, details="No context text available")
 
-    # The generator's own "can't answer" sentence is not a claim about the documents.
-    spans = [s for s in _extract_claim_spans(answer) if not s[0].lower().startswith(REFUSAL_PREFIX.lower())]
+    # The generator's own "can't answer" sentence, and any "sources disagree"
+    # meta-statement (R2-4), are not claims about the documents.
+    spans = [
+        s for s in _extract_claim_spans(answer)
+        if not s[0].lower().startswith(REFUSAL_PREFIX.lower())
+        and not _META_DISAGREEMENT_RE.search(s[0])
+    ]
     if not spans:
         return GuardrailResult(passed=True, score=1.0, details="No claims to check")
     total_claims = len(spans)

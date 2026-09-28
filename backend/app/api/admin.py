@@ -303,6 +303,7 @@ async def get_audit_logs(
             AuditLogResponse(
                 id=log.id,
                 user_id=log.user_id,
+                user_name=(log.user.username or log.user.email) if log.user else None,
                 action=log.action,
                 resource_type=log.resource_type,
                 resource_id=log.resource_id,
@@ -360,6 +361,7 @@ async def export_audit_logs(
             AuditLogResponse(
                 id=log.id,
                 user_id=log.user_id,
+                user_name=(log.user.username or log.user.email) if log.user else None,
                 action=log.action,
                 resource_type=log.resource_type,
                 resource_id=log.resource_id,
@@ -1311,9 +1313,15 @@ async def list_golden_entries(
     if source in ("builtin", "all") and status in (None, GOLDEN_STATUS_APPROVED):
         entries.extend(_builtin_golden_responses())
     if source in ("promoted", "all"):
+        promoted_rows = await list_promoted_entries(db, status=status)
+        ws_ids = {row.workspace_id for row in promoted_rows if row.workspace_id}
+        ws_names: dict[str, str] = {}
+        if ws_ids:
+            ws_result = await db.execute(select(Workspace.id, Workspace.name).where(Workspace.id.in_(ws_ids)))
+            ws_names = dict(ws_result.all())
         entries.extend(
-            GoldenEntryResponse.from_row(row)
-            for row in await list_promoted_entries(db, status=status)
+            GoldenEntryResponse.from_row(row, workspace_name=ws_names.get(row.workspace_id))
+            for row in promoted_rows
         )
     offset = (page - 1) * page_size
     counts = await golden_counts(db)

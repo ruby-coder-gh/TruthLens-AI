@@ -118,15 +118,48 @@ Original question: {query}
 Sub-question findings:
 {sub_findings}
 
+Known contradictions among the retrieved documents (from Contradiction Radar):
+{conflicts}
+
 Your task: Synthesize these findings into a comprehensive, well-structured report.
 Organize it with:
 1. **Executive Summary** — 2-3 sentence overview of the answer
 2. **Detailed Findings** — Organized by theme, with evidence from each sub-question
-3. **Key Sources** — List the most important documents or sources referenced
-4. **Confidence Assessment** — Based on the strength of evidence found
+3. **Contradictions Found** — If any contradictions are listed above, report each one
+   explicitly: state both sides with their sources. Do not omit them, do not pick a
+   side, and do not describe the corpus as consistent when contradictions are listed.
+4. **Key Sources** — List the most important documents or sources referenced
+5. **Confidence Assessment** — Based on the strength of evidence found
 
 Use clear section headings. Cite sources as [source:N] where N corresponds
 to the source number. Be factual and grounded in the evidence provided."""
+
+# R2-7: rendered when no open Radar contradiction touches the investigation's
+# retrieved chunks, or the lookup itself failed (never blocks synthesis).
+CONFLICTS_NONE_TEXT = "No known contradictions among the retrieved documents."
+
+
+def _format_conflicts_context(conflicts: list[dict[str, Any]]) -> str:
+    """Render open Radar contradictions as synthesis prompt context (R2-7)."""
+    if not conflicts:
+        return CONFLICTS_NONE_TEXT
+    lines = []
+    for c in conflicts:
+        a, b = c["a"], c["b"]
+        lines.append(
+            f'- "{a["sentence"]}" ({a["document_name"]}) vs '
+            f'"{b["sentence"]}" ({b["document_name"]})'
+        )
+    return "\n".join(lines)
+
+
+async def _fetch_investigation_conflicts(workspace_id: str, chunk_ids: list[str]) -> list[dict[str, Any]]:
+    """Open Radar contradictions touching the investigation's retrieved chunks (R2-7)."""
+    from app.database import async_session_factory
+    from app.radar import open_conflicts_for_chunks
+
+    async with async_session_factory() as db:
+        return await open_conflicts_for_chunks(db, workspace_id, chunk_ids)
 
 
 # ─── Helper: run LLM call ─────────────────────────────────────────────────────
@@ -477,8 +510,27 @@ def _synthesize_node(state: InvestigationState) -> dict:
 
     sub_findings = "\n".join(findings_parts)
 
+    # R2-7: feed the workspace's open Radar contradictions among the chunks
+    # this investigation actually retrieved into synthesis as explicit
+    # context, so "identify conflicts" reports them instead of the model
+    # having to notice them itself from prose alone. A lookup failure must
+    # never break the report.
+    chunk_ids = sorted({
+        str(c["chunk_id"])
+        for sq in sub_questions
+        for c in sq.get("retrieved_chunks", [])
+        if c.get("chunk_id")
+    })
+    conflicts: list[dict[str, Any]] = []
+    if chunk_ids:
+        try:
+            conflicts = asyncio.run(_fetch_investigation_conflicts(state["workspace_id"], chunk_ids))
+        except Exception as e:
+            logger.warning("investigation_conflicts_lookup_failed", error=str(e))
+    conflicts_context = _format_conflicts_context(conflicts)
+
     try:
-        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=sub_findings)
+        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=sub_findings, conflicts=conflicts_context)
         report = _run_llm(
             "You are a precise research report synthesizer. Be factual, well-structured, and grounded in evidence.",
             prompt,

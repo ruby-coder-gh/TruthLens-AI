@@ -80,6 +80,26 @@ class TestBuildPayload:
         assert payload["claims"] == []
         assert "issued_at" in payload
 
+    def test_conflicts_defaults_to_empty_list(self):
+        """K5: `conflicts` is always present, even when the caller has none to pass."""
+        query = _make_query()
+        payload = build_payload(query, claims=[], workspace=_make_workspace())
+        assert payload["conflicts"] == []
+
+    def test_conflicts_are_embedded_verbatim_when_given(self):
+        """K5: the caller (create_receipt) resolves conflicts via the DB and
+        passes the shaped list straight through -- build_payload stays pure."""
+        query = _make_query()
+        conflicts = [
+            {
+                "a": {"document_name": "spec.pdf", "page_number": 2, "sentence": "Wind powers the turbines."},
+                "b": {"document_name": "other.pdf", "page_number": 5, "sentence": "Solar powers the turbines."},
+                "score": 0.91,
+            }
+        ]
+        payload = build_payload(query, claims=[], workspace=_make_workspace(), conflicts=conflicts)
+        assert payload["conflicts"] == conflicts
+
     def test_includes_only_sources_cited_by_marker(self):
         query = _make_query()
         payload = build_payload(query, claims=[], workspace=_make_workspace())

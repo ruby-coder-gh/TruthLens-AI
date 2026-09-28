@@ -41,16 +41,20 @@ class GoldenEntryResponse(BaseModel):
     approved_at: datetime | None = None
     source_query_id: str | None = None
     workspace_id: str | None = None
+    # K3/R2-18: the source workspace's name, so the admin UI shows a name
+    # instead of a raw workspace UUID.
+    workspace_name: str | None = None
     created_by: str | None = None
     created_at: datetime | None = None
 
     _serialize_datetimes = field_serializer("approved_at", "created_at")(utc_iso)
 
     @classmethod
-    def from_row(cls, row: Any) -> "GoldenEntryResponse":
+    def from_row(cls, row: Any, *, workspace_name: str | None = None) -> "GoldenEntryResponse":
         """Shape a promoted ``golden_entries`` row into the public contract.
 
         Duck-typed on purpose so this schema module stays free of model imports.
+        `workspace_name` is looked up by the caller (it isn't on the row).
         """
         return cls(
             id=row.id,
@@ -67,6 +71,7 @@ class GoldenEntryResponse(BaseModel):
             approved_at=row.approved_at,
             source_query_id=row.source_query_id,
             workspace_id=row.workspace_id,
+            workspace_name=workspace_name,
             created_by=row.created_by,
             created_at=row.created_at,
         )

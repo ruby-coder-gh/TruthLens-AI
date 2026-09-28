@@ -71,6 +71,66 @@ async def test_create_receipt_returns_token_and_seal(client: AsyncClient, owner_
 
 
 @pytest.mark.asyncio
+async def test_create_receipt_includes_open_conflicts_for_cited_chunks(
+    client: AsyncClient, test_db: AsyncSession, owner_and_query, monkeypatch
+):
+    """K5/R2-16: the sealed payload's conflicts[] holds the open Radar
+    contradiction touching the answer's cited chunk ("c1")."""
+    from app.models.contradiction import Contradiction
+    from app.models.document import Document
+    from tests.test_radar.conftest import FakeCollection
+
+    owner, ws_id, q_id = owner_and_query
+
+    doc_a = Document(
+        id="d1", workspace_id=ws_id, filename="srv-spec.pdf", original_filename="spec.pdf",
+        mime_type="application/pdf", file_size=1, status="ready",
+    )
+    doc_b = Document(
+        workspace_id=ws_id, filename="srv-other.pdf", original_filename="other.pdf",
+        mime_type="application/pdf", file_size=1, status="ready",
+    )
+    test_db.add_all([doc_a, doc_b])
+    await test_db.commit()
+    await test_db.refresh(doc_b)
+
+    test_db.add(Contradiction(
+        workspace_id=ws_id, pair_key="k1",
+        doc_a_id="d1", chunk_a_id="c1", sentence_a="Wind powers the turbines.",
+        doc_b_id=doc_b.id, chunk_b_id="c-other", sentence_b="Solar powers the turbines.",
+        score=0.91, similarity=0.8, status="open",
+    ))
+    await test_db.commit()
+    monkeypatch.setattr("app.radar.get_workspace_collection", lambda _wid: FakeCollection([]))
+
+    resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(owner))
+    assert resp.status_code == 201
+    token = resp.json()["token"]
+
+    view = await client.get(f"/api/receipts/{token}")
+    conflicts = view.json()["payload"]["conflicts"]
+    assert conflicts == [
+        {
+            "a": {"document_name": "spec.pdf", "page_number": None, "sentence": "Wind powers the turbines."},
+            "b": {"document_name": "other.pdf", "page_number": None, "sentence": "Solar powers the turbines."},
+            "score": 0.91,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_receipt_conflicts_empty_when_no_open_contradictions(client: AsyncClient, owner_and_query):
+    """K5: no open contradictions touch the cited chunk -> conflicts is an empty list, not absent."""
+    owner, ws_id, q_id = owner_and_query
+    resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(owner))
+    assert resp.status_code == 201
+    token = resp.json()["token"]
+
+    view = await client.get(f"/api/receipts/{token}")
+    assert view.json()["payload"]["conflicts"] == []
+
+
+@pytest.mark.asyncio
 async def test_create_receipt_requires_auth(client: AsyncClient, owner_and_query):
     _, _, q_id = owner_and_query
     resp = await client.post(f"/api/queries/{q_id}/receipts")
