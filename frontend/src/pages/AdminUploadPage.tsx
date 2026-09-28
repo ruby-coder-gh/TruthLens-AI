@@ -376,15 +376,21 @@ export default function AdminUploadPage() {
 
             {/* Actions */}
             <div className="flex items-center gap-3 pt-2">
-              <Button
-                onClick={handleUpload}
-                loading={isUploading}
-                disabled={!hasPending || !workspaceId}
-                size="md"
-              >
-                <Upload size={14} />
-                {isUploading ? 'Uploading...' : `Upload ${files.filter((f) => f.status === 'pending').length} file${files.filter((f) => f.status === 'pending').length > 1 ? 's' : ''}`}
-              </Button>
+              {/* R2-15: once every file has finished (or failed), there's
+                  nothing left to upload — showing a disabled "Upload 0
+                  file" button instead of hiding it read as a stuck/broken
+                  action. */}
+              {hasPending && (
+                <Button
+                  onClick={handleUpload}
+                  loading={isUploading}
+                  disabled={!workspaceId}
+                  size="md"
+                >
+                  <Upload size={14} />
+                  {isUploading ? 'Uploading...' : `Upload ${files.filter((f) => f.status === 'pending').length} file${files.filter((f) => f.status === 'pending').length > 1 ? 's' : ''}`}
+                </Button>
+              )}
               {allComplete && (
                 <Button
                   variant="secondary"
