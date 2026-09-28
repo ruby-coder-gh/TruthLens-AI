@@ -1024,6 +1024,12 @@ async def _usage_rollup(
             func.coalesce(func.sum(Query.cache_hit_count), 0).label("cache_hits"),
         )
 
+    # A sufficiency-gate abstention persists `model_used="abstain"` with no
+    # LLM call behind it (see `_ANSWERED_ONLY` above) — exclude it here the
+    # same way `get_flagged_answers` / `get_trust_score_distribution` do, or
+    # it shows up as a free "model" row and skews query/token totals.
+    stmt = stmt.where(_ANSWERED_ONLY)
+
     naive_from = _to_naive_utc(date_from)
     if naive_from:
         stmt = stmt.where(Query.created_at >= naive_from)
