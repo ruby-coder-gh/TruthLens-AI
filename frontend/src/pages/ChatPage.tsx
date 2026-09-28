@@ -8,8 +8,8 @@
 // callers, not deleted). Every claim's evidence now lives inline in the
 // Claim Ledger; every source lives in the Exhibits list below it.
 import { useState, useRef, useEffect, useCallback, useMemo, memo, type FormEvent, type KeyboardEvent } from 'react';
-import { useParams } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useParams, useLocation } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import {
@@ -132,8 +132,23 @@ function initials(name: string | undefined): string {
 //  MAIN PAGE COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Sidebar "New chat" links to this same route (/workspaces/:id/chat), so a
+// click there doesn't change the path — `location.key` is React Router's
+// only signal that "the user navigated here again". Keying the real page
+// component on it makes React unmount + remount the whole subtree (every
+// hook, every ref, the live WebSocket) on that signal, which is the
+// documented way to reset all of a component's state on a prop/key change —
+// simpler and safer than hand-resetting each piece of state individually.
+// Also fires (correctly) when switching workspaces, since the route element
+// is shared and only its :id param changes.
 export default function ChatPage() {
+  const location = useLocation();
+  return <ChatPageForConversation key={location.key} />;
+}
+
+function ChatPageForConversation() {
   const { id: workspaceId } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
   const { user } = useAuth();
 
@@ -293,6 +308,11 @@ export default function ChatPage() {
           );
           setIsStreaming(false);
           streamingMsgIdRef.current = null;
+          // The sidebar's "Recent" list (Layout.tsx) reads
+          // ['queries', 'recent', pathname] — a bare ['queries', 'recent']
+          // invalidation matches every pathname suffix, so this chat's new
+          // question shows up there without waiting for a refetch interval.
+          void queryClient.invalidateQueries({ queryKey: ['queries', 'recent'] });
         },
 
         onError: (code: string, message: string) => {
@@ -351,7 +371,7 @@ export default function ChatPage() {
       wsRef.current = ws;
       ws.connect();
     },
-    [workspaceId, conversationId, genId, isStreaming],
+    [workspaceId, conversationId, genId, isStreaming, queryClient],
   );
 
   const lastUserQuestion = useCallback(() => {
@@ -487,7 +507,7 @@ export default function ChatPage() {
 
       {/* ─── Composer ────────────────────────────────────────────────────── */}
       <div className="flex-none px-4 pb-4 pt-2 sm:px-6">
-        <form onSubmit={handleSubmit} className="mx-auto max-w-[832px] rounded-panel border border-rule-strong bg-solid shadow-e1 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--color-primary-tint,var(--color-primary-glow))]">
+        <form onSubmit={handleSubmit} className="mx-auto max-w-[832px] rounded-panel border border-border-strong bg-solid shadow-e1 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--color-primary-tint)]">
           <label htmlFor="ask" className="sr-only">Ask a question about this workspace</label>
           <textarea
             key={inputKey}

@@ -23,7 +23,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
   if (loading) {
     return (
       <section className="mt-8" aria-label="Exhibits">
-        <div className="flex items-baseline gap-4 border-b border-rule-strong pb-2">
+        <div className="flex items-baseline gap-4 border-b border-border-strong pb-2">
           <h3 className="text-sm font-semibold text-text">Exhibits</h3>
           <p className="text-xs text-text-dim">Ranking passages…</p>
         </div>
@@ -47,7 +47,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
 
   return (
     <section className="mt-8" aria-labelledby="exhibits-h">
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-rule-strong pb-2">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border-strong pb-2">
         <h3 id="exhibits-h" className="text-sm font-semibold text-text">Exhibits</h3>
         <p className="text-xs text-text-dim" aria-live="polite">
           {sources.length} passage{sources.length === 1 ? '' : 's'} across {docCount} document{docCount === 1 ? '' : 's'}. {citedCount} cited in the answer.
@@ -81,7 +81,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
                 <span className="min-w-0 flex-1 truncate font-medium text-text">{title}</span>
                 {source.page_number != null && <span className="hidden shrink-0 text-xs text-text-muted sm:inline">page {source.page_number}</span>}
                 {(source.conflicts ?? 0) > 0 ? (
-                  <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-red sm:flex">
+                  <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-conflict sm:flex">
                     <Scale size={13} aria-hidden="true" />
                     Conflict
                   </span>

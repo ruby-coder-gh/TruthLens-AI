@@ -117,11 +117,11 @@ function ClaimRow({
       className={clsx(
         'border-b border-border last:border-b-0 transition-colors',
         flashed && 'bg-primary/10',
-        xrefTo.length > 0 && 'bg-red/[0.03]',
+        xrefTo.length > 0 && 'bg-conflict-tint',
       )}
     >
       <div className="flex flex-col gap-2.5 px-2 py-4 sm:grid sm:grid-cols-[2.5rem_7.5rem_minmax(0,1fr)_minmax(0,1.1fr)_2.25rem] sm:items-start sm:gap-4">
-        <span className="font-mono text-xs font-medium text-text-dim sm:pt-0.5">{rid}</span>
+        <span className="font-cond text-[13px] font-medium text-text-dim sm:pt-0.5">{rid}</span>
 
         <div className="flex flex-row items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
           <Stamp verdict={claim.verdict} />
@@ -147,7 +147,7 @@ function ClaimRow({
               key={n}
               type="button"
               onClick={() => flashRowById(`row-C${n}`)}
-              className="ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 align-middle text-xs font-medium text-red hover:bg-red/10"
+              className="ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 align-middle text-xs font-medium text-conflict hover:bg-conflict-tint"
             >
               <Scale size={12} aria-hidden="true" />
               Differs from C{n}
@@ -157,7 +157,7 @@ function ClaimRow({
 
         <div className="min-w-0">
           {claim.evidence && (
-            <blockquote className="border-l-2 border-rule-strong pl-2.5 text-[13px] italic leading-5 text-text-muted">
+            <blockquote className="border-l-2 border-border-strong pl-2.5 text-[13px] italic leading-5 text-text-muted">
               “{claim.evidence}”
             </blockquote>
           )}
@@ -195,7 +195,7 @@ function ClaimRow({
               <button
                 type="button"
                 onClick={handleView}
-                className="inline-flex min-h-8 items-center gap-1.5 rounded-control border border-rule-strong px-2.5 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11"
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-control border border-border-strong px-2.5 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11"
               >
                 <ExternalLink size={13} aria-hidden="true" />
                 View in document{claim.page_number ? `, page ${claim.page_number}` : ''}
@@ -228,9 +228,9 @@ function DiscrepancyRow({ pair, claims, allDocNames, workspaceId }: { pair: Conf
   }, [workspaceId, claimA, openViewer]);
 
   return (
-    <li id={`row-D${pair.claimAIndex}${pair.claimBIndex}`} className="border-b border-border bg-red/[0.03] px-2 py-4 last:border-b-0">
+    <li id={`row-D${pair.claimAIndex}${pair.claimBIndex}`} className="border-b border-border bg-conflict-tint px-2 py-4 last:border-b-0">
       <div className="flex flex-col gap-2.5 sm:grid sm:grid-cols-[2.5rem_7.5rem_minmax(0,1fr)_minmax(0,1.1fr)] sm:gap-4">
-        <span className="font-mono text-xs font-medium text-text-dim">D</span>
+        <span className="font-cond text-[13px] font-medium text-text-dim">D</span>
         <Stamp verdict="conflict" />
         <div className="min-w-0 text-sm text-text">
           <p className="font-medium">Sources disagree{diff ? '' : ` (C${pair.claimAIndex + 1} vs C${pair.claimBIndex + 1})`}</p>
@@ -238,7 +238,7 @@ function DiscrepancyRow({ pair, claims, allDocNames, workspaceId }: { pair: Conf
             {titleA} and {titleB} report different figures for the same thing. TruthLens shows both and doesn't pick one.
           </p>
           {workspaceId && claimA.document_id && claimA.chunk_id && (
-            <button type="button" onClick={handleCompare} className="mt-2 inline-flex min-h-7 items-center gap-1.5 rounded-control border border-rule-strong px-2 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11">
+            <button type="button" onClick={handleCompare} className="mt-2 inline-flex min-h-7 items-center gap-1.5 rounded-control border border-border-strong px-2 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11">
               <ExternalLink size={12} aria-hidden="true" />
               Compare the pages
             </button>
@@ -250,7 +250,7 @@ function DiscrepancyRow({ pair, claims, allDocNames, workspaceId }: { pair: Conf
             <tbody>
               <tr><th scope="row" className="pr-3 py-0.5 text-left font-normal text-text-muted">{titleA}</th><td className="py-0.5 text-right font-semibold tabular-nums text-text">{diff.a.raw}</td></tr>
               <tr><th scope="row" className="pr-3 py-0.5 text-left font-normal text-text-muted">{titleB}</th><td className="py-0.5 text-right font-semibold tabular-nums text-text">{diff.b.raw}</td></tr>
-              <tr className="border-t border-rule-strong"><th scope="row" className="pr-3 pt-1 text-left font-normal text-red">Difference</th><td className="pt-1 text-right font-semibold tabular-nums text-red">{diff.diff.toLocaleString()}</td></tr>
+              <tr className="border-t border-border-strong"><th scope="row" className="pr-3 pt-1 text-left font-normal text-conflict">Difference</th><td className="pt-1 text-right font-semibold tabular-nums text-conflict">{diff.diff.toLocaleString()}</td></tr>
             </tbody>
           </table>
         )}

@@ -2,12 +2,9 @@
 // rows, the tally chips and the prose view's inline icons. One source of
 // truth so every surface agrees on label/icon/colour for a given verdict.
 //
-// Colour tokens: reuse the app's existing green/orange/red inks (already
-// text-safe AA on both themes — see index.css) instead of inventing new
-// "--v-*" tokens. `unsupported` maps to the existing neutral `text-muted`
-// ink, matching the prototype's own grey (not a fourth hue). `conflict`
-// reuses red, exactly as the prototype's own tokens do (`--conflict` ===
-// `--v-contradicted` in both its light and dark palettes).
+// Colour tokens: index.css's Claim Ledger port defines --color-v-supported /
+// -v-partial / -v-unsupported / -v-contradicted / -conflict for exactly this
+// purpose (Tailwind auto-generates text-v-supported etc. from them).
 import { Check, CircleDashed, X, Ban, Scale } from 'lucide-react';
 import type { ClaimVerdict } from '../../api/types';
 
@@ -16,16 +13,16 @@ export type LedgerVerdict = ClaimVerdict | 'conflict';
 export interface VerdictMeta {
   label: string;
   icon: typeof Check;
-  /** Tailwind text-color utility — also the `currentColor` source for `.wax-seal`. */
+  /** Tailwind text-color utility — also the `currentColor` source for `.stamp`. */
   textClass: string;
 }
 
 export const VERDICT_META: Record<LedgerVerdict, VerdictMeta> = {
-  supported: { label: 'Verified', icon: Check, textClass: 'text-green' },
-  partial: { label: 'Partial', icon: CircleDashed, textClass: 'text-orange' },
-  unsupported: { label: 'Unsupported', icon: X, textClass: 'text-text-muted' },
-  contradicted: { label: 'Contradicted', icon: Ban, textClass: 'text-red' },
-  conflict: { label: 'Conflict', icon: Scale, textClass: 'text-red' },
+  supported: { label: 'Verified', icon: Check, textClass: 'text-v-supported' },
+  partial: { label: 'Partial', icon: CircleDashed, textClass: 'text-v-partial' },
+  unsupported: { label: 'Unsupported', icon: X, textClass: 'text-v-unsupported' },
+  contradicted: { label: 'Contradicted', icon: Ban, textClass: 'text-v-contradicted' },
+  conflict: { label: 'Conflict', icon: Scale, textClass: 'text-conflict' },
 };
 
 export interface ClaimTally {

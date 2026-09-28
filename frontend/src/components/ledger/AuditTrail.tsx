@@ -191,7 +191,7 @@ export function AuditTrail(props: AuditTrailProps) {
                         status === 'done' && 'border-text-muted bg-text-muted',
                         status === 'active' && 'border-primary shadow-[inset_0_0_0_2px_var(--color-solid),inset_0_0_0_4px_var(--color-primary)]',
                         status === 'stopped' && 'border-dashed border-text-dim',
-                        status === 'pending' && 'border-rule border-border-light',
+                        status === 'pending' && 'border-border border-border-light',
                       )}
                       aria-hidden="true"
                     />
