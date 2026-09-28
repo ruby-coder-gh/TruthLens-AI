@@ -2,7 +2,7 @@
 // auth required. Renders against `receiptApi.get(token)` and re-derives the
 // seal client-side via WebCrypto so "verified" is never just the server's word.
 import { useCallback, useEffect, useState, type ComponentType } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -57,49 +57,63 @@ async function sha256Hex(text: string): Promise<string> {
 
 /** Backend cites sources inline as literal `[source:N]` markers (1-indexed).
  * On this static page a citation is a plain in-page anchor to the sources
- * list below — no hover card, no live retrieval, just #source-N. */
+ * list below — no hover card, no live retrieval, just #source-N.
+ *
+ * The whole answer renders through a *single* `ReactMarkdown` pass: markers
+ * are rewritten to markdown links first, so citations stay inline with the
+ * surrounding sentence. The previous approach split the text on each marker
+ * and rendered every segment in its own `<ReactMarkdown>`, which produced a
+ * block-level `<p>` per segment — every citation landed on its own line and
+ * left orphan periods behind (BUG-4), and a marker sitting at a segment
+ * boundary could render on its own with nothing to visually tie it to the
+ * sentence it belonged to (BUG-9). */
 function renderAnswer(answer: string, sourceCount: number) {
-  const parts = answer.split(/(\[source:\d+\])/gi);
-  if (parts.length <= 1) {
-    return <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>;
-  }
+  const withCitationLinks = answer.replace(/\[source:(\d+)\]/gi, (_match, numStr: string) => {
+    const n = parseInt(numStr, 10);
+    return n >= 1 && n <= sourceCount ? `[${n}](#source-${n})` : `[${n}](#unavailable)`;
+  });
   return (
-    <>
-      {parts.map((part, i) => {
-        const match = part.match(/\[source:(\d+)\]/i);
-        if (match) {
-          const n = parseInt(match[1], 10);
-          if (n >= 1 && n <= sourceCount) {
-            return (
-              <a key={i} href={`#source-${n}`} aria-label={`Jump to source ${n}`}>
-                <sup className="footnote-ref">{n}</sup>
-              </a>
-            );
-          }
-          return (
-            <sup key={i} className="footnote-ref !text-text-dim" title="Source unavailable">
-              {n}
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ href, children }) =>
+          href === '#unavailable' ? (
+            <sup className="footnote-ref !text-text-dim" title="Source unavailable">
+              {children}
             </sup>
-          );
-        }
-        return (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
-            {part}
-          </ReactMarkdown>
-        );
-      })}
-    </>
+          ) : (
+            <a href={href} aria-label={`Jump to source ${children}`}>
+              <sup className="footnote-ref">{children}</sup>
+            </a>
+          ),
+      }}
+    >
+      {withCitationLinks}
+    </ReactMarkdown>
   );
 }
 
+// BUG-47: these dead-end status screens (bogus/revoked/errored receipt
+// links) previously had no brand and no way back into the app — a visitor
+// who lands here from a stale or bogus link is stuck. Every status screen
+// now carries the same brand header as the loaded receipt and a link home.
 function ReceiptStatusScreen({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-bg px-4">
+    <div className="relative flex min-h-screen flex-col items-center justify-center gap-6 bg-bg px-4">
       <div className="bg-grid" />
+      <Link to="/" className="relative z-10 flex items-center gap-2.5" aria-label="TruthLens home">
+        <Logo size={26} className="text-primary" />
+        <span className="text-[17px] font-semibold tracking-[-0.01em] text-text">TruthLens</span>
+      </Link>
       <div className="relative z-10 w-full max-w-md">
         <Card className="p-2">
           <EmptyState icon={icon} title={title} description={description} />
         </Card>
+        <div className="mt-4 text-center">
+          <Link to="/" className="text-[13px] font-medium text-primary-soft hover:underline">
+            Go to TruthLens home
+          </Link>
+        </div>
       </div>
     </div>
   );

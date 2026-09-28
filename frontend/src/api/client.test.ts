@@ -128,4 +128,32 @@ describe('api/client', () => {
     expect(url).toContain('/admin/prompts/pv-1/promote');
     expect(url).not.toContain('force');
   });
+
+  // BUG-1 regression: the backend wraps the list in a `{data: [...]}`
+  // envelope (ListResponse), but SealReceiptButton does `existing.filter(...)`
+  // on the resolved value — a bare object there throws
+  // "existing.filter is not a function" and crashes the whole page.
+  it('listForQuery unwraps the {data: [...]} envelope into a bare array', async () => {
+    const receipts = [
+      {
+        token: 'tok_existing',
+        url_path: '/r/tok_existing',
+        seal: 'deadbeef00112233445566778899aabbccddeeff0011223344556677889900',
+        created_at: '2026-09-01T00:00:00Z',
+        revoked_at: null,
+        view_count: 3,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: receipts }), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { receiptApi } = await import('./client');
+    const result = await receiptApi.listForQuery('q-1');
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(() => result.filter((r) => !r.revoked_at)).not.toThrow();
+    expect(result).toEqual(receipts);
+  });
 });

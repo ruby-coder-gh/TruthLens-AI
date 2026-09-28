@@ -10,6 +10,9 @@ interface PdfViewerProps {
   /** Backend rects for the *target* chunk — only drawn while viewing the
    *  page they belong to (`isTargetPage`); prev/next just shows page content. */
   highlightRects: ReadonlyArray<readonly [number, number, number, number]>;
+  /** PDF-point page height PyMuPDF reported alongside `highlightRects`
+   *  (`ChunkLocation.page_height`) — needed to un-mirror them, see geometry.ts. */
+  pageHeight: number;
   isTargetPage: boolean;
   onRenderError: (message: string) => void;
 }
@@ -17,7 +20,7 @@ interface PdfViewerProps {
 /** Renders one PDF page to a devicePixelRatio-aware canvas, with the
  *  matched-passage rects overlaid as absolutely-positioned boxes (not drawn
  *  onto the canvas itself, so they stay crisp and hit-testable). */
-export function PdfViewer({ pdfDoc, pageNumber, scale, highlightRects, isTargetPage, onRenderError }: PdfViewerProps) {
+export function PdfViewer({ pdfDoc, pageNumber, scale, highlightRects, pageHeight, isTargetPage, onRenderError }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const firstBoxRef = useRef<HTMLDivElement>(null);
   const scrolledPageRef = useRef<number | null>(null);
@@ -50,7 +53,7 @@ export function PdfViewer({ pdfDoc, pageNumber, scale, highlightRects, isTargetP
         if (cancelled) return;
 
         setPageSize({ width: cssViewport.width, height: cssViewport.height });
-        setBoxes(isTargetPage ? highlightRects.map((rect) => rectToViewportBox(rect, cssViewport)) : []);
+        setBoxes(isTargetPage ? highlightRects.map((rect) => rectToViewportBox(rect, cssViewport, pageHeight)) : []);
       } catch (err) {
         if (!cancelled) onRenderError(err instanceof Error ? err.message : 'Failed to render this page.');
       }

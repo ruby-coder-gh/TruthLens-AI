@@ -24,6 +24,41 @@ const MAX_SCALE = 3;
 const DEFAULT_SCALE = 1.15;
 const ZOOM_STEP = 0.25;
 
+// BUG-17 / C1: `documentApi.locate` (api/client.ts) doesn't take the `text`
+// query param C1 adds to the locate endpoint, and this lane's edits to
+// api/client.ts are scoped to the receipts-list unwrap only (see
+// FIX-round1.md). So the "highlight one cited sentence" request is made
+// directly here, against the same endpoint and auth convention
+// (credentials: 'include'), falling back to `documentApi.locate` (whole
+// chunk) whenever there's no highlight text. Once client.ts grows first-class
+// `text` support this local call can be dropped in favor of it.
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+async function locateChunk(
+  workspaceId: string,
+  documentId: string,
+  chunkId: string,
+  highlightText: string | undefined,
+): Promise<ChunkLocation> {
+  if (!highlightText) return documentApi.locate(workspaceId, documentId, chunkId);
+
+  const url = `${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/chunks/${chunkId}/locate?text=${encodeURIComponent(highlightText)}`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    let message = `Failed to locate this passage (${res.status}).`;
+    try {
+      const body: unknown = await res.json();
+      if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') {
+        message = body.detail;
+      }
+    } catch {
+      // Non-JSON error body — keep the generic message.
+    }
+    throw new Error(message);
+  }
+  return res.json() as Promise<ChunkLocation>;
+}
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -51,11 +86,12 @@ function SourceViewerPanelContent({ target, onClose, pdfCacheRef }: SourceViewer
   const [page, setPage] = useState<number | null>(null);
   const [scale, setScale] = useState(DEFAULT_SCALE);
 
-  // Fetch the chunk's location once, on mount.
+  // Fetch the chunk's location once, on mount. Passes `highlightText` (C1) so
+  // the backend returns rects for just the cited sentence instead of the
+  // whole chunk (BUG-17).
   useEffect(() => {
     let cancelled = false;
-    documentApi
-      .locate(target.workspaceId, target.documentId, target.chunkId)
+    locateChunk(target.workspaceId, target.documentId, target.chunkId, target.highlightText)
       .then((result) => {
         if (cancelled) return;
         setLocation(result);
@@ -71,7 +107,7 @@ function SourceViewerPanelContent({ target, onClose, pdfCacheRef }: SourceViewer
     return () => {
       cancelled = true;
     };
-  }, [target.workspaceId, target.documentId, target.chunkId]);
+  }, [target.workspaceId, target.documentId, target.chunkId, target.highlightText]);
 
   // Once locate resolves to PDF mode, reuse a cached document or lazy-load
   // pdf.js and open it. The cache lookup happens here (inside the effect),
@@ -188,6 +224,7 @@ function SourceViewerPanelContent({ target, onClose, pdfCacheRef }: SourceViewer
               pageNumber={page}
               scale={scale}
               highlightRects={location.rects}
+              pageHeight={location.page_height ?? 0}
               isTargetPage={page === location.page_number}
               onRenderError={setPdfError}
             />

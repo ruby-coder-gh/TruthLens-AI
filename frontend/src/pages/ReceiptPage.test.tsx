@@ -153,6 +153,18 @@ describe('ReceiptPage', () => {
     expect(await screen.findByText(/receipt not found/i)).toBeInTheDocument();
   });
 
+  // BUG-47 regression: status screens (bogus/revoked/errored link) must not
+  // be a dead end — brand + a way back to the app.
+  it('gives every status screen a brand header and a home link (BUG-47)', async () => {
+    mockGet.mockRejectedValue(apiError('Not Found', 404));
+
+    renderPage();
+
+    expect(await screen.findByText(/receipt not found/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^truthlens home$/i })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: /go to truthlens home/i })).toHaveAttribute('href', '/');
+  });
+
   it('shows a network-error state for any other failure', async () => {
     mockGet.mockRejectedValue(new Error('boom'));
 
@@ -160,5 +172,46 @@ describe('ReceiptPage', () => {
 
     expect(await screen.findByText(/could not load this receipt/i)).toBeInTheDocument();
     expect(screen.getByText('boom')).toBeInTheDocument();
+  });
+
+  // BUG-4/BUG-9 regression: citations must stay inline with the sentence
+  // they belong to (one paragraph, not one block per segment) and no raw
+  // `[source:N]` marker text may leak into the rendered page.
+  it('renders inline citations without splitting the sentence into separate paragraphs or leaking raw markers', async () => {
+    const payload = makePayload();
+    payload.answer =
+      'Revenue grew to €412M in 2025 [source:1]. However, the prior estimate was €398M [source:2].';
+    payload.sources = [
+      ...payload.sources,
+      {
+        index: 2,
+        document_name: 'Press Release.pdf',
+        page_number: 1,
+        excerpt: 'Analysts had projected €398M for the period.',
+        content_sha256: 'def456abc123def456abc123def456abc123def456abc123def456abc12300',
+      },
+    ];
+    const view = await makeView({ payload });
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    await screen.findByText(view.payload.question);
+
+    // No raw marker text anywhere on the page.
+    expect(document.body.textContent).not.toMatch(/\[source:\d+\]/i);
+
+    // Both citations render as jump links to their source, inline — not as
+    // their own paragraph/block.
+    const link1 = screen.getByRole('link', { name: /jump to source 1/i });
+    const link2 = screen.getByRole('link', { name: /jump to source 2/i });
+    expect(link1.closest('p')).not.toBeNull();
+    expect(link1.closest('p')).toBe(link2.closest('p'));
+
+    // The sentence around each citation — including the period right after
+    // it — stays in the same paragraph (no orphan-period block).
+    const paragraph = link1.closest('p');
+    expect(paragraph?.textContent).toContain('Revenue grew to €412M in 2025');
+    expect(paragraph?.textContent).toContain('However, the prior estimate was €398M');
   });
 });

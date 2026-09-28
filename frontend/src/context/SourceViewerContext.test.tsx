@@ -139,8 +139,13 @@ describe('SourceViewerProvider + SourceViewerDrawer', () => {
 
     const boxes = await screen.findAllByTestId('source-highlight');
     expect(boxes).toHaveLength(1);
-    // convertToViewportPoint(10, 20) -> [10, 380]; (30, 40) -> [30, 360].
-    expect(boxes[0]).toHaveStyle({ left: '10px', top: '360px', width: '20px', height: '20px' });
+    // BUG-2: the backend rect [10, 20, 30, 40] is page space (top-left
+    // origin, y down) with page_height 400 — near the *top* of the page.
+    // rectToViewportBox flips it into PDF user space first (y' = 400 - y),
+    // so this mock viewport's own bottom-left -> top-left flip
+    // (convertToViewportPoint: (x, y) => [x, 400 - y]) lands it back near the
+    // top of the CSS box (top: 20px), not mirrored to the bottom.
+    expect(boxes[0]).toHaveStyle({ left: '10px', top: '20px', width: '20px', height: '20px' });
 
     expect(await screen.findByText('Page 2 / 5')).toBeInTheDocument();
   });
