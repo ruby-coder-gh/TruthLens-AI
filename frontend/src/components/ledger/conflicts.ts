@@ -62,7 +62,10 @@ function significantTokens(text: string): Set<string> {
  * public receipt with no chunk id to pre-filter on at all, not just some
  * incidental single word in common — see `isConflictRelevantToClaims`). */
 export function isAboutSameFact(claim: Pick<Claim, 'text' | 'evidence'>, sentence: string): boolean {
-  const claimTokens = significantTokens(`${claim.text} ${claim.evidence ?? ''}`);
+  // The claim's own wording only — its evidence can be a whole bullet list that
+  // happens to contain another disputed figure (QA4: the Aurora claim's
+  // press-release evidence listed "€398 million", pulling in the revenue pair).
+  const claimTokens = significantTokens(claim.text);
   let sharedWords = 0;
   for (const token of significantTokens(sentence)) {
     if (!claimTokens.has(token)) continue;

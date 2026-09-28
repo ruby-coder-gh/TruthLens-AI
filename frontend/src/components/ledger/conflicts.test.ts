@@ -127,6 +127,18 @@ describe('pairClaimConflicts', () => {
     expect(pairs.map((p) => p.contradiction.id)).toEqual(['aurora']);
   });
 
+  it('QA4: an Aurora claim whose evidence bullet list mentions €398M does not pull the revenue pair', () => {
+    const claims = [
+      claim({
+        chunk_id: 'pr-p1',
+        text: 'The press release states that Aurora is expected to commission in the third quarter of 2027.',
+        evidence: 'Highlights: Revenue in 2025 was €398 million. Installed capacity reached 1.8 GW. Aurora is expected to commission in the third quarter of 2027.',
+      }),
+    ];
+    const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, AURORA_CONTRADICTION]);
+    expect(pairs.map((p) => p.contradiction.id)).not.toContain('revenue');
+  });
+
   it('R3: a revenue answer still keeps the revenue pair (€14M)', () => {
     const claims = [claim({ chunk_id: 'ar-p1', text: 'Northwind Renewables reported revenue of €412 million for 2025.', evidence: 'Revenue in 2025 was €412 million.' })];
     const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, CEO_CONTRADICTION, EMISSIONS_CONTRADICTION, AURORA_CONTRADICTION]);
