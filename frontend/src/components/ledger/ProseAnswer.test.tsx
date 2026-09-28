@@ -42,6 +42,18 @@ describe('ProseAnswer', () => {
     expect(container.querySelector('.bg-primary-soft')).toBeInTheDocument();
   });
 
+  it('keeps the caret inside the last paragraph, not on its own line below it (R2-20)', () => {
+    const { container } = renderWithProviders(<ProseAnswer content="Writing the answer" sources={[]} streaming />);
+    const paragraphs = container.querySelectorAll('.prose-answer > p');
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0].querySelector('.bg-primary-soft')).toBeInTheDocument();
+  });
+
+  it('renders no caret once streaming stops', () => {
+    const { container } = renderWithProviders(<ProseAnswer content="Done writing." sources={[]} />);
+    expect(container.querySelector('.bg-primary-soft')).not.toBeInTheDocument();
+  });
+
   it('keeps a citation and its trailing punctuation on the same line as the sentence (BUG-4)', () => {
     const { container } = renderWithProviders(
       <ProseAnswer content="Revenue grew [source:1]. However, costs rose too." sources={sources} workspaceId="ws-1" />,

@@ -40,6 +40,25 @@ function CitationChip({ index, source, workspaceId }: { index: number; source: S
 
 const CITE_HREF_RE = /^#cite-(\d+)$/;
 
+// R2-20: the streaming caret used to be a sibling *after* the whole
+// <ReactMarkdown> block, so it always started a new line below the last
+// paragraph instead of sitting at the end of the text. Appending this
+// sentinel image markdown puts it inside the last paragraph's own inline
+// content instead — the `img` component override below swaps it for the
+// real blinking caret span.
+const CARET_HREF = '#tl-caret';
+const CARET_MARKDOWN = `![](${CARET_HREF})`;
+
+function StreamingCaret() {
+  return (
+    <motion.span
+      className="ml-0.5 inline-block h-4 w-[3px] rounded-sm bg-primary-soft align-text-bottom"
+      animate={{ opacity: [1, 0.3, 1] }}
+      transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
+    />
+  );
+}
+
 /** Turns a raw `[source:N]` marker into standard markdown link syntax
  * (`[N](#cite-N)`) so a *single* ReactMarkdown parse renders it as an inline
  * element within its sentence's own paragraph — BUG-4's root cause was the
@@ -97,18 +116,18 @@ export function ProseAnswer({ content, sources, claims, workspaceId, streaming =
   // within their own sentence instead of splitting the text into a
   // paragraph-per-fragment.
   if (claimList.length === 0) {
+    const displayContent = streaming ? `${content}${CARET_MARKDOWN}` : content;
     return (
       <div className="prose-answer text-[15px] leading-7 text-text">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: citationAwareLink(sources, workspaceId) }}>
-          {encodeCitationLinks(content)}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: citationAwareLink(sources, workspaceId),
+            img: ({ src }) => (src === CARET_HREF ? <StreamingCaret /> : null),
+          }}
+        >
+          {encodeCitationLinks(displayContent)}
         </ReactMarkdown>
-        {streaming && (
-          <motion.span
-            className="ml-0.5 inline-block h-4 w-[3px] rounded-sm bg-primary-soft align-text-bottom"
-            animate={{ opacity: [1, 0.3, 1] }}
-            transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
-          />
-        )}
       </div>
     );
   }
