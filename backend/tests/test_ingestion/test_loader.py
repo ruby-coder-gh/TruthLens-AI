@@ -132,10 +132,11 @@ async def test_load_csv_adds_a_summary_chunk_per_low_cardinality_column(tmp_path
 
     construction = next(p for p in summary_pages if p["metadata"]["summary_value"] == "construction")
     assert construction["metadata"]["summary_column"] == "status"
-    assert construction["text"] == "Pipeline — status = Construction: Aurora, Fjellheim, Solheim, Ashford, Lindholm"
+    assert construction["text"].startswith("Pipeline. ")
+    assert construction["text"].endswith("status = Construction: Aurora, Fjellheim, Solheim, Ashford, Lindholm")
 
     permitting = next(p for p in summary_pages if p["metadata"]["summary_value"] == "permitting")
-    assert permitting["text"] == "Pipeline — status = Permitting: Kestrel"
+    assert permitting["text"].endswith("status = Permitting: Kestrel")
 
 
 @pytest.mark.asyncio
@@ -169,7 +170,23 @@ async def test_load_csv_summary_title_comes_from_the_filename(tmp_path: Path):
     pages = await load(path, "text/csv")
 
     summary = next(p for p in pages if "summary_column" in p["metadata"])
-    assert summary["text"].startswith("Project Pipeline — ")
+    assert summary["text"].startswith("Project Pipeline. ")
+
+
+@pytest.mark.asyncio
+async def test_load_csv_titles_rows_and_summaries_with_the_original_filename(tmp_path: Path):
+    """QA4: stored files are named by UUID, so the summary chunk read
+    "Bea4A6B7 9718 …" and was never retrieved. The ingestion pipeline passes
+    the user-facing filename through."""
+    path = tmp_path / "bea4a6b7-9718-4c2e.csv"
+    path.write_text("name,status\n" + "\n".join(f"P{i},construction" for i in range(5)))
+    pages = await load(path, "text/csv", "Northwind Renewables — Project Pipeline.csv")
+
+    summary = next(p for p in pages if "summary_column" in p["metadata"])
+    assert summary["text"].startswith("Northwind Renewables — Project Pipeline. ")
+    row = next(p for p in pages if p["metadata"].get("row_index") == 0)
+    assert row["text"].startswith("Northwind Renewables — Project Pipeline.csv. ")
+    assert "bea4a6b7" not in summary["text"].lower()
 
 
 @pytest.mark.asyncio
@@ -183,7 +200,7 @@ async def test_load_real_demo_pipeline_csv_groups_every_construction_project():
         p for p in pages
         if p["metadata"].get("summary_column") == "status" and p["metadata"]["summary_value"] == "construction"
     )
-    names = construction["text"].split(": ", 1)[1].split(", ")
+    names = construction["text"].rsplit("\n", 1)[-1].split(": ", 1)[1].split(", ")
     assert set(names) == {"Aurora", "Fjellheim Repowering", "Solheim Solar Park", "Ashford Solar", "Lindholm Solar"}
 
 

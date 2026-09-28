@@ -24,8 +24,11 @@ _LINE_END_HYPHEN = re.compile(r"(?<=[a-z])-\n(?=[a-z])")
 _LINE_END_COMPOUND = re.compile(r"(?<=\w)-\s*\n\s*(?=[A-Z0-9])")
 
 
-async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
+async def load(path: Path, mime_type: str, display_name: str = "") -> list[dict[str, Any]]:
     """Load document from disk -> list of page/dict text segments with metadata.
+
+    `display_name` is the user-facing filename (stored files are named by UUID);
+    CSV rows and summaries are titled with it so they stay retrievable.
 
     Returns list of dicts: {"text": str, "page_number": int | None, "metadata": dict}
     """
@@ -43,7 +46,7 @@ async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
     elif mime_type == "text/markdown":
         return _load_markdown(path)
     elif mime_type == "text/csv":
-        return _load_csv(path)
+        return _load_csv(path, display_name)
     elif mime_type == "application/json":
         return _load_json(path)
     else:
@@ -155,15 +158,17 @@ _CSV_SUMMARY_MAX_DISTINCT = 8
 _CSV_SUMMARY_MIN_ROWS = 5
 
 
-def _csv_title(path: Path) -> str:
-    return path.stem.replace("-", " ").replace("_", " ").title()
+def _csv_title(name: str) -> str:
+    return Path(name).stem.replace("-", " ").replace("_", " ").title()
 
 
 def _humanize_csv_value(value: str) -> str:
     return value.replace("_", " ").replace("-", " ").strip().capitalize()
 
 
-def _csv_summary_pages(path: Path, headers: list[str], rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _csv_summary_pages(
+    path: Path, headers: list[str], rows: list[dict[str, str]], name: str = "", description: str = ""
+) -> list[dict[str, Any]]:
     """R3-4: one extra chunk per low-cardinality column (<= 8 distinct
     values), e.g. "Project Pipeline — status = Construction: Aurora, Ashford
     Solar, …". An aggregation question ("which projects are under
@@ -174,7 +179,8 @@ def _csv_summary_pages(path: Path, headers: list[str], rows: list[dict[str, str]
     if len(headers) < 2:
         return []
     id_col = headers[0]
-    title = _csv_title(path)
+    title = _csv_title(name or path.name)
+    lead = f"{title}. {description}\n" if description else f"{title}.\n"
     pages: list[dict[str, Any]] = []
     for col in headers[1:]:
         groups: dict[str, list[str]] = {}
@@ -188,14 +194,14 @@ def _csv_summary_pages(path: Path, headers: list[str], rows: list[dict[str, str]
             continue
         for value, names in groups.items():
             pages.append({
-                "text": f"{title} — {col} = {_humanize_csv_value(value)}: {', '.join(names)}",
+                "text": f"{lead}{col} = {_humanize_csv_value(value)}: {', '.join(names)}",
                 "page_number": None,
                 "metadata": {"source": path.name, "summary_column": col, "summary_value": value},
             })
     return pages
 
 
-def _load_csv(path: Path) -> list[dict[str, Any]]:
+def _load_csv(path: Path, display_name: str = "") -> list[dict[str, Any]]:
     # C7: one page per data row (chunker below turns each page into its own
     # chunk), header repeated as "Column: value; …" text on every row so a
     # single row stays retrievable on its own instead of being buried inside
@@ -222,7 +228,8 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
     headers = reader.fieldnames or []
     if description is None:
         description = f"Table with columns: {', '.join(headers)}." if headers else ""
-    prefix = f"{path.name}. {description}\n" if description else f"{path.name}.\n"
+    name = display_name or path.name
+    prefix = f"{name}. {description}\n" if description else f"{name}.\n"
 
     rows: list[dict[str, str]] = []
     for i, row in enumerate(reader):
@@ -237,7 +244,7 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
         rows.append(row)
 
     if len(rows) >= _CSV_SUMMARY_MIN_ROWS:
-        pages.extend(_csv_summary_pages(path, headers, rows))
+        pages.extend(_csv_summary_pages(path, headers, rows, name, description))
 
     logger.info("csv_loaded", rows=len(rows), path=str(path))
     return pages
