@@ -1,0 +1,1458 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TruthLens chat, direction C: Claim Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ════════════════════════════════════════════════════════════════════════
+   CLAIM LEDGER — direction C
+   Truth-first: prose streams in, then settles into a ledger of claims, each
+   row stamped with a verdict and set beside the exact evidence sentence.
+
+   TOKENS map 1:1 onto frontend/src/index.css names for the Tailwind v4 port:
+   --bg→color-bg · --surface→color-solid · --ink→color-text · --ink-2→text-muted
+   --ink-3→text-dim · --primary→color-primary · --v-*→green/orange/red inks.
+
+   CONTRAST (WCAG, measured by hand from sRGB luminance)
+   light  ink/bg 14.9 · ink-2/bg 6.8 · ink-3/bg 4.9 · ink-3/surface 5.4
+          primary/surface 7.3 · white/primary 7.3 · supported 7.0 · partial 6.3
+          unsupported 6.4 · conflict 6.6 · rule-strong/surface 3.5 (UI 3:1)
+   dark   ink/surface 14.1 · ink-2 9.2 · ink-3 6.5 · primary 8.0 · on-primary/primary 8.6
+          supported 9.4 · partial 10.2 · unsupported 8.5 · conflict 7.5 · rule-strong 4.0
+   paper  (document pages stay paper in both themes) ink 12.4+ · ticks ≥4.8
+   SPACING 4 · 8 · 12 · 16 · 24 · 32 · 48   RADIUS stamp 3 · control 8 · panel 12
+   TYPE    12/16 meta · 13/18 small · 14/22 cell · 15/24 body · 17/29 answer
+           20/28 question · 30/36 display · Condensed 600 for stamps + heads
+   ═══════════════════════════════════════════════════════════════════════ */
+:root{
+  --font-sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-cond:'IBM Plex Sans Condensed','IBM Plex Sans',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-stamp:3px;--r-ctl:8px;--r-panel:12px;
+  --dur-fast:150ms;--dur:220ms;--ease-out:cubic-bezier(.2,.8,.2,1);
+  --proto-h:44px;
+  --paper-ink:#15202B;--paper-sub:#56606B;
+  --paper-supported:#16663F;--paper-partial:#8A5300;--paper-conflict:#B42318;
+}
+:root,[data-theme="light"]{
+  color-scheme:light;
+  --bg:#F2F4F1;--surface:#FFFFFF;--surface-2:#F7F8F6;--surface-sunk:#E7EBE6;--raised:#FFFFFF;
+  --hover:rgba(21,32,43,.05);--rule:#D6DDE2;--rule-strong:#7D8A96;
+  --ink:#15202B;--ink-2:#4A5663;--ink-3:#5F6B78;
+  --primary:#2350B5;--primary-hover:#1C4299;--primary-tint:rgba(35,80,181,.09);--on-primary:#FFFFFF;
+  --v-supported:#16663F;--v-partial:#8A5300;--v-unsupported:#56606B;--v-contradicted:#B42318;
+  --conflict:#B42318;--conflict-tint:rgba(180,35,24,.07);
+  --mark:#FFF0B3;--focus:#2350B5;--focus-halo:#FFFFFF;
+  --paper:#FFFFFF;--paper-hl:#FFE58A;--paper-dim:#DCE2DE;
+  --skeleton:#E3E8E4;--skeleton-hi:#EFF2EE;--scrim:rgba(13,20,25,.44);
+  --e1:0 1px 2px rgba(21,32,43,.06),0 4px 12px -6px rgba(21,32,43,.12);
+  --e2:0 2px 4px rgba(21,32,43,.06),0 12px 32px -12px rgba(21,32,43,.22);
+  --e3:0 8px 16px -8px rgba(21,32,43,.16),0 28px 64px -24px rgba(21,32,43,.32);
+}
+[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E1519;--surface:#141D22;--surface-2:#1A262D;--surface-sunk:#0A1013;--raised:#22303A;
+  --hover:rgba(228,234,236,.06);--rule:#26333B;--rule-strong:#6B7C88;
+  --ink:#E4EAEC;--ink-2:#B4C0C6;--ink-3:#93A2AA;
+  --primary:#8FB0FF;--primary-hover:#AFC6FF;--primary-tint:rgba(143,176,255,.12);--on-primary:#0E1519;
+  --v-supported:#6FD3A0;--v-partial:#F2C063;--v-unsupported:#AEB8C2;--v-contradicted:#FF8A7A;
+  --conflict:#FF8A7A;--conflict-tint:rgba(255,138,122,.09);
+  --mark:rgba(242,192,99,.24);--focus:#8FB0FF;--focus-halo:#0E1519;
+  --paper:#DDE3E0;--paper-hl:#F7D867;--paper-dim:#BAC4C0;
+  --skeleton:#1C272D;--skeleton-hi:#24323A;--scrim:rgba(0,0,0,.56);
+  --e1:0 1px 2px rgba(0,0,0,.36),0 6px 16px -8px rgba(0,0,0,.6);
+  --e2:0 2px 4px rgba(0,0,0,.4),0 14px 36px -14px rgba(0,0,0,.66);
+  --e3:0 8px 16px -8px rgba(0,0,0,.5),0 30px 64px -24px rgba(0,0,0,.75);
+}
+
+/* ─── Base ─── */
+[hidden]{display:none!important}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:400 15px/1.6 var(--font-sans);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums lining-nums;overflow:hidden}
+body.frame{background:var(--surface-sunk)}
+h1,h2,h3,p,ol,ul,dl,dd,blockquote{margin:0}
+ol,ul{padding:0;list-style:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+button:disabled{cursor:not-allowed}
+a{color:inherit}
+table{border-collapse:collapse}
+.i{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;box-shadow:0 0 0 2px var(--focus-halo)}
+kbd{font:500 12px/1 var(--font-sans);padding:3px 5px;border:1px solid var(--rule);border-radius:4px;color:var(--ink-3)}
+.skip{position:absolute;left:8px;top:-60px;z-index:90;padding:10px 14px;border-radius:8px;background:var(--primary);color:var(--on-primary);font-weight:500;text-decoration:none}
+.skip:focus{top:8px}
+
+/* ─── Prototype strip (not product UI) ─── */
+.proto{position:fixed;inset:0 0 auto 0;height:var(--proto-h);z-index:100;display:flex;align-items:center;gap:14px;padding:0 14px;background:#1B2024;color:#EEF2F3;font:500 13px/1 var(--font-sans);overflow-x:auto;white-space:nowrap;border-bottom:1px solid #2E363C}
+.proto-name{font-weight:600}
+.proto-lbl{color:#AEB9BF;font-weight:400}
+.proto-group{display:flex;gap:2px;padding:2px;border:1px solid #3A444B;border-radius:8px}
+.proto-btn{height:30px;padding:0 10px;border-radius:6px;color:#C9D2D7}
+.proto-btn:hover{color:#FFFFFF;background:#2A3238}
+.proto-btn[aria-pressed="true"]{background:#EEF2F3;color:#1B2024}
+.proto-btn:focus-visible{outline-color:#8FB0FF;box-shadow:none}
+
+/* ─── Shell ─── */
+.stage{container:app/inline-size;position:fixed;top:var(--proto-h);left:0;right:0;bottom:0;background:var(--bg);overflow:hidden}
+.stage.is-mobile{position:relative;inset:auto;width:375px;height:min(812px,calc(100dvh - var(--proto-h) - 32px));margin:calc(var(--proto-h) + 16px) auto 0;border:1px solid var(--rule-strong);border-radius:28px;box-shadow:var(--e3)}
+.app{--sidebar-w:248px;position:relative;height:100%;display:grid;grid-template-columns:var(--sidebar-w) minmax(0,1fr);grid-template-rows:minmax(0,1fr);overflow:hidden}
+.app.is-collapsed{--sidebar-w:64px}
+.app.viewer-open{--sidebar-w:64px;grid-template-columns:var(--sidebar-w) minmax(0,1fr) min(480px,40%)}
+
+/* ─── Sidebar ─── */
+.sidebar{container:side/inline-size;grid-column:1;grid-row:1;display:flex;flex-direction:column;gap:2px;min-height:0;padding:10px 12px 12px;background:var(--surface);border-right:1px solid var(--rule);overflow:hidden auto}
+.brand{display:flex;align-items:center;gap:10px;min-height:44px;padding-left:6px;margin-bottom:6px}
+.brand-mark{width:24px;height:24px;color:var(--primary);stroke-width:2}
+.brand-name{font-weight:600;font-size:17px;letter-spacing:-.01em}
+.collapse-btn{margin-left:auto}
+.new-chat,.nav-item{display:flex;align-items:center;gap:12px;width:100%;min-height:40px;padding:0 12px;border-radius:var(--r-ctl);font-size:14px;font-weight:500;text-decoration:none}
+.new-chat{border:1px solid var(--rule-strong);margin-bottom:10px;color:var(--ink)}
+.new-chat:hover{background:var(--hover)}
+.nav-item{color:var(--ink-2)}
+.nav-item:hover{background:var(--hover);color:var(--ink)}
+.nav-item[aria-current="page"]{background:var(--primary-tint);color:var(--ink)}
+.nav-item[aria-current="page"] .i{color:var(--primary)}
+.recent{margin-top:18px}
+.recent-h{padding:0 12px 6px;font-size:12px;line-height:16px;color:var(--ink-3)}
+.recent-item{display:block;width:100%;padding:8px 12px;border-radius:var(--r-ctl);font-size:14px;line-height:20px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-item:hover{background:var(--hover);color:var(--ink)}
+.recent-item[aria-current="true"]{background:var(--hover);color:var(--ink);font-weight:500}
+.app[data-state="1"] .recent-now{display:none}
+.user{margin-top:auto;display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px solid var(--rule)}
+.avatar{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--primary-tint);color:var(--primary);font:600 12px/1 var(--font-sans)}
+.user-meta{display:flex;flex-direction:column;min-width:0;font-size:14px;line-height:18px;font-weight:500}
+.user-role{font-size:12px;line-height:16px;color:var(--ink-3);font-weight:400}
+.user .icon-btn{margin-left:auto}
+@container side (max-width:120px){
+  .brand{flex-direction:column;padding:0;gap:6px}
+  .collapse-btn{margin:0}
+  .new-chat,.nav-item{justify-content:center;padding:0}
+  .nav-label,.brand-name{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .recent,.user-meta,.user .icon-btn{display:none}
+  .user{justify-content:center}
+}
+
+/* ─── Main + topbar ─── */
+.main{grid-column:2;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.topbar{flex:none;display:flex;align-items:center;gap:8px;height:56px;padding:0 12px 0 16px;border-bottom:1px solid var(--rule)}
+.ws{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 10px 0 6px;border-radius:var(--r-ctl);min-width:0}
+.ws:hover{background:var(--hover)}
+.ws-mark{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;flex:none;background:var(--ink);color:var(--bg);font:600 12px/1 var(--font-cond);letter-spacing:.03em}
+.ws-text{display:flex;align-items:baseline;gap:10px;min-width:0}
+.ws-name{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ws-docs{font-size:13px;color:var(--ink-3);white-space:nowrap}
+.ws-chev{width:16px;height:16px;color:var(--ink-3)}
+.topbar-end{margin-left:auto;display:flex;align-items:center;gap:6px}
+.search-btn{display:flex;align-items:center;gap:8px;height:36px;min-width:220px;padding:0 8px 0 12px;border:1px solid var(--rule);border-radius:var(--r-ctl);color:var(--ink-3);font-size:14px}
+.search-btn:hover{border-color:var(--rule-strong);color:var(--ink-2)}
+.search-btn kbd{margin-left:auto}
+.icon-btn{position:relative;display:inline-grid;place-items:center;width:40px;height:40px;border-radius:var(--r-ctl);color:var(--ink-2);flex:none}
+.icon-btn::before{content:"";position:absolute;inset:-2px}
+.icon-btn:hover{background:var(--hover);color:var(--ink)}
+.icon-btn[aria-pressed="true"]{color:var(--primary);background:var(--primary-tint)}
+.only-mobile{display:none}
+.scroll{flex:1;min-height:0;overflow-y:auto;scroll-behavior:smooth}
+.scroll:focus{outline:none}
+.column{container:col/inline-size;max-width:880px;margin:0 auto;padding:32px 24px 40px}
+
+/* ─── Empty state ─── */
+.app:not([data-state="1"]) .empty{display:none}
+.app[data-state="1"] .thread{display:none}
+.empty{padding-top:clamp(8px,6vh,64px)}
+.empty-h{font:600 30px/36px var(--font-sans);letter-spacing:-.015em}
+.empty-sub{margin-top:12px;font-size:16px;line-height:26px;color:var(--ink-2);max-width:62ch}
+.docs-strip{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.doc-chip{display:inline-flex;align-items:center;gap:8px;min-height:30px;padding:0 10px 0 4px;border:1px solid var(--rule);border-radius:6px;font-size:13px;color:var(--ink-2);background:var(--surface)}
+.doc-type{min-width:34px;text-align:center;font:600 11px/1 var(--font-cond);letter-spacing:.04em;padding:4px 5px;border-radius:4px;background:var(--hover);color:var(--ink-2)}
+.suggest-h{margin-top:40px;font:500 13px/18px var(--font-sans);color:var(--ink-3)}
+.suggest{margin-top:8px;display:grid;grid-template-columns:1fr 1fr;column-gap:24px;border-bottom:1px solid var(--rule)}
+.suggest-item{display:flex;flex-direction:column;gap:4px;width:100%;height:100%;min-height:76px;padding:14px 12px;border-top:1px solid var(--rule)}
+.suggest-item:hover{background:var(--hover)}
+.suggest-q{font-weight:500;font-size:15px;line-height:22px}
+.suggest-src{display:flex;align-items:center;gap:6px;font-size:13px;line-height:18px;color:var(--ink-3)}
+.suggest-src .i{width:14px;height:14px}
+
+/* ─── Question ─── */
+.ask{display:flex;gap:12px;align-items:flex-start}
+.ask-meta{font-size:13px;line-height:18px;color:var(--ink-3)}
+.ask-q{font:600 20px/28px var(--font-sans);letter-spacing:-.01em;margin-top:2px}
+.answer{margin-top:24px}
+
+/* ─── Audit trail ─── */
+.trail{border:1px solid var(--rule);border-radius:10px;background:var(--surface)}
+.trail-summary{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 12px 0 14px;border-radius:10px;font-size:14px}
+.trail-summary:hover{background:var(--hover)}
+.trail-icon{color:var(--v-supported)}
+.answer:is([data-phase="live"],[data-phase="stopped"]) .trail-icon{color:var(--primary)}
+.trail-title{font-weight:500}
+.trail-meta{color:var(--ink-3);font-size:13px}
+.trail-chev{margin-left:auto;color:var(--ink-3);transition:transform var(--dur) var(--ease-out)}
+.trail.is-open .trail-chev{transform:rotate(180deg)}
+.trail-body-wrap,.row-detail{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur) var(--ease-out)}
+.trail.is-open .trail-body-wrap,.row.is-open .row-detail{grid-template-rows:1fr}
+.trail-body,.detail-inner{min-height:0;overflow:hidden;visibility:hidden;transition:visibility 0s linear var(--dur)}
+.trail.is-open .trail-body,.row.is-open .detail-inner{visibility:visible;transition-delay:0s}
+.steps{padding:2px 16px 8px 14px}
+.step{position:relative;display:grid;grid-template-columns:20px minmax(0,1fr) auto;column-gap:10px;padding:7px 0}
+.step::before{content:"";position:absolute;left:9.25px;top:27px;bottom:-11px;border-left:1.5px dashed var(--rule-strong)}
+.step:not(:has(~ .step:not([hidden])))::before{display:none}
+.step[data-status="done"]::before{border-left-style:solid;border-color:var(--ink-3)}
+.node{grid-column:1;justify-self:center;position:relative;width:12px;height:12px;margin-top:6px;border-radius:50%;border:1.5px solid var(--rule-strong);background:var(--surface)}
+.step[data-status="done"] .node{background:var(--ink-2);border-color:var(--ink-2)}
+.step[data-status="active"] .node{border-color:var(--primary);box-shadow:inset 0 0 0 2px var(--surface),inset 0 0 0 6px var(--primary)}
+.step[data-status="active"] .node::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1.5px solid var(--primary);animation:ring 1.4s var(--ease-out) infinite}
+.step[data-status="stopped"] .node{border-style:dashed;border-color:var(--ink-3)}
+.step-main{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;font-size:14px;line-height:24px;min-width:0}
+.step-label{font-weight:500}
+.step[data-status="pending"] .step-label{color:var(--ink-3);font-weight:400}
+.step-detail{font-size:13px;color:var(--ink-2)}
+.step-time{font-size:13px;line-height:24px;color:var(--ink-3);text-align:right;min-width:40px}
+.trail-foot{padding:0 16px 14px 44px;font-size:13px;line-height:18px;color:var(--ink-3)}
+
+/* ─── Answer head: view switch + tally ─── */
+.answer:is([data-phase="live"],[data-phase="stopped"]) :is(.answer-head,.key,.totals,.actions,.receipt){display:none}
+.answer-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-top:20px}
+.seg{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--rule);border-radius:10px;background:var(--surface-2)}
+.seg-btn{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:0 12px;border-radius:7px;font-size:14px;font-weight:500;color:var(--ink-2)}
+.seg-btn:hover{color:var(--ink)}
+.seg-btn[aria-pressed="true"]{background:var(--raised);color:var(--ink);box-shadow:var(--e1),inset 0 0 0 1px var(--rule)}
+.seg-btn .i{width:16px;height:16px}
+.tally{display:flex;flex-wrap:wrap;gap:2px}
+.tally-item{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;border-radius:6px;font-size:14px;font-weight:500;color:var(--c)}
+.tally-item:hover{background:var(--hover)}
+.tally-item .i{width:16px;height:16px;stroke-width:2}
+
+/* ─── Prose ─── */
+.answer[data-view="ledger"] .prose-wrap,.answer[data-view="prose"] :is(.ledger-wrap,.key){display:none}
+.prose-wrap{margin-top:18px}
+.prose{font-size:17px;line-height:29px;max-width:66ch}
+.prose strong{font-weight:600}
+.cite{display:inline-block;margin:0 1px;padding:0 5px;border-radius:4px;font:500 12px/18px var(--font-sans);vertical-align:2px;color:var(--primary);background:var(--primary-tint);text-decoration:none}
+.cite:hover{background:var(--primary);color:var(--on-primary)}
+.w.is-hidden{display:none}
+.c.is-checking{text-decoration:underline dotted 2px var(--ink-3);text-underline-offset:6px}
+.c[data-mark]{text-decoration:underline solid 2px var(--mc);text-underline-offset:6px;text-decoration-skip-ink:none}
+.c[data-mark="supported"]{--mc:var(--v-supported);--glyph:"\2713"}
+.c[data-mark="partial"]{--mc:var(--v-partial);--glyph:"~"}
+.c[data-mark]::after{content:var(--glyph);display:inline-block;margin-left:4px;font:600 14px/1 var(--font-sans);color:var(--mc);animation:pop 200ms var(--ease-out) both}
+.caret{display:inline-block;width:8px;height:18px;margin-left:3px;vertical-align:-3px;background:var(--primary);animation:blink 1s steps(1) infinite}
+.skel{display:grid;gap:12px;max-width:66ch;padding:6px 0}
+.skel i,.ex-skel i{display:block;height:12px;border-radius:4px;background:linear-gradient(90deg,var(--skeleton) 25%,var(--skeleton-hi) 50%,var(--skeleton) 75%);background-size:200% 100%;animation:shimmer 1.4s linear infinite}
+
+/* ─── Ledger ─── */
+.ledger-wrap{position:relative;margin-top:16px;padding:0 8px 0 32px;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-panel);overflow:hidden}
+.ledger-head,.row-main{display:grid;grid-template-columns:32px 116px minmax(0,1fr) minmax(0,1.15fr) 40px;grid-template-areas:"rid verdict claim evidence toggle";column-gap:16px}
+.ledger-head{padding:12px 0 10px;border-bottom:1px solid var(--rule-strong);font:500 13px/18px var(--font-cond);color:var(--ink-3);letter-spacing:.01em}
+.row{position:relative;isolation:isolate;border-bottom:1px solid var(--rule)}
+.row:last-child{border-bottom:0}
+.row::before{content:"";position:absolute;z-index:-1;inset:0 -8px 0 -32px;transition:background var(--dur-fast)}
+.row:hover::before{background:var(--hover)}
+.row.is-linked::before{background:var(--conflict-tint)}
+.row.is-flash::before{animation:flash-row 1.4s var(--ease-out)}
+.row:focus{outline:none}
+.row:focus-visible::before{box-shadow:inset 0 0 0 2px var(--focus)}
+.row[data-v="supported"]{--c:var(--v-supported)}
+.row[data-v="partial"]{--c:var(--v-partial)}
+.row-main{padding:16px 0;align-items:start;cursor:pointer}
+.row--d .row-main{cursor:default}
+.rid{grid-area:rid;font:500 13px/24px var(--font-cond);color:var(--ink-3);letter-spacing:.02em}
+.cell-verdict{grid-area:verdict;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.score{display:flex;align-items:center;gap:8px;font-size:13px;line-height:16px;color:var(--ink-2)}
+.score-bar{width:40px;height:3px;border-radius:2px;background:var(--rule);overflow:hidden}
+.score-bar i{display:block;height:100%;width:calc(var(--v) * 100%);background:var(--c)}
+.cell-claim{grid-area:claim;font-size:15px;line-height:24px;min-width:0}
+.cell-evidence{grid-area:evidence;display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.ev{padding-left:12px;border-left:2px solid var(--rule-strong);font-size:14px;line-height:22px;margin-top:1px}
+.ev::before{content:"\201C"}
+.ev::after{content:"\201D"}
+.src{display:inline-flex;align-items:center;gap:6px;min-height:28px;margin-left:6px;padding:0 6px;border-radius:6px;font-size:13px;font-weight:500;color:var(--primary);text-align:left}
+.src:hover{background:var(--primary-tint)}
+.src .i{width:15px;height:15px}
+.row-toggle{grid-area:toggle;justify-self:end;margin-top:-8px}
+.row-toggle .i{transition:transform var(--dur) var(--ease-out)}
+.row.is-open .row-toggle .i{transform:rotate(180deg)}
+.fig{font-weight:600}
+.fig--conflict{text-decoration:underline 2px var(--conflict);text-underline-offset:4px}
+.xref{display:inline-flex;align-items:center;gap:4px;margin-left:4px;padding:0 6px;min-height:24px;border-radius:4px;font-size:13px;font-weight:500;line-height:24px;color:var(--conflict);background:var(--conflict-tint);text-decoration:none;vertical-align:1px}
+.xref:hover{background:var(--conflict);color:var(--surface)}
+.xref .i{width:14px;height:14px;stroke-width:2}
+
+/* Stamps — the verdict motif. Double rule, condensed caps, icon + word. */
+.stamp{--c:var(--v-supported);display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px 0 6px;border:1.5px solid var(--c);border-radius:var(--r-stamp);color:var(--c);background:color-mix(in srgb,var(--c) 8%,var(--surface));box-shadow:inset 0 0 0 1.5px var(--surface),inset 0 0 0 2.5px color-mix(in srgb,var(--c) 45%,transparent);font:600 12px/1 var(--font-cond);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.stamp .i{width:14px;height:14px;stroke-width:2.25}
+.v-supported{--c:var(--v-supported)}
+.v-partial{--c:var(--v-partial)}
+.v-unsupported{--c:var(--v-unsupported)}
+.v-contradicted{--c:var(--v-contradicted)}
+.v-conflict{--c:var(--conflict)}
+
+/* Row detail */
+.detail-body{display:grid;gap:12px;margin-left:180px;padding:0 48px 20px 0}
+.why{font-size:14px;line-height:22px;color:var(--ink-2);max-width:68ch}
+.why strong{color:var(--ink);font-weight:600}
+.why--conflict{display:flex;gap:8px;color:var(--conflict)}
+.why--conflict .i{width:16px;height:16px;margin-top:3px;stroke-width:2}
+.context{padding:10px 14px;border-left:2px solid var(--rule-strong);border-radius:0 8px 8px 0;background:var(--surface-2);font-size:14px;line-height:22px;color:var(--ink-2)}
+.context mark,.align mark{background:var(--mark);color:var(--ink);padding:1px 2px;border-radius:2px}
+.align{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px 12px;padding:12px 14px;border:1px solid var(--rule);border-radius:8px;background:var(--surface-2);font-size:14px;line-height:22px}
+.align dt{font:500 13px/22px var(--font-cond);color:var(--ink-3)}
+.match{text-decoration:underline 1.5px var(--v-supported);text-underline-offset:4px}
+.align mark.gap{text-decoration:underline wavy 1.5px var(--v-partial);text-underline-offset:4px}
+.gap-note{margin:0 2px;font:500 12px/1 var(--font-cond);color:var(--v-partial);letter-spacing:.02em}
+.detail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.detail-meta{font-size:13px;color:var(--ink-3)}
+
+/* Discrepancy row */
+.d-title{font-weight:600}
+.d-note{margin-top:2px;font-size:14px;line-height:22px;color:var(--ink-2)}
+.d-btn{margin-top:10px}
+.d-figs{width:100%;max-width:360px;font-size:14px;line-height:22px}
+.d-figs th{font-weight:400;text-align:left;color:var(--ink-2);padding:2px 12px 2px 0}
+.d-figs td{text-align:right;font-weight:600;padding:2px 0;white-space:nowrap}
+.d-diff th,.d-diff td{border-top:1px solid var(--ink-3);padding-top:6px;color:var(--conflict);font-weight:600}
+
+/* The bracket that links conflicting rows */
+.bracket{position:absolute;left:12px;width:10px;border:2px solid var(--conflict);border-right:0;border-radius:4px 0 0 4px;pointer-events:none;transform-origin:top;z-index:1}
+.knot{position:absolute;left:2px;z-index:2;width:22px;height:22px;margin-top:-11px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:1.5px solid var(--conflict);color:var(--conflict)}
+.knot::before{content:"";position:absolute;inset:-11px}
+.knot .i{width:14px;height:14px;stroke-width:2.25}
+.knot:hover,.bracket.is-hot + .knot{background:var(--conflict);color:var(--surface)}
+
+/* Settle: prose → ledger. The one orchestrated moment. */
+.prose-wrap.is-leaving{animation:fade-out 160ms ease-in forwards}
+.ledger-wrap.is-settling .ledger-head{animation:fade-in 200ms ease-out both}
+.ledger-wrap.is-settling .row{animation:row-in 300ms var(--ease-out) both;animation-delay:calc(var(--i) * 80ms)}
+.ledger-wrap.is-settling .stamp{animation:press 280ms var(--ease-out) both;animation-delay:calc(var(--i) * 80ms + 160ms)}
+.ledger-wrap.is-settling .bracket{animation:draw 320ms var(--ease-out) both 700ms}
+.ledger-wrap.is-settling .knot{animation:fade-in 200ms ease-out both 960ms}
+
+/* Verdict key */
+.key{margin-top:8px}
+.key summary{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 8px;border-radius:6px;font-size:13px;font-weight:500;color:var(--ink-2);cursor:pointer;list-style:none}
+.key summary::-webkit-details-marker{display:none}
+.key summary:hover{background:var(--hover);color:var(--ink)}
+.key summary .i{width:16px;height:16px;transition:transform var(--dur)}
+.key[open] summary .i{transform:rotate(180deg)}
+.key-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 24px;padding:8px 8px 4px}
+.key-list div{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.key-list dd{font-size:13px;line-height:18px;color:var(--ink-2)}
+
+/* ─── Totals: single rule above, double rule below ─── */
+.totals{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px 32px;margin-top:16px;padding:14px 4px 12px;border-top:1px solid var(--ink-3);border-bottom:3px double var(--ink-3)}
+.totals-h{font-weight:600;font-size:15px;line-height:22px}
+.totals-sub{font-size:13px;line-height:18px;color:var(--ink-3);max-width:34ch}
+.trust{display:flex;align-items:flex-end;gap:24px}
+.trust > div{display:flex;flex-direction:column;gap:2px;min-width:64px}
+.trust dt{font:500 12px/16px var(--font-cond);color:var(--ink-3);letter-spacing:.02em}
+.trust dd{font-size:17px;line-height:22px;font-weight:500}
+.meter{display:block;height:2px;margin-top:4px;background:var(--rule)}
+.meter i{display:block;height:100%;width:calc(var(--v) * 1%);background:var(--ink-2)}
+.trust-total dd{font:600 32px/34px var(--font-cond);letter-spacing:-.01em}
+.trust-total .of{font:500 15px var(--font-sans);color:var(--ink-3);margin-left:2px}
+
+/* ─── Exhibits ─── */
+.exhibits{margin-top:32px}
+.ex-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding:0 8px 8px;border-bottom:1px solid var(--rule-strong)}
+.ex-h{font:600 15px/22px var(--font-sans)}
+.ex-sub{font-size:13px;line-height:18px;color:var(--ink-3)}
+.ex-relh{margin-left:auto;font:500 12px/16px var(--font-cond);color:var(--ink-3)}
+.ex{display:grid;grid-template-columns:28px minmax(0,1fr) 64px 170px 84px;grid-template-areas:"n title page flag rel";align-items:center;column-gap:12px;width:100%;min-height:48px;padding:6px 8px;border-bottom:1px solid var(--rule);font-size:14px}
+.ex:hover{background:var(--hover)}
+.ex[aria-current="true"]{background:var(--primary-tint);box-shadow:inset 3px 0 0 var(--primary)}
+.ex-n{grid-area:n;font:500 13px/1 var(--font-cond);color:var(--ink-3)}
+.ex-title{grid-area:title;font-weight:500;line-height:20px}
+.ex-meta{display:contents}
+.ex-page{grid-area:page;font-size:13px;color:var(--ink-2)}
+.ex-flag{grid-area:flag;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--conflict)}
+.ex-flag .i{width:14px;height:14px;stroke-width:2}
+.ex-flag--quiet{color:var(--ink-3);font-weight:400}
+.ex-rel{grid-area:rel;display:flex;align-items:center;justify-content:flex-end;gap:10px;font-weight:500}
+.ex-rel-bar{width:40px;height:3px;border-radius:2px;background:var(--rule);overflow:hidden}
+.ex-rel-bar i{display:block;height:100%;width:calc(var(--v) * 1%);background:var(--ink-2)}
+.ex.is-arriving{animation:row-in 240ms var(--ease-out) both;animation-delay:calc(var(--i) * 60ms)}
+.exhibits[data-loading="true"] .ex-list,.exhibits:not([data-loading="true"]) .ex-skel{display:none}
+.ex-skel{display:grid}
+.ex-skel div{display:grid;grid-template-columns:28px 1fr 84px;gap:12px;align-items:center;min-height:48px;padding:0 8px;border-bottom:1px solid var(--rule)}
+
+/* ─── Actions + receipt ─── */
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:24px}
+.actions-sep{width:1px;height:24px;background:var(--rule);margin:0 4px}
+.model{margin-left:auto;font-size:13px;color:var(--ink-3)}
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 14px;border-radius:var(--r-ctl);font-size:14px;font-weight:500;white-space:nowrap;transition:background var(--dur-fast),color var(--dur-fast),border-color var(--dur-fast)}
+.btn .i{width:17px;height:17px}
+.btn--primary{background:var(--primary);color:var(--on-primary)}
+.btn--primary:hover{background:var(--primary-hover)}
+.btn--outline{border:1px solid var(--rule-strong);color:var(--ink)}
+.btn--outline:hover{background:var(--hover)}
+.btn--ghost{color:var(--ink-2)}
+.btn--ghost:hover{background:var(--hover);color:var(--ink)}
+.btn--sm{min-height:32px;padding:0 10px;font-size:13px}
+.btn--seal{border:1.5px solid var(--primary);color:var(--primary);font-weight:600}
+.btn--seal:hover{background:var(--primary-tint)}
+.btn--seal.is-sealed{background:var(--primary);color:var(--on-primary)}
+.btn:disabled{opacity:.55}
+.btn[aria-busy="true"] .i{animation:spin .9s linear infinite}
+.receipt{display:flex;align-items:center;gap:16px;margin-top:16px;padding:14px 16px;border:1px solid var(--rule);border-radius:10px;background:var(--surface)}
+.seal-mark{width:64px;height:64px;flex:none;color:var(--primary);animation:press 320ms var(--ease-out) both}
+.receipt-title{font-weight:600;font-size:15px;line-height:22px}
+.receipt-sub{font-size:13px;line-height:18px;color:var(--ink-2)}
+.receipt-hash{margin-top:4px;font:400 12.5px/18px var(--font-mono);color:var(--ink-2);word-break:break-all}
+.receipt .btn{margin-left:auto}
+
+/* ─── Composer ─── */
+.composer-wrap{flex:none;padding:8px 24px 16px}
+.composer{max-width:832px;margin:0 auto;border:1px solid var(--rule-strong);border-radius:14px;background:var(--surface);box-shadow:var(--e1);transition:border-color var(--dur-fast),box-shadow var(--dur-fast)}
+.composer:focus-within{border-color:var(--primary);box-shadow:var(--e1),0 0 0 3px var(--primary-tint)}
+.composer textarea{display:block;width:100%;min-height:52px;max-height:160px;padding:14px 16px 4px;border:0;background:none;resize:none;font:400 15px/24px var(--font-sans);color:var(--ink)}
+.composer textarea:focus-visible{outline:none;box-shadow:none}
+.composer textarea::placeholder{color:var(--ink-3)}
+.composer-bar{display:flex;align-items:center;gap:8px;padding:4px 8px 8px 8px}
+.scope{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 8px;border-radius:6px;font-size:13px;font-weight:500;color:var(--ink-2)}
+.scope:hover{background:var(--hover);color:var(--ink)}
+.scope .i{width:15px;height:15px}
+.composer-hint{margin-left:auto;font-size:12px;color:var(--ink-3)}
+.send{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--primary);color:var(--on-primary);flex:none}
+.send:hover{background:var(--primary-hover)}
+.send:disabled{background:var(--hover);color:var(--ink-3)}
+.composer.is-busy .send{background:var(--ink);color:var(--bg)}
+
+/* ─── Exhibit viewer ─── */
+.viewer{grid-column:3;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--surface);border-left:1px solid var(--rule)}
+.viewer-head{display:flex;align-items:flex-start;gap:12px;padding:14px 12px 12px 20px;border-bottom:1px solid var(--rule)}
+.viewer-kicker{font-size:13px;line-height:18px;color:var(--ink-3)}
+.viewer-title{font:600 18px/24px var(--font-sans)}
+.viewer-title:focus{outline:none}
+.viewer-title:focus-visible{outline:2px solid var(--focus);outline-offset:4px}
+.viewer-full{margin-top:2px;font-size:13px;line-height:18px;color:var(--ink-2)}
+.viewer-head .icon-btn{margin-left:auto}
+.viewer-bar{display:flex;align-items:center;gap:12px;padding:6px 12px 6px 14px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--ink-2)}
+.pager{display:flex;align-items:center}
+.pager-label{padding:0 4px}
+.pager .icon-btn:disabled{opacity:.4;background:none}
+.viewer-bar .btn{margin-left:auto}
+.viewer-body{flex:1;min-height:0;overflow-y:auto;padding:24px 20px 32px;background:var(--surface-sunk)}
+.page{position:relative;max-width:520px;margin:0 auto;padding:32px 32px 24px 78px;background:var(--paper);color:var(--paper-ink);border-radius:3px;box-shadow:var(--e1);font-size:13.5px;line-height:22px}
+.page-run{margin-bottom:20px;padding-bottom:8px;border-bottom:1px solid var(--paper-dim);font-size:12px;line-height:16px;color:var(--paper-sub)}
+.page-h{margin-bottom:12px;font:600 16px/22px var(--font-sans)}
+.page-para{position:relative;margin-bottom:14px}
+.margin{position:absolute;left:-62px;top:1px;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.tick{display:inline-flex;align-items:center;gap:3px;height:20px;padding:0 5px;border:1.5px solid currentColor;border-radius:3px;font:600 11px/1 var(--font-cond);letter-spacing:.04em}
+.tick .i{width:11px;height:11px;stroke-width:2.75}
+.tick--supported{color:var(--paper-supported)}
+.tick--partial{color:var(--paper-partial)}
+.tick--retrieved{color:var(--paper-sub)}
+mark.hl{background:var(--paper-hl);color:inherit;padding:1px 0;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+mark.hl--conflict{text-decoration:underline 2px var(--paper-conflict);text-underline-offset:3px}
+mark.hl.is-flash{animation:flash-hl 1.1s var(--ease-out) 2}
+.page-lines{display:grid;gap:9px;margin:16px 0}
+.page-lines i{display:block;height:7px;border-radius:2px;background:var(--paper-dim);width:var(--w,100%)}
+.page-lines--hl i{background:var(--paper-hl)}
+.page-para .page-lines{margin:0}
+.page-num{margin-top:24px;text-align:center;font-size:12px;color:var(--paper-sub)}
+.callout{--c:var(--rule-strong);max-width:520px;margin:16px auto 0;padding:14px 16px;border:1px solid var(--rule);border-left:3px solid var(--c);border-radius:8px;background:var(--surface)}
+.callout--conflict{--c:var(--conflict)}
+.callout-h{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;line-height:20px;color:var(--c)}
+.callout-h .i{width:16px;height:16px;stroke-width:2}
+.callout--quiet .callout-h{color:var(--ink)}
+.callout blockquote{margin-top:8px;font-size:14px;line-height:22px}
+.callout blockquote::before{content:"\201C"}
+.callout blockquote::after{content:"\201D"}
+.callout-src{margin-top:4px;font-size:13px;line-height:18px;color:var(--ink-2)}
+.callout .btn{margin-top:10px}
+
+/* ─── Scrim + toast ─── */
+.scrim{position:absolute;inset:0;z-index:25;background:var(--scrim);display:none}
+.toast{position:absolute;left:50%;bottom:120px;z-index:60;max-width:calc(100% - 32px);padding:10px 14px;border-radius:8px;background:var(--ink);color:var(--bg);font-size:14px;line-height:20px;box-shadow:var(--e2);opacity:0;transform:translate(-50%,8px);pointer-events:none;transition:opacity var(--dur),transform var(--dur) var(--ease-out)}
+.toast.is-on{opacity:1;transform:translate(-50%,0)}
+
+/* ─── Motion ─── */
+@keyframes ring{from{transform:scale(.6);opacity:.9}to{transform:scale(1.35);opacity:0}}
+@keyframes blink{50%{opacity:0}}
+@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@keyframes pop{from{opacity:0;transform:scale(.4)}}
+@keyframes fade-in{from{opacity:0}}
+@keyframes fade-out{to{opacity:0;transform:translateY(-4px)}}
+@keyframes row-in{from{opacity:0;transform:translateY(-8px)}}
+@keyframes press{0%{opacity:0;transform:scale(1.5) rotate(-4deg)}65%{opacity:1;transform:scale(.96) rotate(0)}100%{transform:none}}
+@keyframes draw{from{transform:scaleY(0)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes flash-row{0%,35%{background:var(--primary-tint)}}
+@keyframes flash-hl{50%{box-shadow:0 0 0 4px var(--paper-hl)}}
+
+/* ─── Responsive (container queries — the 375 frame uses the same rules) ─── */
+@container app (max-width:1179px){
+  .app,.app.viewer-open{--sidebar-w:64px;grid-template-columns:var(--sidebar-w) minmax(0,1fr)}
+  .collapse-btn{display:none}
+  .viewer{position:absolute;top:0;right:0;bottom:0;z-index:30;width:min(480px,100%);box-shadow:var(--e3)}
+  .app.viewer-open .scrim{display:block}
+}
+@container app (max-width:639px){
+  .app,.app.viewer-open{grid-template-columns:minmax(0,1fr)}
+  .main{grid-column:1}
+  .sidebar{position:absolute;top:0;bottom:0;left:0;z-index:40;width:min(300px,86%);transform:translateX(-100%);visibility:hidden;box-shadow:var(--e3);transition:transform var(--dur) var(--ease-out),visibility 0s linear var(--dur)}
+  .app.nav-open .sidebar{transform:none;visibility:visible;transition-delay:0s}
+  .app.nav-open .scrim{display:block;z-index:35}
+  .only-mobile{display:inline-grid}
+  .topbar{padding:0 8px;gap:2px}
+  .ws{padding:0 4px;gap:6px}
+  .ws-mark,.ws-docs,.ws-sep{display:none}
+  .ws-name{display:flex;flex-direction:column;font-size:14px;line-height:18px}
+  .ws-proj{font-weight:400;font-size:12px;line-height:16px;color:var(--ink-3)}
+  .search-btn{min-width:0;width:44px;height:44px;padding:0;justify-content:center;border:0}
+  .search-btn span,.search-btn kbd{display:none}
+  .column{padding:20px 16px 28px}
+  .composer-wrap{padding:6px 10px 10px}
+  .composer-hint{display:none}
+  .send{margin-left:auto;width:44px;height:44px}
+  .viewer{width:100%}
+  .toast{bottom:104px}
+  .empty-h{font-size:24px;line-height:30px}
+  .icon-btn{width:44px;height:44px}
+  :is(.src,.xref,.tally-item,.seg-btn,.scope,.btn,.key summary,.recent-item){min-height:44px}
+}
+@container col (max-width:760px){
+  .ledger-head{display:none}
+  .row-main{grid-template-columns:32px minmax(0,1fr) 40px;grid-template-areas:"rid verdict toggle" ". claim claim" ". evidence evidence";row-gap:10px;column-gap:12px}
+  .cell-verdict{flex-direction:row;align-items:center;gap:12px}
+  .detail-body{margin-left:44px;padding-right:8px}
+  .totals{flex-direction:column;align-items:stretch}
+  .trust{flex-wrap:wrap;gap:16px 20px}
+  .ex{grid-template-columns:28px minmax(0,1fr) 76px;grid-template-areas:"n title rel" ". meta meta";row-gap:2px;padding:8px}
+  .ex-meta{grid-area:meta;display:flex;flex-wrap:wrap;gap:4px 12px}
+  .suggest{grid-template-columns:1fr}
+}
+@container col (max-width:479px){
+  .ledger-wrap{padding:0 4px 0 12px}
+  .row::before{inset:0 -4px 0 -12px}
+  .bracket,.knot{display:none}
+  .row-main{grid-template-columns:auto minmax(0,1fr) 44px;grid-template-areas:"rid verdict toggle" "claim claim claim" "evidence evidence evidence";column-gap:10px}
+  .detail-body{margin-left:0;padding-right:4px}
+  .src{margin-left:0}
+  .answer-head{flex-direction:column;align-items:stretch}
+  .seg{display:flex}
+  .seg-btn{flex:1;justify-content:center}
+  .trust{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .trust > div{min-width:0}
+  .trust-total{grid-column:1/-1;flex-direction:row!important;align-items:baseline;justify-content:space-between;padding-top:8px;border-top:1px solid var(--rule)}
+  .d-figs{max-width:none}
+  .model{margin-left:0;width:100%}
+  .receipt{flex-wrap:wrap}
+  .receipt .btn{margin-left:0}
+  .align{grid-template-columns:1fr;gap:2px}
+  .align dd + dt{margin-top:8px}
+}
+@media (pointer:coarse){
+  :is(.src,.xref,.tally-item,.seg-btn,.scope,.btn,.key summary,.search-btn,.nav-item,.new-chat){min-height:44px}
+  .icon-btn{width:44px;height:44px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;transition-delay:0ms!important}
+  .scroll{scroll-behavior:auto}
+  .caret{animation:none}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-partial" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-neq" viewBox="0 0 24 24"><path d="M5 9.5h14M5 14.5h14M15 5L9 19"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.75"/><path d="M12 3.5v1.75M12 18.75v1.75M3.5 12h1.75M18.75 12h1.75M6 6l1.25 1.25M16.75 16.75L18 18M6 18l1.25-1.25M16.75 7.25L18 6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4.5 7h15M4.5 12h15M4.5 17h15"/></symbol>
+  <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5V8H8"/><path d="M12 8.5V12l2.5 1.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13.5L6.5 5.5h11l2.5 8v5H4z"/><path d="M4 13.5h4.5l1 2h5l1-2H20"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10l4.5 4.5 4.5-4.5M5 19.5h14"/></symbol>
+  <symbol id="i-thumb" viewBox="0 0 24 24"><path d="M7 11v8.5H4.5V11z"/><path d="M7 11l3.6-6.3a1.6 1.6 0 0 1 2.9 1.2l-.7 3.6h5.3a1.8 1.8 0 0 1 1.8 2.1l-1.1 6.4a1.8 1.8 0 0 1-1.8 1.5H7"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5V9H15"/></symbol>
+  <symbol id="i-seal" viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><path d="M9 15.3L8 20.5l4-2 4 2-1-5.2"/><path d="M9.6 10l1.6 1.6 3.2-3.2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11L12 5.5 17.5 11"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M13.5 4.5h6v6M19.5 4.5l-8 8"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M8.5 4.5v15"/></symbol>
+  <symbol id="i-para" viewBox="0 0 24 24"><path d="M4 6.5h16M4 11h16M4 15.5h16M4 20h9"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5l7 2.75v5.25c0 4.25-2.9 7.5-7 9-4.1-1.5-7-4.75-7-9V6.25z"/><path d="M9 12l2.1 2.1L15.2 10"/></symbol>
+  <symbol id="i-lens" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L20 20"/><path d="M7.75 10.75l2 2 3.5-3.75"/></symbol>
+</svg>
+
+<!-- Prototype controls — not product UI -->
+<div class="proto" role="region" aria-label="Prototype controls">
+  <span class="proto-name">TruthLens chat, direction C: Claim Ledger</span>
+  <span class="proto-lbl">State</span>
+  <div class="proto-group" role="group" aria-label="State">
+    <button class="proto-btn" data-proto-state="1" aria-pressed="false">1 Empty</button>
+    <button class="proto-btn" data-proto-state="2" aria-pressed="false">2 In progress</button>
+    <button class="proto-btn" data-proto-state="3" aria-pressed="false">3 Prose</button>
+    <button class="proto-btn" data-proto-state="4" aria-pressed="false">4 Ledger</button>
+    <button class="proto-btn" data-proto-state="5" aria-pressed="false">5 Exhibit open</button>
+  </div>
+  <span class="proto-lbl">Theme</span>
+  <div class="proto-group" role="group" aria-label="Theme">
+    <button class="proto-btn" data-proto-theme="light" aria-pressed="false">Light</button>
+    <button class="proto-btn" data-proto-theme="dark" aria-pressed="true">Dark</button>
+  </div>
+  <span class="proto-lbl">Width</span>
+  <div class="proto-group" role="group" aria-label="Width">
+    <button class="proto-btn" data-proto-width="desktop" aria-pressed="true">Desktop</button>
+    <button class="proto-btn" data-proto-width="mobile" aria-pressed="false">375 px</button>
+  </div>
+  <span class="proto-lbl">Keys 1–5 switch state. State 2 replays the live run.</span>
+</div>
+
+<div class="stage" id="stage">
+<div class="app" id="app" data-state="2">
+  <a class="skip" href="#scroll">Skip to conversation</a>
+
+  <!-- ─── Sidebar ─── -->
+  <nav class="sidebar" id="sidebar" aria-label="Primary">
+    <div class="brand">
+      <svg class="i brand-mark" aria-hidden="true"><use href="#i-lens"/></svg>
+      <span class="brand-name">TruthLens</span>
+      <button class="icon-btn collapse-btn" data-action="collapse" aria-pressed="false" aria-label="Collapse sidebar" title="Collapse sidebar"><svg class="i" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+    </div>
+    <button class="new-chat" data-action="new" title="New chat"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg><span class="nav-label">New chat</span></button>
+    <ul>
+      <li><a class="nav-item" href="#" data-action="nav-link" title="Dashboard"><svg class="i" aria-hidden="true"><use href="#i-grid"/></svg><span class="nav-label">Dashboard</span></a></li>
+      <li><a class="nav-item" href="#" data-action="nav-link" aria-current="page" title="Chat History"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg><span class="nav-label">Chat History</span></a></li>
+      <li><a class="nav-item" href="#" data-action="nav-link" title="My Documents"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg><span class="nav-label">My Documents</span></a></li>
+      <li><a class="nav-item" href="#" data-action="nav-link" title="Workspaces"><svg class="i" aria-hidden="true"><use href="#i-layers"/></svg><span class="nav-label">Workspaces</span></a></li>
+      <li><a class="nav-item" href="#" data-action="nav-link" title="Review Queue"><svg class="i" aria-hidden="true"><use href="#i-inbox"/></svg><span class="nav-label">Review Queue</span></a></li>
+      <li><a class="nav-item" href="#" data-action="nav-link" title="Settings"><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg><span class="nav-label">Settings</span></a></li>
+    </ul>
+    <div class="recent">
+      <p class="recent-h" id="recent-h">Recent</p>
+      <ul aria-labelledby="recent-h">
+        <li class="recent-now"><button class="recent-item" data-action="recent" data-i="0" aria-current="true" title="What was Northwind Renewables' revenue in 2025?">Revenue in 2025</button></li>
+        <li><button class="recent-item" data-action="recent" data-i="1">When will Aurora be commissioned?</button></li>
+        <li><button class="recent-item" data-action="recent" data-i="2">Emissions intensity vs 2020</button></li>
+      </ul>
+    </div>
+    <div class="user">
+      <span class="avatar" aria-hidden="true">DA</span>
+      <span class="user-meta"><span>demo_analyst</span><span class="user-role">Analyst</span></span>
+      <button class="icon-btn" data-action="account" aria-label="Account menu for demo_analyst"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
+    </div>
+  </nav>
+
+  <!-- ─── Main ─── -->
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" data-action="nav" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg class="i" aria-hidden="true"><use href="#i-menu"/></svg></button>
+      <h1 class="sr-only">Chat</h1>
+      <button class="ws" data-action="workspace" title="Switch workspace">
+        <span class="ws-mark" aria-hidden="true">NR</span>
+        <span class="ws-text">
+          <span class="ws-name"><span class="ws-org">Northwind Renewables</span><span class="ws-sep"> — </span><span class="ws-proj">Due Diligence</span></span>
+          <span class="ws-docs">6 documents</span>
+        </span>
+        <svg class="i ws-chev" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+      </button>
+      <div class="topbar-end">
+        <button class="search-btn" data-action="search" aria-label="Search this workspace"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><kbd>⌘K</kbd></button>
+        <button class="icon-btn" id="theme-btn" data-action="theme" aria-label="Switch to light theme"><svg class="i" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      </div>
+    </header>
+
+    <main class="scroll" id="scroll" tabindex="-1">
+      <div class="column">
+
+        <!-- ═══ State 1 — empty ═══ -->
+        <section class="empty" aria-labelledby="empty-h">
+          <h2 class="empty-h" id="empty-h">What would you like to verify?</h2>
+          <p class="empty-sub">Answers draw only on the 6 documents in this workspace. Every claim is checked against the passage it cites before you see it.</p>
+          <ul class="docs-strip" aria-label="Documents in this workspace">
+            <li class="doc-chip" title="Northwind Renewables — Annual Report 2025"><span class="doc-type">PDF</span>Annual Report 2025</li>
+            <li class="doc-chip" title="Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results"><span class="doc-type">PDF</span>Q4 &amp; FY2025 Results</li>
+            <li class="doc-chip" title="2025 Sustainability Report"><span class="doc-type">PDF</span>Sustainability Report</li>
+            <li class="doc-chip"><span class="doc-type">DOCX</span>Board memo: Aurora update</li>
+            <li class="doc-chip"><span class="doc-type">MD</span>Leadership Team</li>
+            <li class="doc-chip"><span class="doc-type">CSV</span>Project Pipeline</li>
+          </ul>
+          <h3 class="suggest-h">Suggested for this workspace</h3>
+          <ul class="suggest">
+            <li><button class="suggest-item" data-q="0"><span class="suggest-q">What was Northwind Renewables' revenue in 2025?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Annual Report 2025, Q4 &amp; FY2025 Results</span></button></li>
+            <li><button class="suggest-item" data-q="1"><span class="suggest-q">When is the Aurora offshore wind project expected to be commissioned?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Board memo: Aurora update</span></button></li>
+            <li><button class="suggest-item" data-q="2"><span class="suggest-q">How much has Northwind reduced its emissions intensity versus 2020?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Sustainability Report</span></button></li>
+            <li><button class="suggest-item" data-q="3"><span class="suggest-q">Who is the CEO and when did they start?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Leadership Team</span></button></li>
+            <li><button class="suggest-item" data-q="4"><span class="suggest-q">Which projects in the pipeline are under construction?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Project Pipeline</span></button></li>
+            <li><button class="suggest-item" data-q="5"><span class="suggest-q">What are the key risks facing the Aurora project?</span><span class="suggest-src"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Board memo: Aurora update, Annual Report 2025</span></button></li>
+          </ul>
+        </section>
+
+        <!-- ═══ States 2–5 — thread ═══ -->
+        <section class="thread" aria-label="Conversation">
+          <div class="ask">
+            <span class="avatar" aria-hidden="true">DA</span>
+            <div>
+              <p class="ask-meta"><span class="sr-only">Question from </span>demo_analyst, 10:42</p>
+              <h2 class="ask-q" id="q">What was Northwind Renewables' revenue in 2025?</h2>
+            </div>
+          </div>
+
+          <article class="answer" id="answer" data-view="ledger" data-phase="done" aria-labelledby="q">
+            <p class="sr-only" id="live" aria-live="polite"></p>
+
+            <!-- Audit trail: live stepper while answering, collapsible record afterwards -->
+            <section class="trail" id="trail" aria-label="Verification record">
+              <button class="trail-summary" data-action="trail" aria-expanded="false" aria-controls="trail-body">
+                <svg class="i trail-icon" aria-hidden="true"><use href="#i-shield"/></svg>
+                <span class="trail-title" id="trail-title">How this answer was verified</span>
+                <span class="trail-meta" id="trail-meta">4 steps, 7.8 s</span>
+                <svg class="i trail-chev" aria-hidden="true"><use href="#i-chevron-down"/></svg>
+              </button>
+              <div class="trail-body-wrap"><div class="trail-body" id="trail-body">
+                <ol class="steps">
+                  <li class="step" data-step="search" data-status="done"><span class="node" aria-hidden="true"></span><span class="step-main"><span class="step-label">Searched passages</span><span class="step-detail"></span></span><span class="step-time"></span></li>
+                  <li class="step" data-step="rank" data-status="done"><span class="node" aria-hidden="true"></span><span class="step-main"><span class="step-label">Ranked passages</span><span class="step-detail"></span></span><span class="step-time"></span></li>
+                  <li class="step" data-step="write" data-status="done"><span class="node" aria-hidden="true"></span><span class="step-main"><span class="step-label">Wrote answer</span><span class="step-detail"></span></span><span class="step-time"></span></li>
+                  <li class="step" data-step="verify" data-status="done"><span class="node" aria-hidden="true"></span><span class="step-main"><span class="step-label">Verified claims</span><span class="step-detail"></span></span><span class="step-time"></span></li>
+                  <li class="step" id="step-seal" data-status="done" hidden><span class="node" aria-hidden="true"></span><span class="step-main"><span class="step-label">Sealed receipt</span><span class="step-detail">sha256:7f3a9c21…e21b</span></span><span class="step-time">10:43</span></li>
+                </ol>
+                <p class="trail-foot">Ran on this machine with qwen3:4b. No text left the device.</p>
+              </div></div>
+            </section>
+
+            <div class="answer-head">
+              <div class="seg" role="group" aria-label="Answer view">
+                <button class="seg-btn" data-view="ledger" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="#i-rows"/></svg>Claim ledger</button>
+                <button class="seg-btn" data-view="prose" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-para"/></svg>Read as prose</button>
+              </div>
+              <div class="tally" role="group" aria-label="Claim summary">
+                <button class="tally-item v-supported" data-target="row-c1 row-c2 row-c4"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>3 verified</button>
+                <button class="tally-item v-partial" data-target="row-c3"><svg class="i" aria-hidden="true"><use href="#i-partial"/></svg>1 partial</button>
+                <button class="tally-item v-conflict" data-target="row-d1"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>1 conflict</button>
+              </div>
+            </div>
+
+            <!-- Prose view (Truth Lens off) — also the streaming surface -->
+            <div class="prose-wrap">
+              <div class="skel" id="prose-skel" aria-hidden="true" hidden><i style="width:96%"></i><i style="width:88%"></i><i style="width:54%"></i></div>
+              <p class="prose" id="prose"><span class="c" data-c="1">Northwind Renewables reported revenue of <strong>€412 million</strong> for 2025</span> <a class="cite" href="#" data-open="1" data-page="3" data-hl="c1" aria-label="Source 1, Annual Report 2025, page 3">[1]</a>, <span class="c" data-c="2">up from €356 million in 2024</span> <a class="cite" href="#" data-open="1" data-page="3" data-hl="c2" aria-label="Source 1, Annual Report 2025, page 3">[1]</a>. <span class="c" data-c="3">Growth came mainly from a full year of the Kestrel Ridge onshore expansion</span> <a class="cite" href="#" data-open="1" data-page="3" data-hl="c3" aria-label="Source 1, Annual Report 2025, page 3">[1]</a>. Note that <span class="c" data-c="4">the Q4 &amp; FY2025 results press release gives a different figure of <strong>€398 million</strong></span> <a class="cite" href="#" data-open="2" data-page="1" data-hl="c4" aria-label="Source 2, Q4 and FY2025 Results, page 1">[2]</a> — the two sources disagree.</p>
+            </div>
+
+            <!-- Ledger view (Truth Lens on) -->
+            <div class="ledger-wrap" id="ledger-wrap">
+              <div class="ledger-head" aria-hidden="true"><span>No.</span><span>Verdict</span><span>Claim in the answer</span><span>Evidence in the source</span><span></span></div>
+              <ol class="ledger" aria-label="Claims in this answer, each with its evidence">
+
+                <li class="row" id="row-c1" data-v="supported" style="--i:0" tabindex="-1">
+                  <div class="row-main">
+                    <span class="rid">C1</span>
+                    <div class="cell-verdict">
+                      <span class="stamp v-supported"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Verified</span>
+                      <span class="score"><span class="score-bar" style="--v:.97" aria-hidden="true"><i></i></span><span><span class="sr-only">Entailment score </span>0.97</span></span>
+                    </div>
+                    <div class="cell-claim"><span class="sr-only">Claim: </span>Northwind Renewables reported revenue of <span class="fig fig--conflict">€412 million</span> for 2025. <a class="xref" href="#row-c4"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Differs from C4</a></div>
+                    <div class="cell-evidence">
+                      <blockquote class="ev"><span class="sr-only">Evidence: </span>Revenue in 2025 was €412 million.</blockquote>
+                      <button class="src" data-open="1" data-page="3" data-hl="c1" title="Northwind Renewables — Annual Report 2025">[1] Annual Report 2025, page 3</button>
+                    </div>
+                    <button class="icon-btn row-toggle" aria-expanded="false" aria-controls="det-c1" aria-label="Why C1 is verified"><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+                  </div>
+                  <div class="row-detail" id="det-c1"><div class="detail-inner"><div class="detail-body">
+                    <p class="why"><strong>Why verified.</strong> The passage states the same figure for the same year.</p>
+                    <blockquote class="context"><mark>Revenue in 2025 was €412 million.</mark> This was up from €356 million in 2024. Total generation reached 5.9 TWh…</blockquote>
+                    <p class="why why--conflict"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg><span>Exhibit 2, the Q4 &amp; FY2025 results press release, reports €398 million for the same year. The answer states both.</span></p>
+                    <div class="detail-actions"><button class="btn btn--outline btn--sm" data-open="1" data-page="3" data-hl="c1"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>View in document, page 3</button><span class="detail-meta">Entailment score 0.97</span></div>
+                  </div></div></div>
+                </li>
+
+                <li class="row" id="row-c2" data-v="supported" style="--i:1" tabindex="-1">
+                  <div class="row-main">
+                    <span class="rid">C2</span>
+                    <div class="cell-verdict">
+                      <span class="stamp v-supported"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Verified</span>
+                      <span class="score"><span class="score-bar" style="--v:.94" aria-hidden="true"><i></i></span><span><span class="sr-only">Entailment score </span>0.94</span></span>
+                    </div>
+                    <div class="cell-claim"><span class="sr-only">Claim: </span>up from <span class="fig">€356 million</span> in 2024</div>
+                    <div class="cell-evidence">
+                      <blockquote class="ev"><span class="sr-only">Evidence: </span>This was up from €356 million in 2024.</blockquote>
+                      <button class="src" data-open="1" data-page="3" data-hl="c2" title="Northwind Renewables — Annual Report 2025">[1] Annual Report 2025, page 3</button>
+                    </div>
+                    <button class="icon-btn row-toggle" aria-expanded="false" aria-controls="det-c2" aria-label="Why C2 is verified"><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+                  </div>
+                  <div class="row-detail" id="det-c2"><div class="detail-inner"><div class="detail-body">
+                    <p class="why"><strong>Why verified.</strong> The passage gives the same 2024 figure.</p>
+                    <blockquote class="context">Revenue in 2025 was €412 million. <mark>This was up from €356 million in 2024.</mark> Total generation reached 5.9 TWh…</blockquote>
+                    <div class="detail-actions"><button class="btn btn--outline btn--sm" data-open="1" data-page="3" data-hl="c2"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>View in document, page 3</button><span class="detail-meta">Entailment score 0.94</span></div>
+                  </div></div></div>
+                </li>
+
+                <li class="row" id="row-c3" data-v="partial" style="--i:2" tabindex="-1">
+                  <div class="row-main">
+                    <span class="rid">C3</span>
+                    <div class="cell-verdict">
+                      <span class="stamp v-partial"><svg class="i" aria-hidden="true"><use href="#i-partial"/></svg>Partial</span>
+                      <span class="score"><span class="score-bar" style="--v:.62" aria-hidden="true"><i></i></span><span><span class="sr-only">Entailment score </span>0.62</span></span>
+                    </div>
+                    <div class="cell-claim"><span class="sr-only">Claim: </span>Growth came mainly from a full year of the Kestrel Ridge onshore expansion.</div>
+                    <div class="cell-evidence">
+                      <blockquote class="ev"><span class="sr-only">Evidence: </span>Revenue growth was driven by a full year of contribution from the Kestrel Ridge onshore expansion…</blockquote>
+                      <button class="src" data-open="1" data-page="3" data-hl="c3" title="Northwind Renewables — Annual Report 2025">[1] Annual Report 2025, page 3</button>
+                    </div>
+                    <button class="icon-btn row-toggle" aria-expanded="false" aria-controls="det-c3" aria-label="Why C3 is partial"><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+                  </div>
+                  <div class="row-detail" id="det-c3"><div class="detail-inner"><div class="detail-body">
+                    <p class="why"><strong>Why partial.</strong> The source credits Kestrel Ridge for the growth but doesn't say it was the main driver. “Mainly” has no support in the passage.</p>
+                    <dl class="align">
+                      <dt>Answer</dt>
+                      <dd>Growth came <mark class="gap">mainly</mark><span class="gap-note">(not in source)</span> from <span class="match">a full year</span> of the <span class="match">Kestrel Ridge onshore expansion</span>.</dd>
+                      <dt>Source</dt>
+                      <dd>Revenue growth was driven by <span class="match">a full year</span> of contribution from the <span class="match">Kestrel Ridge onshore expansion</span>…</dd>
+                    </dl>
+                    <div class="detail-actions"><button class="btn btn--outline btn--sm" data-open="1" data-page="3" data-hl="c3"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>View in document, page 3</button><span class="detail-meta">Entailment score 0.62. Underlined words match the source.</span></div>
+                  </div></div></div>
+                </li>
+
+                <li class="row" id="row-c4" data-v="supported" style="--i:3" tabindex="-1">
+                  <div class="row-main">
+                    <span class="rid">C4</span>
+                    <div class="cell-verdict">
+                      <span class="stamp v-supported"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Verified</span>
+                      <span class="score"><span class="score-bar" style="--v:.95" aria-hidden="true"><i></i></span><span><span class="sr-only">Entailment score </span>0.95</span></span>
+                    </div>
+                    <div class="cell-claim"><span class="sr-only">Claim: </span>the press release gives a different figure of <span class="fig fig--conflict">€398 million</span> <a class="xref" href="#row-c1"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Differs from C1</a></div>
+                    <div class="cell-evidence">
+                      <blockquote class="ev"><span class="sr-only">Evidence: </span>Revenue in 2025 was €398 million.</blockquote>
+                      <button class="src" data-open="2" data-page="1" data-hl="c4" title="Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results">[2] Q4 &amp; FY2025 Results, page 1</button>
+                    </div>
+                    <button class="icon-btn row-toggle" aria-expanded="false" aria-controls="det-c4" aria-label="Why C4 is verified"><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+                  </div>
+                  <div class="row-detail" id="det-c4"><div class="detail-inner"><div class="detail-body">
+                    <p class="why"><strong>Why verified.</strong> The press release states this figure. It disagrees with C1, so the answer reports both instead of choosing one.</p>
+                    <blockquote class="context"><mark>Revenue in 2025 was €398 million.</mark></blockquote>
+                    <div class="detail-actions"><button class="btn btn--outline btn--sm" data-open="2" data-page="1" data-hl="c4"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>View in document, page 1</button><span class="detail-meta">Entailment score 0.95</span></div>
+                  </div></div></div>
+                </li>
+
+                <li class="row row--d" id="row-d1" style="--i:4" tabindex="-1">
+                  <div class="row-main">
+                    <span class="rid">D1</span>
+                    <div class="cell-verdict"><span class="stamp v-conflict"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Conflict</span></div>
+                    <div class="cell-claim">
+                      <p class="d-title">Sources disagree on 2025 revenue</p>
+                      <p class="d-note">C1 and C4 cite different figures for the same year. TruthLens shows both and doesn't pick one.</p>
+                      <button class="btn btn--outline btn--sm d-btn" data-open="1" data-page="3" data-hl="c1"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>Compare the pages</button>
+                    </div>
+                    <div class="cell-evidence">
+                      <table class="d-figs">
+                        <caption class="sr-only">2025 revenue by source</caption>
+                        <tbody>
+                          <tr><th scope="row">[1] Annual Report 2025, page 3</th><td>€412M</td></tr>
+                          <tr><th scope="row">[2] Q4 &amp; FY2025 Results, page 1</th><td>€398M</td></tr>
+                          <tr class="d-diff"><th scope="row">Difference</th><td>€14M</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </li>
+              </ol>
+              <div class="bracket" id="bracket" aria-hidden="true"></div>
+              <button class="knot" id="knot" aria-label="C1 and C4 disagree. Go to D1." title="C1 and C4 disagree: €412M vs €398M"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg></button>
+            </div>
+
+            <details class="key">
+              <summary><svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg>What the verdicts mean</summary>
+              <dl class="key-list">
+                <div><dt><span class="stamp v-supported"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Verified</span></dt><dd>The cited passage states the claim.</dd></div>
+                <div><dt><span class="stamp v-partial"><svg class="i" aria-hidden="true"><use href="#i-partial"/></svg>Partial</span></dt><dd>The passage backs part of the claim. Some wording goes further than the source.</dd></div>
+                <div><dt><span class="stamp v-unsupported"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg>Unsupported</span></dt><dd>No retrieved passage backs the claim.</dd></div>
+                <div><dt><span class="stamp v-contradicted"><svg class="i" aria-hidden="true"><use href="#i-ban"/></svg>Contradicted</span></dt><dd>A retrieved passage says the opposite.</dd></div>
+                <div><dt><span class="stamp v-conflict"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Conflict</span></dt><dd>Two sources disagree with each other. Both are shown.</dd></div>
+              </dl>
+            </details>
+
+            <div class="totals">
+              <div>
+                <p class="totals-h">Trust score</p>
+                <p class="totals-sub">How strongly the retrieved evidence supports this answer.</p>
+              </div>
+              <dl class="trust">
+                <div><dt>Retrieval</dt><dd>86<span class="meter" style="--v:86" aria-hidden="true"><i></i></span></dd></div>
+                <div><dt>Faithfulness</dt><dd>100<span class="meter" style="--v:100" aria-hidden="true"><i></i></span></dd></div>
+                <div><dt>Relevance</dt><dd>50<span class="meter" style="--v:50" aria-hidden="true"><i></i></span></dd></div>
+                <div><dt>Authority</dt><dd>100<span class="meter" style="--v:100" aria-hidden="true"><i></i></span></dd></div>
+                <div class="trust-total"><dt>Trust</dt><dd>86<span class="of">/100</span></dd></div>
+              </dl>
+            </div>
+
+            <section class="exhibits" id="exhibits" aria-labelledby="ex-h" data-loading="false">
+              <div class="ex-head">
+                <h3 class="ex-h" id="ex-h">Exhibits</h3>
+                <p class="ex-sub" id="ex-sub" aria-live="polite">5 passages ranked from 16, across 3 documents. 2 cited in the answer.</p>
+                <span class="ex-relh" aria-hidden="true">Relevance</span>
+              </div>
+              <div class="ex-skel" aria-hidden="true">
+                <div><i style="width:20px"></i><i style="width:62%"></i><i></i></div>
+                <div><i style="width:20px"></i><i style="width:48%"></i><i></i></div>
+                <div><i style="width:20px"></i><i style="width:56%"></i><i></i></div>
+              </div>
+              <ol class="ex-list">
+                <li><button class="ex" data-open="1" data-page="3" style="--i:0" title="Northwind Renewables — Annual Report 2025">
+                  <span class="ex-n">[1]</span><span class="ex-title"><span class="sr-only">Northwind Renewables — </span>Annual Report 2025</span>
+                  <span class="ex-meta"><span class="ex-page">page 3</span><span class="ex-flag"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Conflicts with [2]</span></span>
+                  <span class="ex-rel"><span class="ex-rel-bar" style="--v:94" aria-hidden="true"><i></i></span><span><span class="sr-only">Relevance </span>94</span></span>
+                </button></li>
+                <li><button class="ex" data-open="2" data-page="1" style="--i:1" title="Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results">
+                  <span class="ex-n">[2]</span><span class="ex-title">Q4 &amp; FY2025 Results</span>
+                  <span class="ex-meta"><span class="ex-page">page 1</span><span class="ex-flag"><svg class="i" aria-hidden="true"><use href="#i-neq"/></svg>Conflicts with [1]</span></span>
+                  <span class="ex-rel"><span class="ex-rel-bar" style="--v:91" aria-hidden="true"><i></i></span><span><span class="sr-only">Relevance </span>91</span></span>
+                </button></li>
+                <li><button class="ex" data-open="3" data-page="1" style="--i:2" title="2025 Sustainability Report">
+                  <span class="ex-n">[3]</span><span class="ex-title">Sustainability Report</span>
+                  <span class="ex-meta"><span class="ex-page">page 1</span><span class="ex-flag ex-flag--quiet">Not cited</span></span>
+                  <span class="ex-rel"><span class="ex-rel-bar" style="--v:76" aria-hidden="true"><i></i></span><span><span class="sr-only">Relevance </span>76</span></span>
+                </button></li>
+                <li><button class="ex" data-open="4" data-page="2" style="--i:3" title="2025 Sustainability Report">
+                  <span class="ex-n">[4]</span><span class="ex-title">Sustainability Report</span>
+                  <span class="ex-meta"><span class="ex-page">page 2</span><span class="ex-flag ex-flag--quiet">Not cited</span></span>
+                  <span class="ex-rel"><span class="ex-rel-bar" style="--v:57" aria-hidden="true"><i></i></span><span><span class="sr-only">Relevance </span>57</span></span>
+                </button></li>
+                <li><button class="ex" data-open="5" data-page="2" style="--i:4" title="Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results">
+                  <span class="ex-n">[5]</span><span class="ex-title">Q4 &amp; FY2025 Results</span>
+                  <span class="ex-meta"><span class="ex-page">page 2</span><span class="ex-flag ex-flag--quiet">Not cited</span></span>
+                  <span class="ex-rel"><span class="ex-rel-bar" style="--v:52" aria-hidden="true"><i></i></span><span><span class="sr-only">Relevance </span>52</span></span>
+                </button></li>
+              </ol>
+            </section>
+
+            <div class="actions">
+              <button class="btn btn--seal" id="seal-btn" data-action="seal"><svg class="i" aria-hidden="true"><use href="#i-seal"/></svg><span class="btn-label">Seal receipt</span></button>
+              <button class="btn btn--ghost" data-action="copy"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+              <button class="btn btn--ghost" data-action="export"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Export</button>
+              <span class="actions-sep" aria-hidden="true"></span>
+              <button class="icon-btn" data-action="vote" data-v="up" aria-pressed="false" aria-label="Good answer" title="Good answer"><svg class="i" aria-hidden="true"><use href="#i-thumb"/></svg></button>
+              <button class="icon-btn" data-action="vote" data-v="down" aria-pressed="false" aria-label="Bad answer" title="Bad answer"><svg class="i" aria-hidden="true" style="transform:rotate(180deg)"><use href="#i-thumb"/></svg></button>
+              <button class="icon-btn" data-action="regen" aria-label="Regenerate answer" title="Regenerate"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+              <span class="model">qwen3:4b, local, 7.8 s</span>
+            </div>
+
+            <div class="receipt" id="receipt" hidden>
+              <svg class="seal-mark" viewBox="0 0 64 64" aria-hidden="true">
+                <defs><path id="seal-arc" d="M10 32a22 22 0 1 1 44 0a22 22 0 1 1-44 0"/></defs>
+                <circle cx="32" cy="32" r="30.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="32" cy="32" r="27" fill="none" stroke="currentColor" stroke-width=".75"/>
+                <text font-family="IBM Plex Sans Condensed, sans-serif" font-size="6" font-weight="600" letter-spacing="1.4" fill="currentColor"><textPath href="#seal-arc">SEALED RECEIPT · TRUTHLENS ·</textPath></text>
+                <circle cx="32" cy="32" r="13" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M26 32.5l4 4 8-8.5" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <div>
+                <p class="receipt-title">Receipt sealed, 28 Sep 2026 at 10:43</p>
+                <p class="receipt-sub">Anyone with the link can confirm this answer and its evidence haven't changed.</p>
+                <p class="receipt-hash"><span class="sr-only">SHA-256 fingerprint: </span>sha256:7f3a9c21b04e…5d8ae21b</p>
+              </div>
+              <button class="btn btn--outline btn--sm" data-action="copy-link"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy link</button>
+            </div>
+          </article>
+        </section>
+      </div>
+    </main>
+
+    <div class="composer-wrap">
+      <form class="composer" id="composer">
+        <label class="sr-only" for="ask">Ask a question about this workspace</label>
+        <textarea id="ask" rows="1" placeholder="Ask about the Northwind Renewables documents"></textarea>
+        <div class="composer-bar">
+          <button type="button" class="scope" data-action="scope"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>All 6 documents<svg class="i" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
+          <span class="composer-hint">Enter to send, Shift + Enter for a new line</span>
+          <button type="submit" class="send" id="send" aria-label="Send question"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ─── Exhibit viewer ─── -->
+  <aside class="viewer" id="viewer" aria-labelledby="viewer-title" hidden>
+    <div class="viewer-head">
+      <div>
+        <p class="viewer-kicker" id="viewer-kicker">Exhibit 1</p>
+        <h2 class="viewer-title" id="viewer-title" tabindex="-1">Annual Report 2025</h2>
+        <p class="viewer-full" id="viewer-full"></p>
+      </div>
+      <button class="icon-btn" data-action="close" aria-label="Close exhibit"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="viewer-bar">
+      <div class="pager">
+        <button class="icon-btn" data-action="page" data-dir="-1" aria-label="Previous page"><svg class="i" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+        <span class="pager-label" id="viewer-page" aria-live="polite">Page 3 of 6</span>
+        <button class="icon-btn" data-action="page" data-dir="1" aria-label="Next page"><svg class="i" aria-hidden="true"><use href="#i-chevron-right"/></svg></button>
+      </div>
+      <span id="viewer-rel">Relevance 94</span>
+      <button class="btn btn--ghost btn--sm" data-action="original"><svg class="i" aria-hidden="true"><use href="#i-open"/></svg>Open original</button>
+    </div>
+    <div class="viewer-body" id="viewer-body"></div>
+  </aside>
+
+  <div class="scrim" data-action="close" aria-hidden="true"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const html = document.documentElement;
+  const stage = $('#stage'), app = $('#app'), answer = $('#answer'), prose = $('#prose'),
+    trail = $('#trail'), ledgerWrap = $('#ledger-wrap'), bracket = $('#bracket'), knot = $('#knot'),
+    exhibits = $('#exhibits'), viewer = $('#viewer'), composer = $('#composer'), ask = $('#ask'),
+    sendBtn = $('#send'), toastEl = $('#toast'), live = $('#live'), scroller = $('#scroll'), sealBtn = $('#seal-btn');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const ico = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const smooth = () => (reduce.matches ? 'auto' : 'smooth');
+
+  let timers = [], lastTrigger = null, sealed = false, vw = { n: 1, page: 3 };
+  const later = (ms, fn) => { timers.push(setTimeout(fn, ms)); };
+  const every = (ms, fn) => { const id = setInterval(fn, ms); timers.push(id); return id; };
+  const clearTimers = () => { timers.forEach(id => { clearTimeout(id); clearInterval(id); }); timers = []; };
+  const announce = m => { live.textContent = m; };
+
+  /* ── Streaming: wrap the answer into word tokens once ── */
+  function wrapWords(el) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
+    while (walk.nextNode()) if (!walk.currentNode.parentElement.closest('.cite')) nodes.push(walk.currentNode);
+    for (const n of nodes) {
+      const f = document.createDocumentFragment();
+      for (const part of n.textContent.split(/(\s+)/)) {
+        if (!part) continue;
+        if (/^\s+$/.test(part)) { f.append(part); continue; }
+        const s = document.createElement('span'); s.className = 'w'; s.textContent = part; f.append(s);
+      }
+      n.replaceWith(f);
+    }
+    $$('.cite', el).forEach(c => c.classList.add('w'));
+    return $$('.w', el);
+  }
+  const words = wrapWords(prose);
+  const isWord = w => !w.classList.contains('cite') && /[\p{L}\p{N}]/u.test(w.textContent);
+  const WORDS = words.filter(isWord).length;
+
+  /* ── Audit trail ── */
+  const STEP = {
+    search: { live: 'Searching passages', done: 'Searched passages', time: '0.4 s', final: '16 found across 6 documents' },
+    rank:   { live: 'Ranking passages',   done: 'Ranked passages',   time: '1.9 s', final: 'Kept the top 5 of 16' },
+    write:  { live: 'Writing answer',     done: 'Wrote answer',      time: '4.1 s', final: `${WORDS} words from qwen3:4b on this machine` },
+    verify: { live: 'Verifying claims',   done: 'Verified claims',   time: '1.4 s', final: 'Truth Lens checked 4 claims: 3 verified, 1 partial' },
+  };
+  function setStep(id, status, detail, time) {
+    const li = $(`.step[data-step="${id}"]`, trail);
+    li.dataset.status = status;
+    $('.step-label', li).textContent = status === 'done' ? STEP[id].done : STEP[id].live;
+    $('.step-detail', li).textContent = detail ?? '';
+    $('.step-time', li).textContent = time ?? (status === 'done' ? STEP[id].time : '');
+  }
+  function setTrail(open) {
+    trail.classList.toggle('is-open', open);
+    $('.trail-summary', trail).setAttribute('aria-expanded', String(open));
+  }
+  const trailMeta = t => { $('#trail-meta').textContent = t; };
+
+  /* ── Views ── */
+  function setView(v, animate) {
+    answer.dataset.view = v;
+    $$('.seg-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+    if (v !== 'ledger') return;
+    placeBracket();
+    if (animate && !reduce.matches) {
+      ledgerWrap.classList.remove('is-settling'); void ledgerWrap.offsetWidth;
+      ledgerWrap.classList.add('is-settling');
+      later(1300, () => ledgerWrap.classList.remove('is-settling'));
+    }
+  }
+  function setRow(row, open) {
+    const b = $('.row-toggle', row); if (!b) return;
+    row.classList.toggle('is-open', open);
+    b.setAttribute('aria-expanded', String(open));
+  }
+
+  /* ── Bracket linking the conflicting rows (offsets ignore transforms) ── */
+  function offsetIn(el, anc) { let y = 0; while (el && el !== anc) { y += el.offsetTop; el = el.offsetParent; } return y; }
+  function placeBracket() {
+    if (answer.dataset.view !== 'ledger' || !ledgerWrap.offsetParent) return;
+    const a = $('#row-c1 .rid'), b = $('#row-c4 .rid');
+    const top = offsetIn(a, ledgerWrap) + a.offsetHeight / 2, bot = offsetIn(b, ledgerWrap) + b.offsetHeight / 2;
+    bracket.style.top = top + 'px'; bracket.style.height = (bot - top) + 'px';
+    knot.style.top = (top + (bot - top) / 2) + 'px';
+  }
+  new ResizeObserver(placeBracket).observe(ledgerWrap);
+  const linked = ['row-c1', 'row-c4', 'row-d1'].map(id => document.getElementById(id));
+  const link = on => { linked.forEach(r => r.classList.toggle('is-linked', on)); bracket.classList.toggle('is-hot', on); };
+  [...linked, knot].forEach(el => {
+    el.addEventListener('mouseenter', () => link(true)); el.addEventListener('mouseleave', () => link(false));
+    el.addEventListener('focusin', () => link(true)); el.addEventListener('focusout', () => link(false));
+  });
+  function flashRows(ids) {
+    const rows = ids.split(' ').map(id => document.getElementById(id)).filter(Boolean);
+    if (!rows.length) return;
+    rows[0].scrollIntoView({ block: 'center', behavior: smooth() });
+    rows.forEach(r => { r.classList.remove('is-flash'); void r.offsetWidth; r.classList.add('is-flash'); });
+    rows[0].focus({ preventScroll: true });
+  }
+
+  /* ── Exhibits ── */
+  function exhibitsLoading(msg) { exhibits.hidden = false; exhibits.dataset.loading = 'true'; $('#ex-sub').textContent = msg; }
+  function showExhibits(arrive) {
+    exhibits.hidden = false; exhibits.dataset.loading = 'false';
+    $('#ex-sub').textContent = '5 passages ranked from 16, across 3 documents. 2 cited in the answer.';
+    if (arrive && !reduce.matches) {
+      $$('.ex', exhibits).forEach(b => b.classList.add('is-arriving'));
+      later(800, () => $$('.ex', exhibits).forEach(b => b.classList.remove('is-arriving')));
+    }
+  }
+
+  /* ── Composer ── */
+  function setBusy(b) {
+    composer.classList.toggle('is-busy', b);
+    answer.setAttribute('aria-busy', String(b));
+    sendBtn.setAttribute('aria-label', b ? 'Stop answering' : 'Send question');
+    $('use', sendBtn).setAttribute('href', b ? '#i-stop' : '#i-send');
+    updateSend();
+  }
+  function updateSend() { sendBtn.disabled = !composer.classList.contains('is-busy') && !ask.value.trim(); }
+  function autosize() { ask.style.height = 'auto'; ask.style.height = Math.min(ask.scrollHeight, 160) + 'px'; }
+
+  /* ── Seal + votes ── */
+  function resetExtras() {
+    sealed = false;
+    sealBtn.classList.remove('is-sealed'); sealBtn.disabled = false; sealBtn.removeAttribute('aria-busy');
+    $('.btn-label', sealBtn).textContent = 'Seal receipt'; $('use', sealBtn).setAttribute('href', '#i-seal');
+    $('#receipt').hidden = true; $('#step-seal').hidden = true;
+    $$('[data-action="vote"]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  }
+  function seal() {
+    if (sealed) { $('#receipt').scrollIntoView({ block: 'nearest', behavior: smooth() }); return; }
+    sealBtn.setAttribute('aria-busy', 'true'); sealBtn.disabled = true;
+    $('.btn-label', sealBtn).textContent = 'Sealing…'; $('use', sealBtn).setAttribute('href', '#i-refresh');
+    later(700, () => {
+      sealed = true; sealBtn.removeAttribute('aria-busy'); sealBtn.disabled = false; sealBtn.classList.add('is-sealed');
+      $('.btn-label', sealBtn).textContent = 'Sealed'; $('use', sealBtn).setAttribute('href', '#i-check');
+      $('#receipt').hidden = false; $('#step-seal').hidden = false;
+      trailMeta('5 steps, 7.8 s, receipt sealed');
+      $('#receipt').scrollIntoView({ block: 'nearest', behavior: smooth() });
+      toast('Receipt sealed. The link is ready to share.');
+    });
+  }
+  function vote(btn) {
+    const on = btn.getAttribute('aria-pressed') !== 'true';
+    $$('[data-action="vote"]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+    btn.setAttribute('aria-pressed', String(on));
+    if (on) toast('Feedback saved');
+  }
+
+  /* ── Reset + settle ── */
+  function resetAnswer() {
+    words.forEach(w => w.classList.remove('is-hidden'));
+    $('.caret', prose)?.remove();
+    $$('.c', prose).forEach(c => { c.classList.remove('is-checking'); delete c.dataset.mark; });
+    ledgerWrap.classList.remove('is-settling');
+    $('.prose-wrap').classList.remove('is-leaving');
+    $$('.row').forEach(r => { setRow(r, false); r.classList.remove('is-linked', 'is-flash'); });
+    $('#prose-skel').hidden = true;
+    $('.key').open = false;
+    exhibits.hidden = false;
+  }
+  function settle(view) {
+    resetAnswer();
+    answer.dataset.phase = 'done';
+    Object.keys(STEP).forEach(id => setStep(id, 'done', STEP[id].final));
+    setTrail(false);
+    $('#trail-title').textContent = 'How this answer was verified';
+    trailMeta('4 steps, 7.8 s');
+    showExhibits(false);
+    setView(view);
+    setBusy(false);
+  }
+
+  /* ── State 2: the live run, then the settle ── */
+  function runLive() {
+    resetAnswer();
+    answer.dataset.phase = 'live';
+    setView('prose');
+    words.forEach(w => w.classList.add('is-hidden'));
+    $('#prose-skel').hidden = false;
+    Object.keys(STEP).forEach(id => setStep(id, 'pending', '', ''));
+    setTrail(true);
+    $('#trail-title').textContent = 'Answering';
+    setBusy(true);
+    exhibitsLoading('Searching 6 documents…');
+    const t0 = performance.now();
+    const clock = every(100, () => trailMeta(((performance.now() - t0) / 1000).toFixed(1) + ' s elapsed'));
+
+    setStep('search', 'active', '0 found'); announce('Searching passages');
+    let found = 0;
+    const count = every(25, () => { found = Math.min(16, found + 1); setStep('search', 'active', `${found} found`); if (found === 16) clearInterval(count); });
+
+    later(400, () => {
+      setStep('search', 'done', STEP.search.final);
+      setStep('rank', 'active', 'Scoring 16 passages'); announce('Ranking passages');
+      exhibitsLoading('Ranking 16 passages…');
+    });
+    later(2300, () => {
+      setStep('rank', 'done', STEP.rank.final);
+      showExhibits(true);
+      setStep('write', 'active', '0 words'); announce('Writing answer');
+      $('#prose-skel').hidden = true;
+      const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true');
+      prose.append(caret);
+      let i = 0, n = 0;
+      const tick = every(4050 / words.length, () => {
+        const w = words[i]; w.classList.remove('is-hidden'); w.after(caret);
+        if (isWord(w)) n++;
+        setStep('write', 'active', `${n} words`);
+        if (++i >= words.length) clearInterval(tick);
+      });
+    });
+    later(6400, () => {
+      $('.caret', prose)?.remove();
+      words.forEach(w => w.classList.remove('is-hidden'));
+      setStep('write', 'done', STEP.write.final);
+      setStep('verify', 'active', '0 of 4 checked'); announce('Verifying claims');
+      $$('.c', prose).forEach(c => c.classList.add('is-checking'));
+    });
+    ['supported', 'supported', 'partial', 'supported'].forEach((v, i) => later(6400 + 330 * (i + 1), () => {
+      const c = $(`.c[data-c="${i + 1}"]`, prose);
+      c.classList.remove('is-checking'); c.dataset.mark = v;
+      setStep('verify', 'active', `${i + 1} of 4 checked`);
+    }));
+    later(7800, () => {
+      clearInterval(clock);
+      setStep('verify', 'done', STEP.verify.final);
+      $('#trail-title').textContent = 'How this answer was verified';
+      trailMeta('4 steps, 7.8 s');
+      announce('Answer verified: 3 claims verified, 1 partial, 1 conflict between sources.');
+    });
+    later(8300, () => $('.prose-wrap').classList.add('is-leaving'));
+    later(8470, () => {
+      $$('.c', prose).forEach(c => delete c.dataset.mark);
+      $('.prose-wrap').classList.remove('is-leaving');
+      answer.dataset.phase = 'done';
+      setTrail(false);
+      setBusy(false);
+      setView('ledger', true);
+      app.dataset.state = 4; markSwitcher(4);
+    });
+  }
+  function stopLive() {
+    clearTimers();
+    $('.caret', prose)?.remove();
+    $('#prose-skel').hidden = true;
+    answer.dataset.phase = 'stopped';
+    const active = $('.step[data-status="active"]', trail);
+    if (active) { active.dataset.status = 'stopped'; $('.step-detail', active).textContent = 'Stopped'; $('.step-time', active).textContent = ''; }
+    $('#trail-title').textContent = 'Stopped before verification';
+    if (exhibits.dataset.loading === 'true') exhibits.hidden = true;
+    setBusy(false);
+    announce('Stopped');
+  }
+
+  /* ── Exhibit viewer ── */
+  const lines = (ws, hl) => `<div class="page-lines${hl ? ' page-lines--hl' : ''}" aria-hidden="true">${ws.map(w => `<i style="--w:${w}%"></i>`).join('')}</div>`;
+  const EX = {
+    1: { short: 'Annual Report 2025', full: 'Northwind Renewables — Annual Report 2025. PDF, 6 pages.', pages: 6, page: 3, rel: 94,
+      body: `<p class="page-run">Northwind Renewables — Annual Report 2025</p>
+        <h3 class="page-h">Financial review</h3>
+        <div class="page-para"><div class="margin"><span class="tick tick--supported">${ico('check')}C1</span><span class="tick tick--supported">${ico('check')}C2</span></div>
+        <p><mark class="hl hl--conflict" id="hl-c1">Revenue in 2025 was €412 million.</mark> <mark class="hl" id="hl-c2">This was up from €356 million in 2024.</mark> Total generation reached 5.9 TWh…</p></div>
+        <div class="page-para"><div class="margin"><span class="tick tick--partial">${ico('partial')}C3</span></div>
+        <p><mark class="hl" id="hl-c3">Revenue growth was driven by a full year of contribution from the Kestrel Ridge onshore expansion…</mark></p></div>
+        ${lines([100, 96, 98, 72])}${lines([100, 94, 99, 97, 60])}`,
+      callout: `<div class="callout callout--conflict"><p class="callout-h">${ico('neq')}Exhibit 2 disagrees with this page</p>
+        <blockquote>Revenue in 2025 was €398 million.</blockquote><p class="callout-src">Q4 &amp; FY2025 Results, page 1</p>
+        <button class="btn btn--outline btn--sm" data-open="2" data-page="1" data-hl="c4">${ico('open')}Open exhibit 2</button></div>` },
+    2: { short: 'Q4 & FY2025 Results', full: 'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results. PDF, 2 pages.', pages: 2, page: 1, rel: 91,
+      body: `<p class="page-run">Press release</p>
+        <h3 class="page-h">Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results</h3>${lines([100, 88])}
+        <div class="page-para"><div class="margin"><span class="tick tick--supported">${ico('check')}C4</span></div>
+        <p><mark class="hl hl--conflict" id="hl-c4">Revenue in 2025 was €398 million.</mark> …</p></div>
+        ${lines([100, 97, 99, 64])}${lines([100, 92, 70])}`,
+      callout: `<div class="callout callout--conflict"><p class="callout-h">${ico('neq')}Exhibit 1 disagrees with this page</p>
+        <blockquote>Revenue in 2025 was €412 million.</blockquote><p class="callout-src">Annual Report 2025, page 3</p>
+        <button class="btn btn--outline btn--sm" data-open="1" data-page="3" data-hl="c1">${ico('open')}Open exhibit 1</button></div>` },
+    3: { short: 'Sustainability Report', full: '2025 Sustainability Report. PDF, 4 pages.', pages: 4, page: 1, rel: 76 },
+    4: { short: 'Sustainability Report', full: '2025 Sustainability Report. PDF, 4 pages.', pages: 4, page: 2, rel: 57 },
+    5: { short: 'Q4 & FY2025 Results', full: 'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results. PDF, 2 pages.', pages: 2, page: 2, rel: 52 },
+  };
+  function renderViewer(hl) {
+    const ex = EX[vw.n], onCited = vw.page === ex.page;
+    $('#viewer-kicker').textContent = `Exhibit ${vw.n}`;
+    $('#viewer-title').textContent = ex.short;
+    $('#viewer-full').textContent = ex.full;
+    $('#viewer-page').textContent = `Page ${vw.page} of ${ex.pages}`;
+    $('#viewer-rel').textContent = `Relevance ${ex.rel}`;
+    $('[data-action="page"][data-dir="-1"]', viewer).disabled = vw.page <= 1;
+    $('[data-action="page"][data-dir="1"]', viewer).disabled = vw.page >= ex.pages;
+    let body, callout = '';
+    if (onCited && ex.body) { body = ex.body; callout = ex.callout || ''; }
+    else if (onCited) {
+      body = `<p class="page-run">${ex.full.split('.')[0]}</p>${lines([100, 95, 98, 70])}
+        <div class="page-para"><div class="margin"><span class="tick tick--retrieved">Retrieved</span></div>${lines([100, 97, 92, 58], true)}</div>${lines([100, 96, 99, 94, 66])}`;
+      callout = `<div class="callout callout--quiet"><p class="callout-h">Retrieved, not cited</p><p class="callout-src">This passage ranked ${ex.rel} for relevance but the answer doesn't rely on it.</p></div>`;
+    } else {
+      body = `<p class="page-run">${ex.full.split('.')[0]}</p>${lines([100, 95, 98, 70])}${lines([100, 97, 92, 99, 58])}${lines([100, 96, 99, 94, 66])}`;
+      callout = `<div class="callout callout--quiet"><p class="callout-h">Nothing retrieved from this page</p><p class="callout-src">The cited passage is on page ${ex.page}.</p></div>`;
+    }
+    $('#viewer-body').innerHTML = `<div class="page">${body}<p class="page-num">${vw.page}</p></div>${callout}`;
+    $('#viewer-body').scrollTop = 0;
+    const m = hl && document.getElementById('hl-' + hl);
+    if (m) { m.scrollIntoView({ block: 'center' }); if (!reduce.matches) m.classList.add('is-flash'); }
+  }
+  function openViewer(n, page, hl, trigger) {
+    vw = { n, page: page || EX[n].page };
+    // Buttons inside the viewer are re-rendered away; keep the original opener for focus return.
+    if (!(trigger && viewer.contains(trigger))) lastTrigger = trigger || $(`.ex[data-open="${n}"]`);
+    viewer.hidden = false; app.classList.add('viewer-open');
+    $$('.ex').forEach(b => b.setAttribute('aria-current', String(+b.dataset.open === n)));
+    renderViewer(hl);
+    requestAnimationFrame(() => { $('#viewer-title').focus({ preventScroll: true }); placeBracket(); });
+  }
+  function closeViewer(restore = true) {
+    if (viewer.hidden) return;
+    viewer.hidden = true; app.classList.remove('viewer-open');
+    $$('.ex').forEach(b => b.removeAttribute('aria-current'));
+    if (restore && lastTrigger && document.contains(lastTrigger)) lastTrigger.focus({ preventScroll: true });
+    requestAnimationFrame(placeBracket);
+  }
+  function setNav(open) {
+    app.classList.toggle('nav-open', open);
+    $('[data-action="nav"]').setAttribute('aria-expanded', String(open));
+    if (open) $('.nav-item', app).focus();
+  }
+
+  /* ── Toast ── */
+  let toastT;
+  function toast(msg) {
+    toastEl.textContent = msg; toastEl.classList.add('is-on');
+    clearTimeout(toastT); toastT = setTimeout(() => toastEl.classList.remove('is-on'), 3200);
+  }
+
+  /* ── Prototype controls ── */
+  function markSwitcher(n) { $$('[data-proto-state]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.protoState === n))); }
+  function setState(n) {
+    clearTimers();
+    app.dataset.state = n; markSwitcher(n);
+    closeViewer(false); setNav(false); resetExtras();
+    scroller.scrollTop = 0;
+    if (n === 1) { resetAnswer(); setBusy(false); }
+    else if (n === 2) runLive();
+    else if (n === 3) settle('prose');
+    else if (n === 4) { settle('ledger'); setRow($('#row-c3'), true); }
+    else if (n === 5) { settle('ledger'); openViewer(1, 3, 'c1', null); }
+  }
+  function setTheme(t) {
+    html.dataset.theme = t;
+    const b = $('#theme-btn');
+    b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+    $('use', b).setAttribute('href', t === 'dark' ? '#i-sun' : '#i-moon');
+    $$('[data-proto-theme]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.protoTheme === t)));
+  }
+  function setWidth(mobile) {
+    stage.classList.toggle('is-mobile', mobile);
+    document.body.classList.toggle('frame', mobile);
+    $$('[data-proto-width]').forEach(x => x.setAttribute('aria-pressed', String((x.dataset.protoWidth === 'mobile') === mobile)));
+    requestAnimationFrame(placeBracket);
+  }
+
+  const SUGGESTED = [
+    "What was Northwind Renewables' revenue in 2025?",
+    'When is the Aurora offshore wind project expected to be commissioned?',
+    'How much has Northwind reduced its emissions intensity versus 2020?',
+    'Who is the CEO and when did they start?',
+    'Which projects in the pipeline are under construction?',
+    'What are the key risks facing the Aurora project?',
+  ];
+  const ONE_SCRIPT = 'This prototype scripts one answer. Try the revenue question.';
+
+  /* ── Events ── */
+  document.addEventListener('click', e => {
+    const t = e.target.closest('button, a, .row-main, .scrim');
+    if (!t) return;
+    if (t.matches('[data-proto-state]')) return setState(+t.dataset.protoState);
+    if (t.matches('[data-proto-theme]')) return setTheme(t.dataset.protoTheme);
+    if (t.matches('[data-proto-width]')) return setWidth(t.dataset.protoWidth === 'mobile');
+    if (t.matches('[data-open]')) { e.preventDefault(); return openViewer(+t.dataset.open, +t.dataset.page || null, t.dataset.hl || null, t); }
+    if (t.matches('.seg-btn')) return setView(t.dataset.view);
+    if (t.matches('.row-toggle')) { const r = t.closest('.row'); return setRow(r, !r.classList.contains('is-open')); }
+    if (t.matches('.xref')) { e.preventDefault(); return flashRows(t.getAttribute('href').slice(1)); }
+    if (t.matches('.knot')) return flashRows('row-d1');
+    if (t.matches('.tally-item')) { setView('ledger'); return requestAnimationFrame(() => flashRows(t.dataset.target)); }
+    if (t.matches('.suggest-item')) {
+      const i = +t.dataset.q;
+      if (i === 0) return setState(2);
+      ask.value = SUGGESTED[i]; autosize(); updateSend(); ask.focus(); return toast(ONE_SCRIPT);
+    }
+    if (t.matches('.row-main')) {
+      if (String(getSelection())) return;
+      const r = t.closest('.row'); return setRow(r, !r.classList.contains('is-open'));
+    }
+    switch (t.dataset.action) {
+      case 'theme': return setTheme(html.dataset.theme === 'dark' ? 'light' : 'dark');
+      case 'collapse': {
+        const c = app.classList.toggle('is-collapsed');
+        t.setAttribute('aria-pressed', String(c)); t.setAttribute('aria-label', c ? 'Expand sidebar' : 'Collapse sidebar'); t.title = t.getAttribute('aria-label');
+        return;
+      }
+      case 'nav': return setNav(!app.classList.contains('nav-open'));
+      case 'close': closeViewer(); return setNav(false);
+      case 'trail': return setTrail(!trail.classList.contains('is-open'));
+      case 'new': return setState(1);
+      case 'recent': if (t.dataset.i === '0') return setState(4); return toast(ONE_SCRIPT);
+      case 'seal': return seal();
+      case 'copy': return toast('Answer copied with its citations');
+      case 'export': return toast('Answer and evidence exported as PDF');
+      case 'copy-link': return toast('Receipt link copied');
+      case 'vote': return vote(t);
+      case 'regen': return setState(2);
+      case 'page': vw.page += +t.dataset.dir; return renderViewer(null);
+      case 'original': return toast(`Opens the original PDF at page ${vw.page}`);
+      case 'search': return toast('Workspace search opens here');
+      case 'scope': return toast('Choose which documents to search');
+      case 'workspace': return toast('Switch workspace');
+      case 'account': return toast('Account menu');
+      case 'nav-link': e.preventDefault(); return toast('Navigation is not part of this prototype');
+    }
+  });
+  composer.addEventListener('submit', e => {
+    e.preventDefault();
+    if (composer.classList.contains('is-busy')) return stopLive();
+    const q = ask.value.trim(); if (!q) return;
+    if (/revenue/i.test(q)) { ask.value = ''; autosize(); setState(2); }
+    else toast(ONE_SCRIPT);
+  });
+  ask.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); composer.requestSubmit(); } });
+  ask.addEventListener('input', () => { autosize(); updateSend(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { if (!viewer.hidden) closeViewer(); else if (app.classList.contains('nav-open')) setNav(false); return; }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); return toast('Workspace search opens here'); }
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (/^[1-5]$/.test(e.key)) setState(+e.key);
+  });
+
+  /* ── Boot: open on the live run so the settle is the first thing seen ── */
+  setTheme('dark');
+  setWidth(false);
+  setState(2);
+})();
+</script>
+</body>
+</html>
