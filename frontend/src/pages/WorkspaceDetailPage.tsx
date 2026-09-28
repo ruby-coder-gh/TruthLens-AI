@@ -1,5 +1,5 @@
 import { useState, useRef, type FormEvent, type DragEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -26,6 +26,7 @@ import {
   MessageSquare,
   Loader2,
   ClipboardCheck,
+  Radar as RadarIcon,
 } from 'lucide-react';
 import { Button, Input, TextArea, Select, Card, Badge, Modal, EmptyState, Tabs, Skeleton, ProgressBar } from '../components/ui';
 import { staggerContainer, staggerItem, fadeIn, pageTransition, slideInRight } from '../components/motion';
@@ -34,8 +35,10 @@ import { PageShell } from '../components/PageWrappers';
 import {
   workspaceApi,
   documentApi,
+  radarApi,
 } from '../api/client';
 import { useAuth } from '../context/auth-context';
+import RadarPanel from '../components/radar/RadarPanel';
 import type {
   ActivityEntry,
   Workspace,
@@ -47,6 +50,7 @@ import type {
 const TABS = [
   { id: 'documents', label: 'Documents', icon: <FileText size={15} /> },
   { id: 'activity', label: 'Activity', icon: <Clock size={15} /> },
+  { id: 'radar', label: 'Radar', icon: <RadarIcon size={15} /> },
   { id: 'members', label: 'Members', icon: <Users size={15} /> },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
 ];
@@ -270,6 +274,7 @@ function WorkspaceHeader({
   activeTab,
   setActiveTab,
   memberCount,
+  radarOpenCount,
 }: {
   workspace: Workspace;
   isOwner: boolean;
@@ -277,7 +282,15 @@ function WorkspaceHeader({
   activeTab: string;
   setActiveTab: (tab: string) => void;
   memberCount: number;
+  radarOpenCount: number;
 }) {
+  // Tab labels are plain strings (Tab.label: string), so the open-conflict
+  // badge is rendered as "Radar (N)" text rather than a separate pill —
+  // matches the count-in-label convention this file already has none of, but
+  // keeps Tabs a dumb, reusable primitive instead of special-casing one tab.
+  const tabs = radarOpenCount > 0
+    ? TABS.map((tab) => (tab.id === 'radar' ? { ...tab, label: `Radar (${radarOpenCount})` } : tab))
+    : TABS;
   return (
     <motion.div variants={staggerItem} className="space-y-5">
       {/* Back + breadcrumb */}
@@ -367,7 +380,7 @@ function WorkspaceHeader({
         className="sticky top-0 z-20 -mx-1 px-1 pt-2 pb-1"
       >
         <Tabs
-          tabs={TABS}
+          tabs={tabs}
           activeTab={activeTab}
           onChange={setActiveTab}
           className="w-fit border border-border bg-card-2"
@@ -386,7 +399,11 @@ export default function WorkspaceDetailPage() {
   const workspaceId = id!;
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('documents');
+  // `?tab=radar` deep-links straight into the Radar tab (e.g. from a
+  // notification or a shared link) — read once on mount, then the tab is
+  // ordinary local state so switching tabs never touches the URL.
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(() => (searchParams.get('tab') === 'radar' ? 'radar' : 'documents'));
 
   // ─── Fetch workspace ──────────────────────────────────────────────────────
   const {
@@ -410,6 +427,18 @@ export default function WorkspaceDetailPage() {
 
   const members = memberList?.data ?? [];
   const isOwner = workspace?.owner_id === user?.id;
+  const myRole = members.find((m) => m.user_id === user?.id)?.role;
+  const canModerateRadar = isOwner || myRole === 'editor';
+
+  // Light, unfiltered fetch just for the tab badge — the panel itself fetches
+  // its own (filtered, polling) copy under the same query-key prefix so a
+  // dismiss/resolve mutation invalidates both in one call.
+  const { data: radarSummary } = useQuery({
+    queryKey: ['radar', workspaceId, 'summary'],
+    queryFn: () => radarApi.get(workspaceId),
+    enabled: !!workspaceId,
+  });
+  const radarOpenCount = radarSummary?.counts.open ?? 0;
 
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (wsLoading) {
@@ -526,6 +555,7 @@ export default function WorkspaceDetailPage() {
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             memberCount={members.length}
+            radarOpenCount={radarOpenCount}
           />
 
           {/* Tab content */}
@@ -543,6 +573,9 @@ export default function WorkspaceDetailPage() {
                 )}
                 {activeTab === 'activity' && (
                   <ActivityTab workspaceId={workspaceId} />
+                )}
+                {activeTab === 'radar' && (
+                  <RadarPanel workspaceId={workspaceId} canModerate={canModerateRadar} />
                 )}
                 {activeTab === 'members' && (
                   <MembersTab workspaceId={workspaceId} isOwner={isOwner} members={members} />
