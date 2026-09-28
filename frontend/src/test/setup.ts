@@ -25,6 +25,22 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();
 }
 
+// jsdom doesn't implement IntersectionObserver — framer-motion's `whileInView`
+// (e.g. LandingPage's scroll-reveal sections) throws without it on mount.
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  class MockIntersectionObserver implements IntersectionObserver {
+    readonly root: Element | Document | null = null;
+    readonly rootMargin: string = '';
+    readonly thresholds: ReadonlyArray<number> = [];
+    readonly scrollMargin: string = '';
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+    takeRecords = () => [];
+  }
+  globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+}
+
 // jsdom's canvas getContext() is unimplemented without the optional `canvas`
 // npm package — components with canvas-based ambient effects (e.g. the
 // Evidence sidebar's empty-state constellation) already null-guard on it, but
