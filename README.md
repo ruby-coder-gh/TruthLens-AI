@@ -4,6 +4,19 @@ Offline-first, enterprise-grade RAG platform. Ask natural-language questions ove
 
 > "Perplexity for your private documents — fully offline, fully free."
 
+## Demo in 60 seconds
+
+Requires [Ollama](https://ollama.ai) installed (the script starts it and pulls the model if needed):
+
+```bash
+./run.sh --demo
+```
+
+First run bootstraps everything (backend venv, frontend deps, Ollama model pull, seeded
+demo workspace) — later runs are fast. When the browser opens, click **Try the demo** on
+the login page and pick **Analyst** or **Admin**; no signup required. See
+[`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a 3-minute walkthrough of what to show.
+
 ## Architecture
 
 ```
