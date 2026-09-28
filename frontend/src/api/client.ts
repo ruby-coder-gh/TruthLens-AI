@@ -560,6 +560,11 @@ const adminPromptsApi = {
 
   diff: (id: string, against = 'active'): Promise<PromptDiffResponse> =>
     request(`/admin/prompts/${id}/diff${buildQuery({ against })}`),
+
+  // BUG-39: the only way back to the built-in DEFAULT_SYSTEM_PROMPT once any
+  // version has been promoted — retires whatever is active for `name`.
+  restoreDefault: (name = 'answer'): Promise<ActivePrompt> =>
+    request(`/admin/prompts/${name}/restore-default`, { method: 'POST' }),
 };
 
 // ─── SEC-2 — golden-entry approval workflow ─────────────────────────────────

@@ -6,7 +6,7 @@ import AdminPromptsPage from './AdminPromptsPage';
 import type { ActivePrompt, PromptEvalSummary, PromptVersion } from '../api/types';
 
 const {
-  list, get, active, create, evaluate, promote, rollback, remove, diff,
+  list, get, active, create, evaluate, promote, rollback, remove, diff, restoreDefault,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
@@ -17,11 +17,12 @@ const {
   rollback: vi.fn(),
   remove: vi.fn(),
   diff: vi.fn(),
+  restoreDefault: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
   adminApi: {
-    prompts: { list, get, active, create, evaluate, promote, rollback, remove, diff },
+    prompts: { list, get, active, create, evaluate, promote, rollback, remove, diff, restoreDefault },
   },
 }));
 
@@ -241,6 +242,40 @@ describe('AdminPromptsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: /^roll back$/i }));
 
     await waitFor(() => expect(rollback).toHaveBeenCalledWith('p-retired'));
+  });
+
+  // BUG-39: once a version is promoted, there was no way back to the
+  // built-in default without creating a copy of it.
+  it('confirms before restoring the built-in default prompt', async () => {
+    const user = userEvent.setup();
+    restoreDefault.mockResolvedValueOnce({
+      name: 'answer',
+      content: 'Built-in default prompt text.',
+      content_hash: 'default-hash',
+      model_name: null,
+      version: null,
+      version_id: null,
+      is_default: true,
+    });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: /restore built-in default/i }));
+    expect(restoreDefault).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('dialog', { name: /restore built-in default/i });
+    await user.click(within(dialog).getByRole('button', { name: /^restore default$/i }));
+
+    await waitFor(() => expect(restoreDefault).toHaveBeenCalledWith('answer'));
+  });
+
+  it('hides the restore-default button once the built-in default is already active', async () => {
+    active.mockResolvedValue({ ...activePrompt, is_default: true, version: null, version_id: null });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await screen.findByText(/no promoted version yet/i);
+    expect(screen.queryByRole('button', { name: /restore built-in default/i })).not.toBeInTheDocument();
   });
 
   it('queues a smoke eval for the selected row', async () => {

@@ -555,6 +555,66 @@ class TestRollback:
         assert resp.status_code == 409
 
 
+class TestRestoreDefault:
+    """BUG-39: once any prompt is promoted, there is no way back to the code
+    default without creating a copy. restore-default retires whatever is
+    active so `registry.get_active` falls back to `DEFAULT_SYSTEM_PROMPT`."""
+
+    async def test_restore_default_retires_the_active_version_and_audits(
+        self, client: AsyncClient, admin_headers, test_db: AsyncSession, monkeypatch
+    ):
+        _install_pipeline(monkeypatch, _grounded_generate())
+        draft = await _create_draft(client, admin_headers, "Custom promoted prompt.")
+        await _evaluate(client, admin_headers, draft["id"])
+        await client.post(f"{PROMPTS}/{draft['id']}/promote", headers=admin_headers)
+
+        resp = await client.post(f"{PROMPTS}/answer/restore-default", headers=admin_headers)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["is_default"] is True
+        assert body["content"] == DEFAULT_SYSTEM_PROMPT
+        assert body["content_hash"] == registry.DEFAULT_PROMPT_HASH
+        assert body["version_id"] is None
+
+        row = (
+            await test_db.execute(
+                select(PromptVersion).where(PromptVersion.id == draft["id"])
+            )
+        ).scalar_one()
+        assert row.status == "retired"
+
+        resolved = await registry.get_active(test_db, "answer")
+        assert resolved.is_default is True
+        assert resolved.content == DEFAULT_SYSTEM_PROMPT
+
+        audit = (
+            await test_db.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "prompt.restore_default",
+                    AuditLog.resource_id == draft["id"],
+                )
+            )
+        ).scalar_one()
+        details = json.loads(audit.details or "{}")
+        assert details["name"] == "answer"
+        assert details["to_hash"] == registry.DEFAULT_PROMPT_HASH
+
+    async def test_restore_default_is_a_no_op_when_already_on_default(
+        self, client: AsyncClient, admin_headers
+    ):
+        resp = await client.post(f"{PROMPTS}/answer/restore-default", headers=admin_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["is_default"] is True
+
+    async def test_non_admin_cannot_restore_default(
+        self, client: AsyncClient, auth_headers
+    ):
+        resp = await client.post(f"{PROMPTS}/answer/restore-default", headers=auth_headers)
+        assert resp.status_code == 403
+
+
 class TestDelete:
     async def test_deleting_a_draft_is_audited(
         self, client: AsyncClient, admin_headers, test_db: AsyncSession
