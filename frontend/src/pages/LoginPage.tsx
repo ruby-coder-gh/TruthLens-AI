@@ -1,18 +1,21 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle, UserSearch, ShieldCheck } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
-import { Card } from '../components/ui';
+import { Card, Button } from '../components/ui';
 import { useAuth } from '../context/auth-context';
+import { useReady } from '../hooks/useReady';
+import type { DemoPersona } from '../api/types';
 import Logo from '../components/Logo';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginPage() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, loginDemo, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const { demoMode, demoWorkspaceId } = useReady();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,6 +23,8 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState<DemoPersona | null>(null);
+  const [demoError, setDemoError] = useState('');
 
   useEffect(() => {
     if (isAuthenticated) navigate('/workspaces', { replace: true });
@@ -34,6 +39,21 @@ export default function LoginPage() {
     if (!trimmedPassword) next.password = 'Password is required';
     setErrors(next);
     return Object.keys(next).length === 0;
+  }
+
+  async function handleDemoLogin(persona: DemoPersona) {
+    setDemoError('');
+    setDemoLoading(persona);
+    try {
+      await loginDemo(persona);
+      if (persona === 'admin') navigate('/admin', { replace: true });
+      else navigate(demoWorkspaceId ? `/workspaces/${demoWorkspaceId}/chat` : '/workspaces', { replace: true });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Demo login failed. Please try again.';
+      setDemoError(msg);
+    } finally {
+      setDemoLoading(null);
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -96,6 +116,74 @@ export default function LoginPage() {
             Sign in to TruthLens AI to continue
           </motion.p>
         </motion.div>
+
+        {/* One-click demo — only ever rendered when the backend is running
+            in demo mode; hidden entirely otherwise. */}
+        {demoMode && (
+          <motion.div
+            initial={{ opacity: 0.99, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.5, ease: [0.16, 1, 0.3, 1] as const }}
+            className="mb-6"
+          >
+            <Card className="p-5">
+              <p className="text-sm font-semibold text-text">One-click demo</p>
+              <p className="mt-1 text-xs text-text-muted">Skip the form — explore TruthLens as a seeded persona.</p>
+
+              <AnimatePresence>
+                {demoError && (
+                  <motion.p
+                    initial={{ opacity: 0.99, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    role="alert"
+                    className="mt-3 flex items-center gap-2 rounded-control border border-red/28 bg-red/10 px-3 py-2 text-xs text-red"
+                  >
+                    <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
+                    {demoError}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={demoLoading === 'analyst'}
+                    disabled={demoLoading !== null}
+                    onClick={() => void handleDemoLogin('analyst')}
+                    className="w-full justify-start"
+                  >
+                    <UserSearch size={14} aria-hidden="true" />
+                    Analyst
+                  </Button>
+                  <p className="px-1 text-[11px] text-text-dim">Ask, seal receipts, run Radar</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={demoLoading === 'admin'}
+                    disabled={demoLoading !== null}
+                    onClick={() => void handleDemoLogin('admin')}
+                    className="w-full justify-start"
+                  >
+                    <ShieldCheck size={14} aria-hidden="true" />
+                    Admin
+                  </Button>
+                  <p className="px-1 text-[11px] text-text-dim">Analytics, review queue, audit</p>
+                </div>
+              </div>
+            </Card>
+
+            <div className="my-6 flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-text-dim">
+              <span className="h-px flex-1 bg-border" />
+              or sign in
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          </motion.div>
+        )}
 
         {/* Card */}
         <motion.div
