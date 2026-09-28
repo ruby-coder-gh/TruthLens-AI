@@ -970,6 +970,22 @@ export interface ReceiptPayload {
   asked_at: string | null;
   issued_at: string;
   issuer: string;
+  /** K5: open Radar contradictions involving this answer's cited chunks —
+   *  a public reader must learn the sources disagree, not just the seal
+   *  holder who saw the chat's D-rows (R2-16). */
+  conflicts?: ReceiptConflict[];
+}
+
+export interface ReceiptConflictSide {
+  document_name: string;
+  page_number: number | null;
+  sentence: string;
+}
+
+export interface ReceiptConflict {
+  a: ReceiptConflictSide;
+  b: ReceiptConflictSide;
+  score: number;
 }
 
 export interface ReceiptView {
