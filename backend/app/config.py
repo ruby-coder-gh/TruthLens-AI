@@ -180,6 +180,16 @@ class Settings(BaseSettings):
     # the DB engine is disposed.
     WS_SHUTDOWN_DRAIN_SECONDS: int = 10
 
+    # ─── Investigation Agent (BUG-10) ─────────
+    # A local model is slow per call, and every extra sub-question is a full
+    # retrieval+generation round-trip run mostly serially (one local model, no
+    # real GPU fan-out) — the prompt asked for 3-6 and each LLM call allowed
+    # up to 1536/2048 tokens, which measured ~4 min end-to-end on qwen3:4b.
+    # Capping both keeps a run in the low tens of seconds per step.
+    INVESTIGATION_MAX_SUB_QUESTIONS: int = 4
+    INVESTIGATION_DECOMPOSE_MAX_TOKENS: int = 768
+    INVESTIGATION_SYNTHESIS_MAX_TOKENS: int = 1280
+
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_REQUESTS: int = 30
