@@ -790,3 +790,28 @@ class TestGuardrailClaims:
         frame = next(m["payload"] for m in sent if m["type"] == "guardrail")
         assert frame["claims"] == []
 
+    async def test_cached_replay_carries_the_stored_trust_components(self):
+        """BUG-50: a cache hit must replay the origin's trust sub-scores, not `{}`."""
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        components = {
+            "retrieval_quality": 0.91,
+            "faithfulness": 0.82,
+            "relevance": 0.77,
+            "source_authority": 0.65,
+        }
+        cached = Query(
+            id="cached-trust", workspace_id="ws-1", query_text="q", response_text="a",
+            response_sources="[]", trust_score=0.8, trust_components=components,
+        )
+        await ws_api._send_cached_query(cached, _pipeline_sink(_send, "cached-trust"), 3)
+
+        frame = next(m["payload"] for m in sent if m["type"] == "trust_score")
+        assert frame["components"] == components
+

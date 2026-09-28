@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Plus, FileText, Clock, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { FolderOpen, Plus, FileText, Clock, Pencil, Trash2, AlertTriangle, X } from 'lucide-react';
 import { Button, Card, Input, Modal, Select } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell, StateBlock } from '../components/PageWrappers';
-import { collectionApi, workspaceApi } from '../api/client';
-import type { Workspace } from '../api/types';
+import { collectionApi, documentApi, workspaceApi } from '../api/client';
+import type { Document, Workspace } from '../api/types';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -45,16 +45,21 @@ export default function AdminCollectionsPage() {
   const [newDesc, setNewDesc] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
 
-  // BUG-18: edit/delete. There is no backend endpoint to attach a document to
-  // a collection after upload (documents carry no `collection_id` field the
-  // API lets a client set — see `POST /workspaces/{id}/documents` and
-  // `DocumentResponse`), so "add docs" isn't implemented — noted in the report.
+  // BUG-18: edit/delete.
   const [editTarget, setEditTarget] = useState<CollectionItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CollectionItem | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // BUG-18: add/remove documents. `docsList` is every document in the
+  // workspace; membership is `doc.collection_id === docsTarget.id`.
+  const [docsTarget, setDocsTarget] = useState<CollectionItem | null>(null);
+  const [docsList, setDocsList] = useState<Document[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [docsError, setDocsError] = useState('');
+  const [docActionId, setDocActionId] = useState<string | null>(null);
 
   const loadWorkspaces = useCallback(async () => {
     setWorkspacesLoading(true);
@@ -160,6 +165,57 @@ export default function AdminCollectionsPage() {
     }
   }
 
+  async function openDocs(col: CollectionItem) {
+    setDocsTarget(col);
+    if (!workspaceId) return;
+    setDocsLoading(true);
+    setDocsError('');
+    try {
+      const result = await documentApi.list(workspaceId);
+      setDocsList(result.data || []);
+    } catch (err) {
+      setDocsList([]);
+      setDocsError(err instanceof Error ? err.message : 'Failed to load documents.');
+    } finally {
+      setDocsLoading(false);
+    }
+  }
+
+  async function handleAddDoc(doc: Document) {
+    if (!docsTarget || !workspaceId) return;
+    const previousCollectionId = doc.collection_id;
+    setDocActionId(doc.id);
+    try {
+      await collectionApi.addDocuments(workspaceId, docsTarget.id, [doc.id]);
+      setDocsList((prev) => prev.map((d) => (d.id === doc.id ? { ...d, collection_id: docsTarget.id } : d)));
+      setCollections((prev) => prev.map((c) => {
+        if (c.id === docsTarget.id) return { ...c, document_count: c.document_count + 1 };
+        if (c.id === previousCollectionId) return { ...c, document_count: Math.max(0, c.document_count - 1) };
+        return c;
+      }));
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to add document', 'error');
+    } finally {
+      setDocActionId(null);
+    }
+  }
+
+  async function handleRemoveDoc(doc: Document) {
+    if (!docsTarget || !workspaceId) return;
+    setDocActionId(doc.id);
+    try {
+      await collectionApi.removeDocument(workspaceId, docsTarget.id, doc.id);
+      setDocsList((prev) => prev.map((d) => (d.id === doc.id ? { ...d, collection_id: null } : d)));
+      setCollections((prev) => prev.map((c) => (
+        c.id === docsTarget.id ? { ...c, document_count: Math.max(0, c.document_count - 1) } : c
+      )));
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to remove document', 'error');
+    } finally {
+      setDocActionId(null);
+    }
+  }
+
   const hasWorkspaces = workspaces.length > 0;
 
   return (
@@ -257,6 +313,10 @@ export default function AdminCollectionsPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-3">
+                      <Button size="sm" variant="secondary" onClick={() => void openDocs(col)}>
+                        <FileText size={12} />
+                        Documents
+                      </Button>
                       <Button size="sm" variant="secondary" onClick={() => openEdit(col)}>
                         <Pencil size={12} />
                         Edit
@@ -359,6 +419,57 @@ export default function AdminCollectionsPage() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* Manage documents (BUG-18) */}
+      <Modal
+        open={docsTarget !== null}
+        onClose={() => setDocsTarget(null)}
+        title={docsTarget ? `Manage documents — ${docsTarget.name}` : 'Manage documents'}
+      >
+        {docsLoading ? (
+          <StateBlock role="status">Loading documents…</StateBlock>
+        ) : docsError ? (
+          <StateBlock tone="danger" role="alert">{docsError}</StateBlock>
+        ) : docsList.length === 0 ? (
+          <p className="text-sm text-text-muted">No documents in this workspace yet.</p>
+        ) : (
+          <ul className="max-h-96 space-y-2 overflow-y-auto">
+            {docsList.map((doc) => {
+              const inThisCollection = docsTarget !== null && doc.collection_id === docsTarget.id;
+              const busy = docActionId === doc.id;
+              return (
+                <li
+                  key={doc.id}
+                  className="flex items-center justify-between gap-3 rounded-control border border-border bg-card-2 px-3 py-2"
+                >
+                  <span className="min-w-0 truncate text-sm text-text">{doc.original_filename}</span>
+                  {inThisCollection ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={busy}
+                      onClick={() => void handleRemoveDoc(doc)}
+                    >
+                      <X size={12} />
+                      Remove
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={busy}
+                      onClick={() => void handleAddDoc(doc)}
+                    >
+                      <Plus size={12} />
+                      Add
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Modal>
       </PageShell>
     </motion.div>

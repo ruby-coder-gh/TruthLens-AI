@@ -171,6 +171,37 @@ async def test_list_documents(client: AsyncClient, auth_headers: dict[str, str],
 
 
 @pytest.mark.asyncio
+async def test_list_documents_reports_collection_id(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """BUG-18: the collection picker needs to know which documents are
+    already assigned, so the list response must carry `collection_id`."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("coll_test.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+    assert upload.json()["collection_id"] is None
+
+    coll = await client.post(
+        f"/api/workspaces/{workspace_id}/collections",
+        json={"name": "Reports"},
+        headers=auth_headers,
+    )
+    collection_id = coll.json()["id"]
+    await client.put(
+        f"/api/workspaces/{workspace_id}/collections/{collection_id}/documents",
+        json={"document_ids": [doc_id]},
+        headers=auth_headers,
+    )
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    row = next(d for d in resp.json()["data"] if d["id"] == doc_id)
+    assert row["collection_id"] == collection_id
+
+
+@pytest.mark.asyncio
 async def test_list_documents_does_not_query_chunk_quarantines_table(
     client: AsyncClient, auth_headers: dict[str, str], workspace_id: str, test_db, test_engine
 ):

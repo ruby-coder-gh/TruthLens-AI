@@ -142,7 +142,9 @@ function formatPricingCaption(
 ): string {
   const entries = Object.entries(pricing);
   if (pricingSource === 'none' || entries.length === 0) {
-    return 'Estimated — no pricing configured for any model; costs shown as $0.';
+    // BUG-43: this deployment's models are local (no per-token API cost),
+    // so $0 here isn't an estimate rounding down — it's the real cost.
+    return 'Local models have no API cost — no pricing is configured, so costs show as $0.';
   }
   const parts = entries.map(
     ([model, rate]) => `${model} $${rate.input_per_1k}/1K in · $${rate.output_per_1k}/1K out`,

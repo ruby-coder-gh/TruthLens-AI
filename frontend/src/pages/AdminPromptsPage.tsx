@@ -13,6 +13,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Trash2,
+  Undo2,
   XCircle,
   Zap,
 } from 'lucide-react';
@@ -280,6 +281,9 @@ export default function AdminPromptsPage() {
   // keeps promoting in one click, matching the existing BUG-4-regression
   // test coverage for that flow.
   const [rollbackTarget, setRollbackTarget] = useState<PromptVersion | null>(null);
+  // BUG-39: the only way back to the built-in default once any version has
+  // been promoted — also stops at a confirmation, same as rollback.
+  const [restoreDefaultConfirming, setRestoreDefaultConfirming] = useState(false);
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const promptsQuery = useQuery({
@@ -426,6 +430,16 @@ export default function AdminPromptsPage() {
     onError: (err) => addToast(errorMessage(err), 'error'),
   });
 
+  const restoreDefaultMutation = useMutation({
+    mutationFn: () => adminApi.prompts.restoreDefault(PROMPT_NAME),
+    onSuccess: () => {
+      setRestoreDefaultConfirming(false);
+      invalidatePrompts();
+      addToast('Restored the built-in default prompt.', 'success');
+    },
+    onError: (err) => addToast(errorMessage(err), 'error'),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (version: PromptVersion) => adminApi.prompts.remove(version.id),
     onSuccess: (_void, version) => {
@@ -502,21 +516,33 @@ export default function AdminPromptsPage() {
         ) : activePrompt ? (
           <motion.div variants={staggerItem}>
             <Card className="p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
-                  <ShieldCheck size={16} />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-text">
-                    Active prompt · <code className="font-mono text-xs">{activePrompt.content_hash}</code>
-                  </p>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {activePrompt.is_default
-                      ? 'No promoted version yet — answers use the built-in default prompt.'
-                      : `${activePrompt.name} v${activePrompt.version}`}
-                    {activePrompt.model_name ? ` · pinned to ${activePrompt.model_name}` : ' · no model pinned'}
-                  </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
+                    <ShieldCheck size={16} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text">
+                      Active prompt · <code className="font-mono text-xs">{activePrompt.content_hash}</code>
+                    </p>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {activePrompt.is_default
+                        ? 'No promoted version yet — answers use the built-in default prompt.'
+                        : `${activePrompt.name} v${activePrompt.version}`}
+                      {activePrompt.model_name ? ` · pinned to ${activePrompt.model_name}` : ' · no model pinned'}
+                    </p>
+                  </div>
                 </div>
+                {activePrompt.is_default ? null : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRestoreDefaultConfirming(true)}
+                  >
+                    <Undo2 size={14} />
+                    Restore built-in default
+                  </Button>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -903,6 +929,34 @@ export default function AdminPromptsPage() {
               </div>
             </div>
           ) : null}
+        </Modal>
+
+        {/* ── Restore built-in default confirmation (BUG-39) ──────────────── */}
+        <Modal
+          open={restoreDefaultConfirming}
+          onClose={() => setRestoreDefaultConfirming(false)}
+          title="Restore built-in default"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-muted">
+              Retire the active prompt and go back to the built-in default? Every answer will use the
+              hard-coded default prompt immediately, for every user, until a new version is promoted.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setRestoreDefaultConfirming(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={restoreDefaultMutation.isPending}
+                onClick={() => restoreDefaultMutation.mutate()}
+              >
+                <Undo2 size={14} />
+                Restore default
+              </Button>
+            </div>
+          </div>
         </Modal>
       </PageShell>
     </motion.div>
