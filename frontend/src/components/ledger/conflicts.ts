@@ -19,14 +19,23 @@ export interface ConflictPair {
 // emissions figure) — matching on `chunk_id` alone attached every open
 // contradiction that merely touched that page to every claim that cited it.
 // A claim only "belongs" to a contradiction side when its own wording (text
-// or cited evidence) actually shares a number or a distinguishing word with
-// that side's sentence.
+// or cited evidence) actually shares a number/date or *two or more*
+// distinguishing words with that side's sentence — R3 follow-up: a single
+// shared word was still too weak (an Aurora claim mentioning "revenue" in
+// passing — "...higher revenue was partially offset by increased
+// development spend ahead of Aurora's construction phase." — isn't actually
+// about the revenue figure), so a lone word match no longer counts on its
+// own; a lone shared *number* still does, since two different disputed
+// figures landing on the same value is essentially never a coincidence.
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'with', 'from', 'that', 'this', 'these', 'those', 'was', 'were', 'are', 'been', 'have',
   'has', 'had', 'will', 'would', 'could', 'should', 'their', 'they', 'them', 'into', 'over', 'than', 'then',
   'also', 'which', 'while', 'about', 'across', 'after', 'before', 'during', 'under', 'both', 'source', 'sources',
   'report', 'reports', 'reported', 'company', 'companys', 'said', 'says', 'year', 'years', 'same', 'figure',
   'figures', 'differ', 'differs', 'different', 'shows', 'show', 'states', 'state', 'stated', 'according',
+  // Doc-title / company-name words — every chunk in the demo corpus mentions
+  // these, so sharing one proves nothing about two sentences being related.
+  'northwind', 'renewables',
 ]);
 
 function isYearToken(token: string): boolean {
@@ -48,14 +57,31 @@ function significantTokens(text: string): Set<string> {
 }
 
 /** True when `claim` is actually *about* `sentence` (a contradiction side's
- * own evidence sentence) — they share at least one significant word or
- * number, not just the same oversized source chunk. */
-function isAboutSameFact(claim: Claim, sentence: string): boolean {
+ * own evidence sentence) — they share a number/date, or two or more
+ * significant words, not just the same oversized source chunk (or, for a
+ * public receipt with no chunk id to pre-filter on at all, not just some
+ * incidental single word in common — see `isConflictRelevantToClaims`). */
+export function isAboutSameFact(claim: Pick<Claim, 'text' | 'evidence'>, sentence: string): boolean {
   const claimTokens = significantTokens(`${claim.text} ${claim.evidence ?? ''}`);
+  let sharedWords = 0;
   for (const token of significantTokens(sentence)) {
-    if (claimTokens.has(token)) return true;
+    if (!claimTokens.has(token)) continue;
+    if (/^\d+$/.test(token)) return true;
+    sharedWords += 1;
   }
-  return false;
+  return sharedWords >= 2;
+}
+
+/** Same relevance test as the Claim Ledger's `pairClaimConflicts`, for
+ * surfaces that only have a contradiction's two sentences to go on — no
+ * `chunk_id` to pre-filter with (the public Truth Receipt's `conflicts`
+ * payload never carried one; R3-6). Relevant when *any* claim in the answer
+ * is about either side's sentence. */
+export function isConflictRelevantToClaims(
+  claims: Pick<Claim, 'text' | 'evidence'>[],
+  conflict: { a: { sentence: string }; b: { sentence: string } },
+): boolean {
+  return claims.some((claim) => isAboutSameFact(claim, conflict.a.sentence) || isAboutSameFact(claim, conflict.b.sentence));
 }
 
 /** Every open contradiction with at least one side cited by a claim in this
