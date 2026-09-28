@@ -46,7 +46,10 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | Fix B backend | merged | d2b5033 — 468 passed. BUG-7,9,11,15,16(partial),17,19,24,34,35,59,60 fixed; BUG-1 FE-only; BUG-10 async progress deferred (feature); BUG-16 residual synonym gap → next sprint |
 | Follow-up G | merged | c2342b5 — BUG-18, 39, 43, 50(BE) fixed; local backend/.env pricing set {} |
 | Fix F2 shell/pages | merged | 27 bugs; integrated FE gate: 319 tests, tsc/lint/build green |
-| Investigation async (BUG-10) | running | lane H: 202 + background job + progress registry + polling UI + sub-question caps |
+| Investigation async (BUG-10) | merged | lane H + 5a210ca (G's cached-trust test fake). FE gate 321 green; full BE suite running |
+| Full gates | pass | BE 1113 passed / 2 skipped, ruff clean; FE 321 passed, tsc/lint/build clean |
+| Playwright QA round 2 | running | fresh seed ws b728acaf-…; CSV 12 row chunks; 4 contradictions. Reports → reports/QA2-verification.md + QA2-new-bugs.md |
+| Next | — | QA2 → fix any S1/S2 → PR + merge to main (merge commit) |
 | Playwright QA round 1 (detail) | done | fresh demo seed ws ae7efa84-…; backend bound to localhost (sec fix confirmed); reports → reports/QA-playwright-{bugs,report}.md |
 | Merge + gates | in progress | next: full suite → restart demo → Playwright QA → fix → re-sweep → PR+merge; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
 | Security + review | pending | |
