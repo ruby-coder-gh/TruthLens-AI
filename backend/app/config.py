@@ -188,7 +188,7 @@ class Settings(BaseSettings):
     # Capping both keeps a run in the low tens of seconds per step.
     INVESTIGATION_MAX_SUB_QUESTIONS: int = 4
     INVESTIGATION_DECOMPOSE_MAX_TOKENS: int = 768
-    INVESTIGATION_SYNTHESIS_MAX_TOKENS: int = 1280
+    INVESTIGATION_SYNTHESIS_MAX_TOKENS: int = 2048
 
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True

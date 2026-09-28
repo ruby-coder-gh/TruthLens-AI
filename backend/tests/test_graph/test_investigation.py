@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import asdict
 
+import pytest
 
 from app.graph.investigation import (
     SubQuestion,
@@ -231,14 +232,16 @@ class TestFormatConflictsContext:
 
 class TestSynthesizeNodeConflicts:
     """R2-7: investigation synthesis gets the workspace's open Radar
-    contradictions for the retrieved documents as explicit context, so
-    "identify conflicts" reports them instead of describing the corpus as
-    consistent (previously no contradictions were fed into synthesis)."""
+    contradictions for the retrieved documents as explicit context (document-
+    level, so "identify conflicts" reports every planted pair, not just the
+    ones whose exact chunk a sub-question happened to retrieve), or the whole
+    workspace when the question itself asks about conflicts/contradictions/
+    discrepancies."""
 
     @staticmethod
-    def _state(sub_questions):
+    def _state(sub_questions, query="Summarize the annual report"):
         return {
-            "query": "Identify conflicts",
+            "query": query,
             "workspace_id": "ws-1",
             "sub_questions": sub_questions,
             "reasoning_trace": [],
@@ -250,12 +253,13 @@ class TestSynthesizeNodeConflicts:
 
         sub_questions = [{
             "question": "Q1", "purpose": "p", "partial_answer": "Answer",
-            "retrieved_chunks": [{"chunk_id": "chunk-a"}, {"chunk_id": "chunk-b"}],
+            "retrieved_chunks": [{"document_id": "doc-a"}, {"document_id": "doc-b"}],
         }]
 
-        async def fake_fetch(workspace_id, chunk_ids):
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
             assert workspace_id == "ws-1"
-            assert sorted(chunk_ids) == ["chunk-a", "chunk-b"]
+            assert sorted(document_ids) == ["doc-a", "doc-b"]
+            assert whole_workspace is False
             return [{
                 "a": {"document_name": "Annual Report", "page_number": 1, "sentence": "Revenue was €412 million."},
                 "b": {"document_name": "Press Release", "page_number": 1, "sentence": "Revenue was €398 million."},
@@ -277,12 +281,45 @@ class TestSynthesizeNodeConflicts:
         assert "€398 million" in captured["user_prompt"]
         assert result["final_report"] == "# Report\nSynthesized."
 
-    def test_no_retrieved_chunks_skips_the_lookup_entirely(self, monkeypatch):
+    @pytest.mark.parametrize("query", [
+        "Compare the key findings and identify conflicts",
+        "Are there any contradictions between the sources?",
+        "Is there a discrepancy in the reported figures?",
+    ])
+    def test_a_conflict_question_fetches_the_whole_workspace(self, monkeypatch, query):
+        """R2-7 exact repro: 'identify conflicts' must not miss a planted
+        pair just because that document's chunk wasn't retrieved."""
+        from app.graph import investigation as inv
+
+        sub_questions = [{
+            "question": "Q1", "purpose": "p", "partial_answer": "Answer",
+            "retrieved_chunks": [{"document_id": "doc-a"}],
+        }]
+
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
+            assert whole_workspace is True
+            return [
+                {"a": {"document_name": "A", "page_number": 1, "sentence": "Revenue €412M."},
+                 "b": {"document_name": "B", "page_number": 1, "sentence": "Revenue €398M."}, "score": 0.9},
+                {"a": {"document_name": "A", "page_number": 2, "sentence": "CEO since March 2021."},
+                 "b": {"document_name": "C", "page_number": 1, "sentence": "CEO since January 2022."}, "score": 0.9},
+            ]
+
+        captured: dict = {}
+        monkeypatch.setattr(inv, "_fetch_investigation_conflicts", fake_fetch)
+        monkeypatch.setattr(inv, "_run_llm", lambda sp, up, **kw: captured.setdefault("user_prompt", up) or "# Report")
+
+        inv._synthesize_node(self._state(sub_questions, query=query))
+
+        assert "€412M" in captured["user_prompt"] and "€398M" in captured["user_prompt"]
+        assert "March 2021" in captured["user_prompt"] and "January 2022" in captured["user_prompt"]
+
+    def test_no_retrieved_documents_and_no_conflict_question_skips_the_lookup(self, monkeypatch):
         from app.graph import investigation as inv
 
         called: list[bool] = []
 
-        async def fake_fetch(workspace_id, chunk_ids):
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
             called.append(True)
             return []
 
@@ -299,7 +336,7 @@ class TestSynthesizeNodeConflicts:
         """A Radar/DB hiccup must never break report synthesis."""
         from app.graph import investigation as inv
 
-        async def fake_fetch(workspace_id, chunk_ids):
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
             raise RuntimeError("db unavailable")
 
         captured: dict = {}
@@ -314,7 +351,7 @@ class TestSynthesizeNodeConflicts:
         result = inv._synthesize_node(self._state([
             {
                 "question": "Q", "purpose": "p", "partial_answer": "A",
-                "retrieved_chunks": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+                "retrieved_chunks": [{"document_id": "d1"}, {"document_id": "d2"}],
             },
         ]))
 

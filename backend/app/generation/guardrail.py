@@ -40,6 +40,50 @@ _MARKER_RE = re.compile(r"\s*\[source:\s*(\d+)\]")
 # scored UNSUPPORTED/CONTRADICTED and failed otherwise-honest conflict
 # answers. Excluded from claim scoring like the refusal sentence below.
 _META_DISAGREEMENT_RE = re.compile(r"\b(?:disagree\w*|discrepanc\w*)\b", re.IGNORECASE)
+# R2-4, general case: a claim that names >=2 distinct values as alternatives
+# ("different values: 41% and 34%", "either March 2021 or January 2022",
+# "while the press release reports €398 million", "X in one and Y in the
+# other") -- used only by `_alternative_values` below, which also requires
+# >=2 distinct numbers, so a stray "one"/"differ" alone can't misfire.
+_ALTERNATIVES_CUE_RE = re.compile(
+    r"differ\w*|conflict\w*|inconsistent\w*"
+    r"|\beither\b[^.!?]{0,80}?\bor\b"
+    r"|\bone\b[^.!?]{0,80}?\bthe other\b"
+    r"|\bwhile\b[^.!?]{0,80}?\b(?:reports?|reported|states?|stated|shows?|showed)\b",
+    re.IGNORECASE,
+)
+# R2-4: a bare list item ("First quarter of 2028") has no subject/verb for
+# NLI to evaluate on its own -- `_looks_like_fragment` below merges it into
+# the previous claim instead of scoring it alone.
+# ponytail: word-list heuristic, not real POS tagging. Upgrade to spacy
+# (already a requirements.txt dep, unused today) if real no-verb sentences
+# start slipping through.
+_FRAGMENT_VERB_RE = re.compile(
+    r"\b(?:am|is|are|was|were|be|been|being|has|have|had|"
+    r"will|would|shall|should|can|could|may|might|must|do|does|did|"
+    r"became|become|becomes|began|begins?|brought|brings?|bought|buys?|built|builds?|"
+    r"caught|catches?|came|comes?|cut|cuts?|dealt|deals?|drove|drives?|ate|eats?|"
+    r"fell|falls?|felt|feels?|fought|fights?|found|finds?|flew|flies?|forgot|forgets?|"
+    r"gave|gives?|went|goes?|grew|grows?|heard|hears?|held|holds?|hit|hits?|"
+    r"knew|knows?|laid|lays?|led|leads?|left|leaves?|lent|lends?|let|lets?|"
+    r"lost|loses?|made|makes?|meant|means?|met|meets?|paid|pays?|put|puts?|"
+    r"ran|runs?|read|reads?|rode|rides?|rose|rises?|said|says?|saw|sees?|"
+    r"sent|sends?|set|sets?|shot|shoots?|shut|shuts?|sold|sells?|sought|seeks?|"
+    r"spent|spends?|spoke|speaks?|stood|stands?|stole|steals?|struck|strikes?|"
+    r"swore|swears?|taught|teaches?|told|tells?|thought|thinks?|threw|throws?|"
+    r"understood|understands?|wore|wears?|won|wins?|wrote|writes?|"
+    r"disagrees?|disagreed|differs?|differed|conflicts?|conflicted|agrees?|agreed|"
+    # Bare plural-subject present tense ("sources provide", "employees accrue")
+    # has no suffix at all -- the generic -ed/-ing/-s rule below can't catch it.
+    r"provide|receive|accrue|mention|report|state|show|remain|indicate|note|"
+    r"list|cite|attribute|confirm|describe|include|require|expect|plan|close|"
+    r"reach|hold|drive|add|cut|meet|produce|generate|operate|serve|offer|allow|"
+    r"enable|support|cover|address|involve|affect|impact|follow|continue|begin|"
+    r"extend|exceed|maintain|contribute|increase|decrease|rise|total|comprise|"
+    r"consist|represent|reflect|"
+    r"\w+(?:ed|ing|s))\b",
+    re.IGNORECASE,
+)
 # A claim ends at .!? (keeping any [source:N] markers right after it) when the
 # next sentence starts with a capital/quote/paren, and always at a line break.
 _CLAIM_END_RE = re.compile(r"[.!?]+(?:\s*\[source:\s*\d+\])*(?=\s+[A-Z\"'(*]|\s*$)|\r?\n")
@@ -136,6 +180,45 @@ def _extract_claim_spans(answer: str) -> list[tuple[str, int, int]]:
     return spans
 
 
+def _alternative_values(claim: str) -> set[str] | None:
+    """Distinct numeric/date values a claim reports as alternatives.
+
+    `None` unless the claim both names a disagreement/alternation
+    (`_ALTERNATIVES_CUE_RE`) and states >=2 distinct numbers -- the shape of
+    an honest "sources report X vs Y" sentence, which no single premise can
+    entail as one hypothesis. `check()` marks it `supported` outright when
+    every value is independently grounded in some retrieved context (R2-4).
+    """
+    if not _ALTERNATIVES_CUE_RE.search(claim):
+        return None
+    values = _numbers(claim)
+    return values if len(values) >= 2 else None
+
+
+def _looks_like_fragment(text: str) -> bool:
+    """A bare list item with no subject/verb (e.g. a lone date) that NLI
+    can't evaluate on its own -- `_merge_fragment_spans` folds it into the
+    previous claim instead of scoring it alone (R2-4)."""
+    words = text.split()
+    if len(words) < 4:
+        return True
+    return not _FRAGMENT_VERB_RE.search(text)
+
+
+def _merge_fragment_spans(spans: list[tuple[str, int, int]]) -> list[tuple[str, int, int]]:
+    """Fold bare fragments into the previous claim span; drop a leading
+    fragment that has nothing to merge into."""
+    merged: list[tuple[str, int, int]] = []
+    for text, start, end in spans:
+        if _looks_like_fragment(text):
+            if merged:
+                p_text, p_start, _ = merged[-1]
+                merged[-1] = (f"{p_text} {text}", p_start, end)
+            continue
+        merged.append((text, start, end))
+    return merged
+
+
 def _verdict(entailment: float, ratio: float, max_contradiction: float) -> str:
     """Map a claim's best-support entailment/ratio and worst contradiction to a verdict."""
     if entailment >= SUPPORTED_MIN_ENTAILMENT and ratio >= settings.GUARDRAIL_THRESHOLD:
@@ -168,6 +251,12 @@ def _context_text(ctx: dict[str, Any]) -> str:
 _DOC_EXT_RE = re.compile(r"\.(pdf|docx|txt|md|csv|json)$", re.IGNORECASE)
 
 
+def _doc_title(ctx: dict[str, Any]) -> str:
+    """The chunk's source document name with its file extension stripped."""
+    name = ctx.get("document_name") or (ctx.get("metadata") or {}).get("document_name") or ""
+    return _DOC_EXT_RE.sub("", str(name)).strip()
+
+
 def _premise_prefix(ctx: dict[str, Any]) -> str:
     """Document title to prepend to a premise.
 
@@ -176,9 +265,40 @@ def _premise_prefix(ctx: dict[str, Any]) -> str:
     with the title in front it does (~0.998) and catches "€398M" as a
     contradiction (~0.995).
     """
-    name = ctx.get("document_name") or (ctx.get("metadata") or {}).get("document_name") or ""
-    title = _DOC_EXT_RE.sub("", str(name)).strip()
+    title = _doc_title(ctx)
     return f"{title}: " if title else ""
+
+
+def _is_heading_like(sentence: str, doc_title: str) -> bool:
+    """A document title/heading line, not a real claim-bearing sentence
+    (R3-1): matches the document title, has no terminal punctuation, or is
+    fewer than 5 words -- any one of the three is enough."""
+    s = sentence.strip()
+    if not s:
+        return True
+    if doc_title and s.strip(" -–—#").casefold() == doc_title.casefold():
+        return True
+    if s[-1] not in ".!?":
+        return True
+    return len(s.split()) < 5
+
+
+def _pick_evidence(sents: list[str], claim_words: set[str], claim_numbers: set[str], doc_title: str) -> str:
+    """Best evidence sentence for a claim: numeric overlap first, then
+    content-word overlap (R3-1). Ties go to a real sentence over a
+    title/heading line -- the old combined-sum score let a title that shares
+    several words with the claim outrank the actual fact sentence."""
+    if not sents:
+        return ""
+    scored = [(len(claim_numbers & _numbers(s)), len(claim_words & _words(s)), i) for i, s in enumerate(sents)]
+    top_score = max(t[:2] for t in scored)
+    if top_score == (0, 0):
+        return ""
+    tied = [i for num, word, i in scored if (num, word) == top_score]
+    for i in tied:
+        if not _is_heading_like(sents[i], doc_title):
+            return sents[i]
+    return sents[tied[0]]
 
 
 def _claim_object(
@@ -305,10 +425,12 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     if not scored:
         return GuardrailResult(passed=True, score=1.0, details="No context text available")
 
+    # Bare list-item fragments ("First quarter of 2028") are folded into the
+    # previous claim before filtering (R2-4) -- NLI can't evaluate them alone.
     # The generator's own "can't answer" sentence, and any "sources disagree"
-    # meta-statement (R2-4), are not claims about the documents.
+    # meta-statement, are not claims about the documents.
     spans = [
-        s for s in _extract_claim_spans(answer)
+        s for s in _merge_fragment_spans(_extract_claim_spans(answer))
         if not s[0].lower().startswith(REFUSAL_PREFIX.lower())
         and not _META_DISAGREEMENT_RE.search(s[0])
     ]
@@ -336,7 +458,10 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
             # Shared numbers count twice: they pin down which sentence a claim is about.
             overlaps = [len(claim_words & _words(s)) + len(claim_numbers & _numbers(s)) for s in sents]
             best = overlaps.index(max(overlaps))
-            evidence[c, k] = sents[best] if overlaps[best] else ""
+            # R3-1: the evidence *text* is picked separately -- numeric overlap
+            # first, then content words, never a title/heading line over a real
+            # sentence that scores at least as well.
+            evidence[c, k] = _pick_evidence(sents, claim_words, claim_numbers, _doc_title(ctx))
             pairs.append((prefix + text, claim))
             owners.append((c, k))
             if overlaps[best] >= WINDOW_MIN_OVERLAP:
@@ -360,6 +485,20 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     ratios: list[float] = []
     unsupported: list[str] = []
     for c, (claim, start, end) in enumerate(spans):
+        # R2-4: a claim presenting >=2 distinct values as alternatives is
+        # `supported` outright once every value is grounded in *some*
+        # retrieved context -- no single premise can entail both sides as
+        # one hypothesis, so ordinary NLI scoring would wrongly fail it.
+        alt_values = _alternative_values(claim)
+        if alt_values is not None:
+            pool = set().union(*context_numbers) if context_numbers else set()
+            if alt_values <= pool:
+                best_k = max(range(len(scored)), key=lambda k: len(alt_values & context_numbers[k]))
+                index, ctx, _ = scored[best_k]
+                claims.append(_claim_object(claim, start, end, "supported", 1.0, 0.0, index, ctx, evidence[c, best_k]))
+                ratios.append(1.0)
+                continue
+
         claim_numbers = _numbers(claim)
         rows = []
         for k in range(len(scored)):

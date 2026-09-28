@@ -624,6 +624,7 @@ async def invite_user(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -686,6 +687,7 @@ async def update_user_role(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -726,6 +728,7 @@ async def update_user_status(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )

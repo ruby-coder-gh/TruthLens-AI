@@ -45,28 +45,13 @@ def _page_numbers_sync(workspace_id: str, chunk_ids: list[str]) -> dict[str, int
     return pages
 
 
-async def open_conflicts_for_chunks(
-    session: AsyncSession, workspace_id: str, chunk_ids: list[str]
+async def _shape_conflict_rows(
+    session: AsyncSession, workspace_id: str, rows: list[Contradiction]
 ) -> list[dict[str, Any]]:
-    """Open Radar contradictions touching any of `chunk_ids` (K5).
-
-    Shapes each row as `{a: {document_name, page_number, sentence}, b: {...},
-    score}` for the Truth Receipt payload's `conflicts` field — the caller
-    (`create_receipt`) resolves this for the answer's cited chunks before
-    calling `build_payload`. A page-lookup hiccup (Chroma) must never break
-    sealing, so it's swallowed like `api.radar._page_numbers`.
-    """
-    wanted = set(chunk_ids)
-    if not wanted:
-        return []
-    rows = (
-        await session.execute(
-            select(Contradiction).where(
-                Contradiction.status == "open",
-                or_(Contradiction.chunk_a_id.in_(wanted), Contradiction.chunk_b_id.in_(wanted)),
-            )
-        )
-    ).scalars().all()
+    """Resolve document names + chunk page numbers and shape rows as
+    `{a: {document_name, page_number, sentence}, b: {...}, score}`. A
+    page-lookup hiccup (Chroma) must never break the caller, so it's
+    swallowed like `api.radar._page_numbers`."""
     if not rows:
         return []
 
@@ -94,6 +79,54 @@ async def open_conflicts_for_chunks(
         }
         for r in rows
     ]
+
+
+async def open_conflicts_for_chunks(
+    session: AsyncSession, workspace_id: str, chunk_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Open Radar contradictions touching any of `chunk_ids` (K5).
+
+    Shapes each row as `{a: {document_name, page_number, sentence}, b: {...},
+    score}` for the Truth Receipt payload's `conflicts` field — the caller
+    (`create_receipt`) resolves this for the answer's cited chunks before
+    calling `build_payload`.
+    """
+    wanted = set(chunk_ids)
+    if not wanted:
+        return []
+    rows = (
+        await session.execute(
+            select(Contradiction).where(
+                Contradiction.status == "open",
+                or_(Contradiction.chunk_a_id.in_(wanted), Contradiction.chunk_b_id.in_(wanted)),
+            )
+        )
+    ).scalars().all()
+    return await _shape_conflict_rows(session, workspace_id, rows)
+
+
+async def open_conflicts_for_workspace(
+    session: AsyncSession, workspace_id: str, document_ids: set[str] | None = None
+) -> list[dict[str, Any]]:
+    """Open Radar contradictions for the workspace (R2-7).
+
+    Document-level, not chunk-level: a contradiction is included as long as
+    either side's *document* -- not necessarily the exact chunk a sub-question
+    retrieved -- is in `document_ids`. `None` (the default) returns every open
+    contradiction in the workspace; an empty set returns none. Used by
+    investigation synthesis, which wants the full picture for "identify
+    conflicts" questions rather than only the chunks one sub-question
+    happened to retrieve.
+    """
+    if document_ids is not None and not document_ids:
+        return []
+    stmt = select(Contradiction).where(
+        Contradiction.workspace_id == workspace_id, Contradiction.status == "open"
+    )
+    if document_ids is not None:
+        stmt = stmt.where(or_(Contradiction.doc_a_id.in_(document_ids), Contradiction.doc_b_id.in_(document_ids)))
+    rows = (await session.execute(stmt)).scalars().all()
+    return await _shape_conflict_rows(session, workspace_id, rows)
 
 
 def _numbers(text: str) -> set[str]:

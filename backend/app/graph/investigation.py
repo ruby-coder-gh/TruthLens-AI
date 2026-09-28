@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -124,10 +125,12 @@ Known contradictions among the retrieved documents (from Contradiction Radar):
 Your task: Synthesize these findings into a comprehensive, well-structured report.
 Organize it with:
 1. **Executive Summary** — 2-3 sentence overview of the answer
-2. **Detailed Findings** — Organized by theme, with evidence from each sub-question
-3. **Contradictions Found** — If any contradictions are listed above, report each one
-   explicitly: state both sides with their sources. Do not omit them, do not pick a
-   side, and do not describe the corpus as consistent when contradictions are listed.
+2. **Contradictions Found** — List every item from "Known contradictions" above FIRST,
+   before any other section, and concisely (one or two sentences each): state both
+   sides with their sources. Do not omit any of them, do not pick a side, and do not
+   describe the corpus as consistent when contradictions are listed above. If none are
+   listed, say so in one sentence.
+3. **Detailed Findings** — Organized by theme, with evidence from each sub-question
 4. **Key Sources** — List the most important documents or sources referenced
 5. **Confidence Assessment** — Based on the strength of evidence found
 
@@ -135,8 +138,12 @@ Use clear section headings. Cite sources as [source:N] where N corresponds
 to the source number. Be factual and grounded in the evidence provided."""
 
 # R2-7: rendered when no open Radar contradiction touches the investigation's
-# retrieved chunks, or the lookup itself failed (never blocks synthesis).
+# retrieved documents, or the lookup itself failed (never blocks synthesis).
 CONFLICTS_NONE_TEXT = "No known contradictions among the retrieved documents."
+# R2-7: a question that itself asks about conflicts/contradictions/discrepancies
+# gets every open contradiction in the workspace fed into synthesis, not just
+# the ones touching documents a sub-question happened to retrieve.
+_CONFLICT_QUESTION_RE = re.compile(r"\b(?:conflict|contradiction|discrepanc)\w*", re.IGNORECASE)
 
 
 def _format_conflicts_context(conflicts: list[dict[str, Any]]) -> str:
@@ -153,13 +160,19 @@ def _format_conflicts_context(conflicts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-async def _fetch_investigation_conflicts(workspace_id: str, chunk_ids: list[str]) -> list[dict[str, Any]]:
-    """Open Radar contradictions touching the investigation's retrieved chunks (R2-7)."""
+async def _fetch_investigation_conflicts(
+    workspace_id: str, document_ids: list[str], whole_workspace: bool = False
+) -> list[dict[str, Any]]:
+    """Open Radar contradictions for the investigation's retrieved documents,
+    or every open contradiction in the workspace when `whole_workspace` (the
+    question itself asks about conflicts/contradictions/discrepancies) (R2-7)."""
     from app.database import async_session_factory
-    from app.radar import open_conflicts_for_chunks
+    from app.radar import open_conflicts_for_workspace
 
     async with async_session_factory() as db:
-        return await open_conflicts_for_chunks(db, workspace_id, chunk_ids)
+        return await open_conflicts_for_workspace(
+            db, workspace_id, document_ids=None if whole_workspace else set(document_ids)
+        )
 
 
 # ─── Helper: run LLM call ─────────────────────────────────────────────────────
@@ -510,21 +523,27 @@ def _synthesize_node(state: InvestigationState) -> dict:
 
     sub_findings = "\n".join(findings_parts)
 
-    # R2-7: feed the workspace's open Radar contradictions among the chunks
-    # this investigation actually retrieved into synthesis as explicit
-    # context, so "identify conflicts" reports them instead of the model
-    # having to notice them itself from prose alone. A lookup failure must
+    # R2-7: feed the workspace's open Radar contradictions into synthesis as
+    # explicit context, so "identify conflicts" reports them instead of the
+    # model having to notice them itself from prose alone. Document-level
+    # (not just the exact chunks a sub-question happened to retrieve) -- and
+    # the *whole* workspace when the question itself asks about conflicts/
+    # contradictions/discrepancies, so a planted pair is never missed just
+    # because retrieval didn't surface its document. A lookup failure must
     # never break the report.
-    chunk_ids = sorted({
-        str(c["chunk_id"])
+    document_ids = sorted({
+        str(c["document_id"])
         for sq in sub_questions
         for c in sq.get("retrieved_chunks", [])
-        if c.get("chunk_id")
+        if c.get("document_id")
     })
+    whole_workspace = bool(_CONFLICT_QUESTION_RE.search(query))
     conflicts: list[dict[str, Any]] = []
-    if chunk_ids:
+    if document_ids or whole_workspace:
         try:
-            conflicts = asyncio.run(_fetch_investigation_conflicts(state["workspace_id"], chunk_ids))
+            conflicts = asyncio.run(
+                _fetch_investigation_conflicts(state["workspace_id"], document_ids, whole_workspace)
+            )
         except Exception as e:
             logger.warning("investigation_conflicts_lookup_failed", error=str(e))
     conflicts_context = _format_conflicts_context(conflicts)

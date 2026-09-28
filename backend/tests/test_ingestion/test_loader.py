@@ -108,6 +108,86 @@ async def test_load_csv_uses_its_own_leading_comment_line_as_the_description(tmp
 
 
 @pytest.mark.asyncio
+async def test_load_csv_adds_a_summary_chunk_per_low_cardinality_column(tmp_path: Path):
+    """R3-4: aggregation questions ("which projects are under construction")
+    only see the top reranked *row* chunks, silently missing rows past that
+    cutoff. One extra chunk per low-cardinality column (<= 8 distinct values)
+    lists every matching row's name together so the full group survives in
+    a single chunk."""
+    path = tmp_path / "pipeline.csv"
+    path.write_text(
+        "name,status\n"
+        "Aurora,construction\n"
+        "Fjellheim,construction\n"
+        "Solheim,construction\n"
+        "Ashford,construction\n"
+        "Lindholm,construction\n"
+        "Kestrel,permitting\n"
+    )
+    pages = await load(path, "text/csv")
+
+    row_pages = [p for p in pages if p["metadata"].get("row_index") is not None]
+    summary_pages = [p for p in pages if "summary_column" in p["metadata"]]
+    assert len(row_pages) == 6
+
+    construction = next(p for p in summary_pages if p["metadata"]["summary_value"] == "construction")
+    assert construction["metadata"]["summary_column"] == "status"
+    assert construction["text"] == "Pipeline — status = Construction: Aurora, Fjellheim, Solheim, Ashford, Lindholm"
+
+    permitting = next(p for p in summary_pages if p["metadata"]["summary_value"] == "permitting")
+    assert permitting["text"] == "Pipeline — status = Permitting: Kestrel"
+
+
+@pytest.mark.asyncio
+async def test_load_csv_skips_summary_for_high_cardinality_columns(tmp_path: Path):
+    """A column where (almost) every row has a distinct value (e.g. a
+    numeric measurement) doesn't get a summary chunk per value -- that would
+    be one chunk per row all over again, not a useful rollup."""
+    rows = "\n".join(f"Project{i},{i*10}" for i in range(10))
+    path = tmp_path / "pipeline.csv"
+    path.write_text(f"name,mw\n{rows}\n")
+    pages = await load(path, "text/csv")
+
+    assert not any("summary_column" in p["metadata"] for p in pages)
+
+
+@pytest.mark.asyncio
+async def test_load_csv_skips_summary_for_small_tables(tmp_path: Path):
+    """A handful of rows all fit comfortably in top-k retrieval already --
+    no rollup chunk needed (also keeps toy/unit-test CSVs summary-free)."""
+    path = tmp_path / "pipeline.csv"
+    path.write_text("name,status\nAurora,construction\nKestrel,commissioned\n")
+    pages = await load(path, "text/csv")
+
+    assert not any("summary_column" in p["metadata"] for p in pages)
+
+
+@pytest.mark.asyncio
+async def test_load_csv_summary_title_comes_from_the_filename(tmp_path: Path):
+    path = tmp_path / "project-pipeline.csv"
+    path.write_text("name,status\n" + "\n".join(f"P{i},construction" for i in range(5)))
+    pages = await load(path, "text/csv")
+
+    summary = next(p for p in pages if "summary_column" in p["metadata"])
+    assert summary["text"].startswith("Project Pipeline — ")
+
+
+@pytest.mark.asyncio
+async def test_load_real_demo_pipeline_csv_groups_every_construction_project():
+    """The exact R3-4 repro against the real demo corpus file: 'which
+    projects are under construction?' must be able to find all 5 (not 4)."""
+    path = Path("app/demo/corpus/project-pipeline.csv")
+    pages = await load(path, "text/csv")
+
+    construction = next(
+        p for p in pages
+        if p["metadata"].get("summary_column") == "status" and p["metadata"]["summary_value"] == "construction"
+    )
+    names = construction["text"].split(": ", 1)[1].split(", ")
+    assert set(names) == {"Aurora", "Fjellheim Repowering", "Solheim Solar Park", "Ashford Solar", "Lindholm Solar"}
+
+
+@pytest.mark.asyncio
 async def test_load_json_object_flattens_to_key_path_value_lines(tmp_path: Path):
     """R2-5: a JSON object is flattened to 'key.path: value' lines instead of
     raising "Unsupported mime type" (the upload UI already advertises JSON)."""
