@@ -6,12 +6,15 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi.responses import FileResponse
 
+from app.chroma_client import get_workspace_collection
 from app.config import settings
 from app.core.deps import (
     check_workspace_access,
@@ -21,6 +24,7 @@ from app.core.deps import (
     get_db,
 )
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
+from app.ingestion.locate import locate_in_pdf
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -29,6 +33,7 @@ from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.common import PaginatedResponse
 from app.schemas.document import (
     ChunkInfo,
+    ChunkLocateResponse,
     DocumentDetailResponse,
     DocumentResponse,
     DocumentStatusResponse,
@@ -47,6 +52,12 @@ SUPPORTED_MIME_TYPES = {
     "text/csv",
     "application/json",
 }
+
+# Served as `text/plain` on the file endpoint regardless of stored mime type —
+# never as `text/html` or a browser-sniffed type — so a malicious .md/.csv/.json
+# upload can't execute as HTML in the viewer's origin (stored XSS).
+TEXT_LIKE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json"}
+CONTEXT_CHARS = 600
 
 MAX_FILE_SIZE = 52_428_800  # 50 MB
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -438,6 +449,132 @@ async def list_all_documents(
             for d in docs
         ],
         meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+def _lookup_chroma_page_number(workspace_id: str, document_id: str, chunk_index: int) -> int | None:
+    """Best-effort page-number lookup from the chunk's Chroma metadata.
+
+    Chroma's client is synchronous but local/fast for a single-id `get`
+    (same as the unwrapped `collection.upsert` call in `indexer.store`), so
+    this isn't wrapped in `asyncio.to_thread`. Any failure degrades to the
+    PDF-wide fallback search in `locate_in_pdf` rather than a 500.
+    """
+    try:
+        collection = get_workspace_collection(workspace_id)
+        result = collection.get(ids=[f"{document_id}:{chunk_index}"], include=["metadatas"])
+    except Exception as e:
+        logger.warning("chroma_page_lookup_failed", error=str(e), document_id=document_id)
+        return None
+
+    metadatas = result.get("metadatas") or []
+    if not metadatas or not metadatas[0]:
+        return None
+    return metadatas[0].get("page_number")
+
+
+@router.get("/workspaces/{workspace_id}/documents/{doc_id}/file")
+async def get_document_file(
+    workspace_id: str,
+    doc_id: str,
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the original uploaded file inline, for the source viewer."""
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", doc_id)
+
+    file_path = settings.upload_path / doc.filename
+    if not file_path.exists():
+        raise NotFoundException("File", doc_id)
+
+    if doc.mime_type in TEXT_LIKE_MIME_TYPES:
+        media_type = "text/plain; charset=utf-8"
+    elif doc.mime_type == "application/pdf":
+        media_type = "application/pdf"
+    else:
+        media_type = doc.mime_type
+
+    quoted_name = quote(doc.original_filename)
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quoted_name}",
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/documents/{doc_id}/chunks/{chunk_id}/locate",
+    response_model=ChunkLocateResponse,
+)
+async def locate_chunk(
+    workspace_id: str,
+    doc_id: str,
+    chunk_id: str,
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Locate a chunk's passage in its source document, for the source viewer."""
+    doc_result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
+    )
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", doc_id)
+
+    chunk_result = await db.execute(
+        select(Chunk).where(Chunk.id == chunk_id, Chunk.document_id == doc_id)
+    )
+    chunk = chunk_result.scalar_one_or_none()
+    if not chunk:
+        raise NotFoundException("Chunk", chunk_id)
+
+    file_path = settings.upload_path / doc.filename
+    if doc.mime_type == "application/pdf" and file_path.exists():
+        page_number_hint = _lookup_chroma_page_number(workspace_id, doc_id, chunk.index)
+        located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, chunk.content)
+        return ChunkLocateResponse(
+            mode="pdf",
+            page_number=located["page_number"],
+            page_count=located["page_count"],
+            page_width=located["page_width"],
+            page_height=located["page_height"],
+            rects=located["rects"],
+            content=chunk.content,
+            context_before=None,
+            context_after=None,
+        )
+
+    # Non-PDF, or the PDF file is missing on disk: text mode with neighbour
+    # context, built from the chunk content already in SQLite — never 500s
+    # just because the original file was removed from storage.
+    prev_result = await db.execute(
+        select(Chunk).where(Chunk.document_id == doc_id, Chunk.index == chunk.index - 1)
+    )
+    prev_chunk = prev_result.scalar_one_or_none()
+    next_result = await db.execute(
+        select(Chunk).where(Chunk.document_id == doc_id, Chunk.index == chunk.index + 1)
+    )
+    next_chunk = next_result.scalar_one_or_none()
+
+    return ChunkLocateResponse(
+        mode="text",
+        page_number=None,
+        page_count=None,
+        page_width=None,
+        page_height=None,
+        rects=[],
+        content=chunk.content,
+        context_before=prev_chunk.content[-CONTEXT_CHARS:] if prev_chunk else None,
+        context_after=next_chunk.content[:CONTEXT_CHARS] if next_chunk else None,
     )
 
 

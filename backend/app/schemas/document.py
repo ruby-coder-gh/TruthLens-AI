@@ -129,3 +129,20 @@ class BulkDocumentSummary(BaseModel):
 class BulkDocumentResponse(BaseModel):
     results: list[BulkDocumentResult]
     summary: BulkDocumentSummary
+
+
+# ─── Source viewer (L7/L8) ────────────────────────────────────────────────────
+
+
+class ChunkLocateResponse(BaseModel):
+    """Where a chunk's text lives in its source document, for the viewer."""
+
+    mode: Literal["pdf", "text"]
+    page_number: int | None = None
+    page_count: int | None = None
+    page_width: float | None = None
+    page_height: float | None = None
+    rects: list[list[float]] = []
+    content: str
+    context_before: str | None = None
+    context_after: str | None = None
