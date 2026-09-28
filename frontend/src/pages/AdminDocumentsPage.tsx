@@ -336,7 +336,7 @@ export default function AdminDocumentsPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border bg-card-2">
-              <th className="px-4 py-2.5 w-10">
+              <th className="px-3 py-2.5 w-10">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -346,15 +346,15 @@ export default function AdminDocumentsPage() {
                   className="h-4 w-4 accent-primary"
                 />
               </th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Type</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Chunks</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Size</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Tags</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Uploaded By</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Date</th>
-              <th className="px-4 py-2.5 w-10" />
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Type</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Chunks</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Size</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Tags</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Uploaded By</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Date</th>
+              <th className="px-3 py-2.5 w-10" />
             </tr>
           </thead>
           <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
@@ -380,7 +380,7 @@ export default function AdminDocumentsPage() {
                       : 'hover:bg-card-2'
                   }`}
                 >
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selected.has(doc.id)}
@@ -389,14 +389,14 @@ export default function AdminDocumentsPage() {
                       className="h-4 w-4 accent-primary"
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-primary-soft shrink-0" />
                       <span className="text-text truncate max-w-[190px] block">{doc.original_filename}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text-muted whitespace-nowrap">{getFileType(doc.mime_type)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-text-muted whitespace-nowrap">{getFileType(doc.mime_type)}</td>
+                  <td className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
                       {isUnsearchableReady(doc) && (
@@ -406,13 +406,13 @@ export default function AdminDocumentsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text tabular-nums whitespace-nowrap">{doc.chunk_count ?? '—'}</td>
+                  <td className="px-3 py-3 text-text tabular-nums whitespace-nowrap">{doc.chunk_count ?? '—'}</td>
                   {/* BUG-38: `whitespace-nowrap` — without it, once the row's
                       other columns got tight, this was the flexible one the
                       table layout squeezed, wrapping "171 KB" onto two
                       lines. */}
-                  <td className="px-4 py-3 text-text-muted tabular-nums whitespace-nowrap">{formatFileSize(doc.file_size)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-text-muted tabular-nums whitespace-nowrap">{formatFileSize(doc.file_size)}</td>
+                  <td className="px-3 py-3">
                     <div className="flex flex-wrap gap-1 max-w-[120px]">
                       {(doc.tags ?? []).length === 0 ? (
                         <span className="text-xs text-text-dim">—</span>
@@ -424,18 +424,18 @@ export default function AdminDocumentsPage() {
                   {/* K3/BUG-36/BUG-38: a name, not the raw uploader UUID —
                       also shrinks this column enough that the table stops
                       scrolling horizontally at 1280px. */}
-                  <td className="px-4 py-3 text-text-muted text-xs">
+                  <td className="px-3 py-3 text-text-muted text-xs">
                     <span className="block max-w-[110px] truncate" title={doc.uploaded_by}>
                       {doc.uploaded_by_name ?? doc.uploaded_by}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-text-dim text-xs whitespace-nowrap">
+                  <td className="px-3 py-3 text-text-dim text-xs whitespace-nowrap">
                     <span className="flex items-center gap-1">
                       <Clock size={11} />
                       {formatDate(doc.created_at)}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <ChevronRight size={14} className="text-text-dim" />
                   </td>
                 </motion.tr>
