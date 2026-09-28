@@ -180,7 +180,13 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
     if query.trust_score is not None:
         await sink.emit(
             "trust_score",
-            {"query_id": query.id, "score": query.trust_score, "components": {}},
+            {
+                "query_id": query.id,
+                "score": query.trust_score,
+                # BUG-50: replay the persisted sub-scores instead of a stub
+                # empty dict — a cache hit is a real answer, not a lesser one.
+                "components": query.trust_components or {},
+            },
         )
     complete: dict[str, Any] = {
         "query_id": query.id,
