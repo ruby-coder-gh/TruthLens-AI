@@ -23,6 +23,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
 from app.models.query import Query
 from app.models.receipt import Receipt
@@ -66,6 +69,10 @@ def _receipt_sources(sources: list[dict[str, Any]], indices: set[int]) -> list[d
         result.append(
             {
                 "index": i,
+                # Kept alongside document_name so a deleted document's receipts can be
+                # found and revoked (see `revoke_receipts_for_document`) even after a
+                # rename; document_name stays as the fallback for pre-existing receipts.
+                "document_id": source.get("document_id") or metadata.get("document_id"),
                 "document_name": source.get("document_name") or metadata.get("document_name"),
                 "page_number": source.get("page_number", metadata.get("page_number")),
                 "excerpt": content[:EXCERPT_MAX_CHARS],
@@ -134,3 +141,46 @@ def verify(receipt: Receipt) -> tuple[bool, bool]:
     recomputed_signature = hmac.new(_signing_key(), receipt.seal.encode("utf-8"), hashlib.sha256).hexdigest()
     signature_valid = hmac.compare_digest(recomputed_signature, receipt.signature)
     return seal_valid, signature_valid
+
+
+def _cites_document(payload: dict[str, Any], document_id: str, document_name: str | None) -> bool:
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        return False
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        if source.get("document_id"):
+            if source["document_id"] == document_id:
+                return True
+        elif document_name and source.get("document_name") == document_name:
+            # Pre-existing receipts sealed before `document_id` was stored.
+            return True
+    return False
+
+
+async def revoke_receipts_for_document(
+    db: AsyncSession, *, workspace_id: str, document_id: str, document_name: str | None = None
+) -> int:
+    """Revoke every non-revoked receipt in `workspace_id` that quotes `document_id`.
+
+    A deleted document's receipts would otherwise keep publicly citing evidence
+    that no longer exists. Matches on `document_id` in the payload's `sources`;
+    falls back to `document_name` for receipts sealed before `document_id` was
+    stored there. Returns the number of receipts revoked.
+    """
+    receipts = (
+        await db.execute(select(Receipt).where(Receipt.workspace_id == workspace_id, Receipt.revoked_at.is_(None)))
+    ).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    revoked = 0
+    for receipt in receipts:
+        try:
+            payload = json.loads(receipt.payload)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and _cites_document(payload, document_id, document_name):
+            receipt.revoked_at = now
+            revoked += 1
+    return revoked

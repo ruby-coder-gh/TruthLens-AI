@@ -5,12 +5,21 @@ BACKEND_DIR="$(cd "$(dirname "$0")/backend" && pwd)"
 FRONTEND_DIR="$(cd "$(dirname "$0")/frontend" && pwd)"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 PREFERRED_BACKEND_PORT="${BACKEND_PORT:-8000}"
-BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 OLLAMA_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
 
 DEMO_MODE_FLAG=false
 if [ "${1:-}" = "--demo" ]; then
   DEMO_MODE_FLAG=true
+fi
+
+# --demo defaults to loopback only: /api/auth/demo-login hands out an admin
+# session with no credentials, and demo-login itself now 404s for any
+# non-loopback caller — but binding 0.0.0.0 would still expose the rest of
+# the API. Set BACKEND_HOST explicitly to opt back into LAN/remote access.
+if [ "${DEMO_MODE_FLAG}" = true ]; then
+  BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
+else
+  BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 fi
 
 BACKEND_PID=""

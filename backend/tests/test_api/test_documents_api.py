@@ -1,19 +1,25 @@
 """HTTP tests for document upload, list, get, delete — with real workspace."""
 
 from __future__ import annotations
+import json
 import sys
 import types
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.documents import MAX_DETAIL_CHUNKS, MAX_PAGE_SIZE, MIN_PAGE_SIZE, upload_document
 from app.core.exceptions import TooLargeException
 from app.core.auth import create_access_token
 from app.models.chunk import Chunk
+from app.models.query import Query
+from app.models.receipt import Receipt
 from app.models.user import User
+from app.models.workspace import Workspace
+from app.receipts import build_payload, canonicalize, seal_and_sign
 
 
 @pytest.fixture
@@ -395,6 +401,59 @@ async def test_delete_document_not_found(client: AsyncClient, auth_headers: dict
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_document_revokes_receipts_citing_it(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str, test_db: AsyncSession
+):
+    """A public receipt must not keep quoting a document that no longer exists."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("cited.txt", b"cited content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    query = Query(
+        workspace_id=workspace_id,
+        query_text="What does the cited document say?",
+        response_text="It says something [source:1].",
+        response_sources=json.dumps(
+            [{"chunk_id": "c1", "document_id": doc_id, "document_name": "cited.txt", "content": "It says something."}]
+        ),
+    )
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    workspace = (await test_db.execute(select(Workspace).where(Workspace.id == workspace_id))).scalar_one()
+    payload = build_payload(query, claims=[], workspace=workspace)
+    canonical = canonicalize(payload)
+    seal, signature = seal_and_sign(canonical)
+    receipt = Receipt(
+        token="tok-cited-doc",
+        query_id=query.id,
+        workspace_id=workspace_id,
+        payload=json.dumps(payload),
+        canonical=canonical,
+        seal=seal,
+        signature=signature,
+    )
+    test_db.add(receipt)
+    await test_db.commit()
+
+    fake_indexer = types.ModuleType("app.ingestion.indexer")
+    fake_indexer.delete_document = AsyncMock()
+    with patch.dict(sys.modules, {"app.ingestion.indexer": fake_indexer}):
+        del_resp = await client.delete(
+            f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+            headers=auth_headers,
+        )
+    assert del_resp.status_code == 204
+
+    view_resp = await client.get(f"/api/receipts/{receipt.token}")
+    assert view_resp.status_code == 410
 
 
 @pytest.mark.asyncio

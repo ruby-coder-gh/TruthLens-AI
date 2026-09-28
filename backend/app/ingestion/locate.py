@@ -14,6 +14,12 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _WINDOW_SIZE = 10
 _EDGE_WORDS = 6
 _MAX_RECTS = 200
+# A per-page PyMuPDF search is not cheap; scanning every page on every
+# request-time call doesn't scale past a certain document size. Bound the
+# fallback to a small window around the hint, and only fall through to a
+# whole-document scan for PDFs small enough that it stays cheap.
+_HINT_WINDOW = 2
+_MAX_PAGES_FOR_FULL_SCAN = 60
 
 
 def _split_into_fragments(content: str) -> list[str]:
@@ -90,10 +96,13 @@ def locate_in_pdf(file_path: Path, page_number_hint: int | None, content: str) -
 
     `page_number_hint` is 1-based (as stored in Chroma metadata) and may be
     None if the metadata lookup failed. Search order: the hinted page, then
-    the next page (content can spill across a page break), then every other
-    page in order. If no fragment matches anywhere, falls back to the
-    hinted page (or page 1) with empty rects — the viewer can still show the
-    right page even without a highlight.
+    the next page (content can spill across a page break), then the rest of
+    the hinted page's +/-2 window, then — only for PDFs of at most
+    `_MAX_PAGES_FOR_FULL_SCAN` pages — every other page in order. Past that
+    size, the whole-document scan is skipped (too expensive per call). If no
+    fragment matches anywhere it falls back to the hinted page (or page 1)
+    with empty rects — the viewer can still show the right page even without
+    a highlight ("text mode").
 
     Returns: {page_number, page_count, page_width, page_height, rects}.
     """
@@ -117,9 +126,19 @@ def locate_in_pdf(file_path: Path, page_number_hint: int | None, content: str) -
             candidates.append(hint_index)
             if hint_index + 1 < page_count:
                 candidates.append(hint_index + 1)
-        for i in range(page_count):
-            if i not in candidates:
-                candidates.append(i)
+            for offset in range(-1, -_HINT_WINDOW - 1, -1):
+                neighbor = hint_index + offset
+                if 0 <= neighbor < page_count and neighbor not in candidates:
+                    candidates.append(neighbor)
+            for offset in range(2, _HINT_WINDOW + 1):
+                neighbor = hint_index + offset
+                if 0 <= neighbor < page_count and neighbor not in candidates:
+                    candidates.append(neighbor)
+
+        if page_count <= _MAX_PAGES_FOR_FULL_SCAN:
+            for i in range(page_count):
+                if i not in candidates:
+                    candidates.append(i)
 
         for page_index in candidates:
             page = doc[page_index]

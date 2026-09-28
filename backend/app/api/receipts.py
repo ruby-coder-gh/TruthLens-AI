@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_accessible_workspace_ids, get_current_user, get_db
+from app.core.deps import get_accessible_workspace_ids, get_current_user, get_db, require_workspace_editor
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.models.audit_log import AuditLog
 from app.models.query import Query
@@ -69,6 +69,9 @@ async def create_receipt(
         raise ForbiddenException(message="Truth Receipts are disabled")
 
     query = await _get_query_with_access(query_id, user, db)
+    # Sealing publishes a public, unauthenticated page — a viewer (read-only
+    # membership) must not be able to publish on the workspace's behalf.
+    await require_workspace_editor(workspace=query.workspace, current_user=user, db=db)
     if not query.response_text or query.edge_case:
         raise HTTPException(
             status_code=422,
@@ -173,15 +176,18 @@ async def revoke_receipt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Revoke a receipt. Allowed for its creator, the workspace owner, or an admin."""
+    """Revoke a receipt. Allowed for its creator, a workspace editor/owner, or an admin."""
     receipt = (await db.execute(select(Receipt).where(Receipt.token == token))).scalar_one_or_none()
     if not receipt:
         raise NotFoundException("Receipt", token)
 
-    is_creator = receipt.created_by == user.id
-    is_owner = receipt.workspace is not None and receipt.workspace.owner_id == user.id
-    if not (is_creator or is_owner or user.role == "admin"):
-        raise ForbiddenException(message="Only the creator, workspace owner, or an admin can revoke this receipt")
+    if receipt.created_by != user.id:
+        try:
+            await require_workspace_editor(workspace=receipt.workspace, current_user=user, db=db)
+        except ForbiddenException:
+            raise ForbiddenException(
+                message="Only the creator, a workspace editor/owner, or an admin can revoke this receipt"
+            )
 
     if receipt.revoked_at is None:
         receipt.revoked_at = datetime.now(timezone.utc)

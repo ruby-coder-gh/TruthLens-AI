@@ -15,8 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.audit_log import AuditLog
 from app.models.document import Document
+from app.models.query import Query
+from app.models.receipt import Receipt
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.receipts import build_payload, canonicalize, seal_and_sign
 
 
 async def _make_workspace(test_db: AsyncSession, owner: User) -> Workspace:
@@ -658,6 +661,56 @@ async def test_bulk_delete_removes_quarantine_rows(
         select(ChunkQuarantine).where(ChunkQuarantine.document_id == doc.id)
     )).scalars().all()
     assert orphans == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_revokes_receipts_citing_deleted_documents(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession, test_user: User
+):
+    """A public receipt must not keep quoting a document a bulk delete removed."""
+    ws = await _make_workspace(test_db, test_user)
+    doc = await _make_document(test_db, ws.id)
+
+    query = Query(
+        workspace_id=ws.id,
+        query_text="What does the doc say?",
+        response_text="It says something [source:1].",
+        response_sources=json.dumps(
+            [{"chunk_id": "c1", "document_id": doc.id, "document_name": doc.original_filename, "content": "It says something."}]
+        ),
+    )
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    payload = build_payload(query, claims=[], workspace=ws)
+    canonical = canonicalize(payload)
+    seal, signature = seal_and_sign(canonical)
+    receipt = Receipt(
+        token="tok-bulk-deleted-doc",
+        query_id=query.id,
+        workspace_id=ws.id,
+        payload=json.dumps(payload),
+        canonical=canonical,
+        seal=seal,
+        signature=signature,
+    )
+    test_db.add(receipt)
+    await test_db.commit()
+
+    async def fake_delete_documents(workspace_id: str, document_ids: list[str]) -> dict[str, str | None]:
+        return dict.fromkeys(document_ids)
+
+    with patch("app.ingestion.indexer.delete_documents", side_effect=fake_delete_documents):
+        resp = await client.post(
+            "/api/admin/documents/bulk",
+            json={"action": "delete", "document_ids": [doc.id]},
+            headers=admin_headers,
+        )
+    assert resp.status_code == 200
+
+    view_resp = await client.get(f"/api/receipts/{receipt.token}")
+    assert view_resp.status_code == 410
 
 
 @pytest.mark.asyncio

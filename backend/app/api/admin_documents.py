@@ -23,6 +23,7 @@ from app.models.contradiction import Contradiction
 from app.models.document import Document
 from app.models.user import User
 from app.query_cache import bump_workspace_document_version
+from app.receipts import revoke_receipts_for_document
 from app.schemas.document import (
     BulkDocumentAction,
     BulkDocumentResponse,
@@ -186,6 +187,11 @@ async def _bulk_delete(
         except OSError as e:
             warning = f"file cleanup failed: {e}"
             logger.warning("bulk_delete_file_cleanup_failed", document_id=doc.id, error=str(e))
+
+        # A public receipt must not keep quoting evidence that no longer exists.
+        await revoke_receipts_for_document(
+            db, workspace_id=workspace_id, document_id=doc.id, document_name=doc.original_filename
+        )
 
         to_delete_ids.append(doc.id)
         results[doc.id] = BulkDocumentResult(id=doc.id, status="ok", warning=warning)

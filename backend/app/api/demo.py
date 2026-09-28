@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.auth import _set_auth_cookies
 from app.config import settings
@@ -41,6 +41,11 @@ _DEMO_PERSONA_EMAILS = {
 
 _MAX_DERIVED_SUGGESTIONS = 4
 _SUGGESTIONS_PER_DOC = 2
+
+# demo-login grants a full session with no credentials. run.sh --demo binds
+# uvicorn to 0.0.0.0, so without this any LAN peer could self-serve an admin
+# session; the Vite dev proxy always connects from loopback.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1"}
 
 
 class DemoLoginRequest(BaseModel):
@@ -75,15 +80,19 @@ class ReadyResponse(BaseModel):
 @router.post("/auth/demo-login", response_model=AuthResponse)
 async def demo_login(
     body: DemoLoginRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """One-click login for a seeded demo persona.
 
     404 outside demo mode (never in production, even if DEMO_MODE was left
-    on by mistake) so the route reveals nothing about the deployment.
+    on by mistake) and 404 for any non-loopback caller (it hands out a full
+    session with no credentials) — both reveal nothing about the deployment.
     """
     if not settings.DEMO_MODE or settings.APP_ENV == "production":
+        raise NotFoundException()
+    if request.client is None or request.client.host not in _LOOPBACK_HOSTS:
         raise NotFoundException()
 
     email = _DEMO_PERSONA_EMAILS[body.persona]
