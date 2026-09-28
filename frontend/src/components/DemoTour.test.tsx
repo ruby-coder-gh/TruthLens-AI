@@ -5,6 +5,27 @@ import { renderWithProviders } from '../test/utils';
 import { DemoTour } from './DemoTour';
 import { useReady } from '../hooks/useReady';
 import type { UseReadyResult } from '../hooks/useReady';
+import type { User } from '../api/types';
+
+const demoUser: User = {
+  id: 'demo-1',
+  email: 'analyst@truthlens.dev',
+  username: 'demo_analyst',
+  role: 'analyst',
+  is_active: true,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+};
+
+const qaUser: User = {
+  id: 'qa-1',
+  email: 'viewer.qa@example.com',
+  username: 'viewer_qa',
+  role: 'viewer',
+  is_active: true,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+};
 
 vi.mock('../hooks/useReady', () => ({ useReady: vi.fn() }));
 
@@ -69,6 +90,8 @@ describe('DemoTour', () => {
       models: { embedder: 'warm', reranker: 'loading', nli: 'cold' },
       ollama: { reachable: true, model: 'qwen3:4b', model_present: false },
     });
+    // The warm-up status is for any authenticated user on a demo-mode
+    // deployment, not just the demo personas — no `user` needed here.
     renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
 
     expect(screen.getByText(/warming up models/i)).toBeInTheDocument();
@@ -92,7 +115,7 @@ describe('DemoTour', () => {
     mockReady({ demoMode: true, warm: true, demoWorkspaceId: 'ws-demo-1' });
     const user = userEvent.setup();
 
-    const { unmount } = renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    const { unmount } = renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
     expect(screen.getByRole('button', { name: /demo tour 0\/5/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
@@ -101,18 +124,60 @@ describe('DemoTour', () => {
     expect(await screen.findByRole('button', { name: /demo tour 1\/5/i })).toBeInTheDocument();
 
     unmount();
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
     expect(await screen.findByRole('button', { name: /demo tour 1\/5/i })).toBeInTheDocument();
   });
 
-  it('hides the tour entirely after "Hide tour" is clicked', async () => {
+  // BUG-33: viewer_qa/editor_qa-style accounts are signed into a demo-mode
+  // deployment for QA, but aren't running the demo.
+  it('hides the presenter checklist (but not the warm-up toast) for a non-demo account', () => {
+    mockReady({ demoMode: true, warm: false });
+    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: qaUser } });
+
+    expect(screen.queryByRole('button', { name: /demo tour/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/warming up models/i)).toBeInTheDocument();
+  });
+
+  it('collapses (never hides entirely) so the tour is always re-openable', async () => {
     mockReady({ demoMode: true, warm: true });
     const user = userEvent.setup();
 
-    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true } });
+    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
     await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
-    await user.click(screen.getByRole('button', { name: /hide tour/i }));
+    await user.click(screen.getByRole('button', { name: /collapse tour/i }));
 
-    expect(screen.queryByRole('button', { name: /demo tour/i })).not.toBeInTheDocument();
+    // The pill itself is still there — collapsing is not a dead end.
+    const pill = screen.getByRole('button', { name: /demo tour 0\/5/i });
+    expect(pill).toBeInTheDocument();
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(pill);
+    expect(screen.getByText('Presenter tour')).toBeInTheDocument();
+  });
+
+  it('closes on Escape and returns focus to the toggle pill', async () => {
+    mockReady({ demoMode: true, warm: true });
+    const user = userEvent.setup();
+
+    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
+    const pill = screen.getByRole('button', { name: /demo tour 0\/5/i });
+    await user.click(pill);
+    expect(screen.getByText('Presenter tour')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByText('Presenter tour')).not.toBeInTheDocument();
+    expect(pill).toHaveFocus();
+  });
+
+  it('collapses the panel after "Go" navigates to a step', async () => {
+    mockReady({ demoMode: true, warm: true, demoWorkspaceId: 'ws-demo-1' });
+    const user = userEvent.setup();
+
+    renderWithProviders(<DemoTour />, { authValue: { isAuthenticated: true, user: demoUser } });
+    await user.click(screen.getByRole('button', { name: /demo tour 0\/5/i }));
+    await user.click(screen.getAllByRole('link', { name: /^go$/i })[0]);
+
+    expect(screen.queryByText('Presenter tour')).not.toBeInTheDocument();
   });
 });
