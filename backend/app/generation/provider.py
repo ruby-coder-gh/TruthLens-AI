@@ -152,6 +152,27 @@ def _build_ollama_llm(
 
     actual_model = model or (settings.OLLAMA_FALLBACK_MODEL if fallback else settings.OLLAMA_PRIMARY_MODEL)
 
+    # `reasoning` toggles langchain-ollama's native <think> handling. Verified
+    # against a live local qwen3:4b (2026-09-28):
+    #   - reasoning=True:  the model's chain-of-thought is correctly routed to
+    #     `additional_kwargs["reasoning_content"]` on every chunk — `.content`
+    #     stayed empty throughout — but the model always spends its token
+    #     budget thinking, adding real latency.
+    #   - reasoning=False: NOT reliable — the model still emitted its full
+    #     chain-of-thought, and langchain-ollama's tag-boundary parser ate the
+    #     opening `<think>` but leaked the literal closing `</think>` into
+    #     `.content`, i.e. the reasoning text itself leaked into the answer.
+    #   - reasoning omitted entirely: the model answered directly with no
+    #     thinking block and no extra latency (best case, but not guaranteed
+    #     for every prompt).
+    # So OLLAMA_THINK=False (the demo default) omits the kwarg rather than
+    # passing `reasoning=False`, to avoid the leak above. generator.generate /
+    # stream additionally strip any `<think>…</think>` that still slips
+    # through, since a different prompt could yet trigger thinking.
+    ollama_kwargs: dict[str, Any] = dict(kwargs)
+    if settings.OLLAMA_THINK:
+        ollama_kwargs["reasoning"] = True
+
     # langchain_ollama's ChatOllama accepts `timeout` at runtime but its stub
     # doesn't declare the kwarg.
     return ChatOllama(
@@ -160,5 +181,8 @@ def _build_ollama_llm(
         temperature=temperature if temperature is not None else settings.OLLAMA_TEMPERATURE,
         num_predict=max_tokens if max_tokens is not None else settings.OLLAMA_MAX_TOKENS,
         timeout=timeout if timeout is not None else settings.OLLAMA_TIMEOUT,  # type: ignore[call-arg]
-        **kwargs,
+        # Keeps the model resident between demo queries instead of Ollama's
+        # default unload-after-request.
+        keep_alive=settings.OLLAMA_KEEP_ALIVE,
+        **ollama_kwargs,
     )
