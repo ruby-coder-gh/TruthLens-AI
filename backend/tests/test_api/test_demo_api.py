@@ -116,6 +116,23 @@ async def test_demo_login_sets_cookies_for_seeded_persona(
 
 
 @pytest.mark.asyncio
+async def test_demo_login_sets_last_login_at(
+    client: AsyncClient, test_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """BUG-35: demo-login must set last_login_at, same as a normal password login."""
+    monkeypatch.setattr(settings, "DEMO_MODE", True)
+    monkeypatch.setattr(settings, "APP_ENV", "development")
+    user = await _seed_demo_user(test_db, email="analyst@truthlens.dev", username="demo_analyst", role="user")
+    assert user.last_login_at is None
+
+    resp = await client.post("/api/auth/demo-login", json={"persona": "analyst"})
+    assert resp.status_code == 200
+
+    await test_db.refresh(user)
+    assert user.last_login_at is not None
+
+
+@pytest.mark.asyncio
 async def test_demo_login_unknown_persona_422(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "DEMO_MODE", True)
     monkeypatch.setattr(settings, "APP_ENV", "development")

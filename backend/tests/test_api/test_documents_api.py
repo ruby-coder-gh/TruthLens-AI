@@ -51,6 +51,54 @@ async def test_upload_document(client: AsyncClient, auth_headers: dict[str, str]
 
 
 @pytest.mark.asyncio
+async def test_upload_document_duplicate_content_rejected(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """BUG-60: an identical duplicate file upload in the same workspace is
+    rejected with 409, not silently accepted twice."""
+    content = b"Hello world content here"
+    first = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("test.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert first.status_code == 202
+
+    second = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("test-copy.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert second.status_code == 409
+    assert "test.txt" in second.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_upload_document_same_content_different_workspace_allowed(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """Duplicate detection is scoped to a single workspace."""
+    content = b"Shared content across workspaces"
+    first = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("shared.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert first.status_code == 202
+
+    other_ws = await client.post(
+        "/api/workspaces", json={"name": "Other WS"}, headers=auth_headers
+    )
+    other_ws_id = other_ws.json()["id"]
+    second = await client.post(
+        f"/api/workspaces/{other_ws_id}/documents",
+        files={"file": ("shared.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert second.status_code == 202
+
+
+@pytest.mark.asyncio
 async def test_upload_document_no_auth(client: AsyncClient, workspace_id: str):
     """Upload without auth returns 401."""
     resp = await client.post(

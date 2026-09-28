@@ -201,9 +201,10 @@ class TestQuarantineListEndpoint:
         assert data[0]["pattern"] == "ignore_previous_instructions"
         assert data[0]["document_name"] == "report.txt"
 
-    async def test_viewer_forbidden_from_listing(
+    async def test_viewer_can_read_quarantine_list(
         self, client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession
     ):
+        """C4: viewers may READ the quarantine list; only mutations stay editor-only."""
         workspace_id, doc = await _make_workspace_and_document(client, auth_headers, test_db)
         await _seed_quarantine_row(test_db, workspace_id, doc.id)
 
@@ -217,7 +218,8 @@ class TestQuarantineListEndpoint:
         resp = await client.get(
             f"/api/workspaces/{workspace_id}/review-queue/quarantine", headers=viewer_headers
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert len(resp.json()["data"]) == 1
 
 
 @pytest.mark.asyncio

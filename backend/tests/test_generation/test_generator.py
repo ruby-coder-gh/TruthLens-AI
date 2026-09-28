@@ -4,7 +4,20 @@ from __future__ import annotations
 
 import pytest
 
-from app.generation.generator import GenerationInput, _build_context_text
+from app.generation.generator import DEFAULT_SYSTEM_PROMPT, GenerationInput, _build_context_text
+
+
+def test_default_prompt_instructs_disagreement_over_a_pick():
+    """BUG-24: when sources disagree, the default prompt must tell the model
+    to state both figures with citations and say they disagree — not pick a
+    side (previous default let the model conclude "the correct answer is
+    X", contradicting the product's promise)."""
+    lowered = DEFAULT_SYSTEM_PROMPT.lower()
+    assert "disagree" in lowered
+    assert "both" in lowered
+    # The original abstention/citation instructions must survive the edit.
+    assert "I cannot find this information in your documents." in DEFAULT_SYSTEM_PROMPT
+    assert "[source:N]" in DEFAULT_SYSTEM_PROMPT
 
 
 def test_build_context_text_empty():

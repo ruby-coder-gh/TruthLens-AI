@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db
-from app.core.exceptions import ConflictException, ForbiddenException, InvalidInputException, NotFoundException
+from app.core.exceptions import (
+    AppException,
+    ConflictException,
+    ForbiddenException,
+    InvalidInputException,
+    NotFoundException,
+)
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.query import Query
@@ -236,7 +242,8 @@ async def add_member(
         result = await db.execute(select(User).where(User.email == body.email))
         user = result.scalar_one_or_none()
         if not user:
-            raise NotFoundException("User", body.email)
+            # C2 contract: exact message the email-invite UI matches on.
+            raise AppException("NOT_FOUND", "No user with that email", status_code=404)
         user_id = user.id
 
     # Check user exists

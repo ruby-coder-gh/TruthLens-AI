@@ -291,6 +291,65 @@ async def test_add_member_duplicate(
 
 
 @pytest.mark.asyncio
+async def test_add_member_by_email(
+    client: AsyncClient,
+    test_db: AsyncSession,
+    auth_headers: dict[str, str],
+):
+    """C2: add member accepts {email, role} as an alternative to {user_id, role}."""
+    create = await client.post(
+        "/api/workspaces",
+        json={"name": "Email Member WS"},
+        headers=auth_headers,
+    )
+    ws_id = create.json()["id"]
+
+    member_user = User(
+        email="by-email@example.com",
+        username="byemailuser",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(member_user)
+    await test_db.commit()
+    await test_db.refresh(member_user)
+
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/members",
+        json={"email": "by-email@example.com", "role": "editor"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "editor"
+    assert resp.json()["user_id"] == member_user.id
+    assert resp.json()["email"] == "by-email@example.com"
+
+
+@pytest.mark.asyncio
+async def test_add_member_by_email_unknown(
+    client: AsyncClient,
+    test_db: AsyncSession,
+    auth_headers: dict[str, str],
+):
+    """C2: unknown email returns 404 with a clear message ('No user with that email')."""
+    create = await client.post(
+        "/api/workspaces",
+        json={"name": "Unknown Email WS"},
+        headers=auth_headers,
+    )
+    ws_id = create.json()["id"]
+
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/members",
+        json={"email": "ghost@nowhere.com", "role": "viewer"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+    assert "No user with that email" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_list_members(
     client: AsyncClient,
     test_db: AsyncSession,

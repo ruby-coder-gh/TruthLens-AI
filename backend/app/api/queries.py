@@ -21,7 +21,7 @@ from app.models.query_pin import QueryPin
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.query_cache import normalize_query
-from app.report_export import render_evidence_markdown
+from app.report_export import normalize_citations, render_evidence_markdown
 from app.schemas.common import ListResponse, PaginatedResponse
 from app.schemas.pin import QueryPinResponse
 from app.schemas.query import QueryDetailResponse, QuerySummary, SourceResponse
@@ -216,18 +216,26 @@ async def list_queries(
 @router.get("/queries", response_model=PaginatedResponse[QuerySummary])
 async def list_all_queries(
     pinned: bool | None = None,
+    mine: bool | None = None,
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List history across the caller's accessible workspaces and private pins."""
+    """List history across the caller's accessible workspaces and private pins.
+
+    C3: `mine=true` restricts to queries the caller asked — otherwise (e.g. an
+    admin/owner with access to a workspace) this lists every member's queries,
+    which reads wrong under a "your recent chats" label.
+    """
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
     workspace_ids = await get_accessible_workspace_ids(db, user)
     if not workspace_ids:
         return PaginatedResponse(data=[], meta={"page": page, "page_size": page_size, "total": 0})
 
     filters = [Query.workspace_id.in_(workspace_ids)]
+    if mine is True:
+        filters.append(Query.user_id == user.id)
     if pinned is True:
         filters.append(Query.id.in_(select(QueryPin.query_id).where(QueryPin.user_id == user.id)))
     total = (await db.execute(select(func.count(Query.id)).where(*filters))).scalar() or 0
@@ -262,7 +270,7 @@ async def get_query_anywhere(
 
 def _render_query_markdown(query: Query, sources: list[dict[str, Any]]) -> str:
     """Render a query's question/answer/trust score/sources as a Markdown document."""
-    answer = query.response_text or "_No answer generated._"
+    answer = normalize_citations(query.response_text) if query.response_text else "_No answer generated._"
 
     if query.trust_score is None:
         trust = "_Not scored._"

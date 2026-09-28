@@ -58,6 +58,19 @@ async def test_load_csv():
 
 
 @pytest.mark.asyncio
+async def test_load_csv_one_chunk_per_row(tmp_path: Path):
+    """C7: CSV rows become independently retrievable — one page per row, with
+    the header repeated as 'Column: value; …' text (not one page for the whole file)."""
+    path = tmp_path / "rows.csv"
+    path.write_text("project,status\nAurora,construction\nKestrel Ridge,commissioned\n")
+    pages = await load(path, "text/csv")
+
+    assert len(pages) == 2
+    assert pages[0]["text"] == "project: Aurora; status: construction"
+    assert pages[1]["text"] == "project: Kestrel Ridge; status: commissioned"
+
+
+@pytest.mark.asyncio
 async def test_load_pdf_reverses_ligature_glyphs():
     """PyMuPDF's `Story` HTML layout (used to build the demo corpus PDFs) can
     substitute a single ligature glyph for an "fi"/"fl" letter pair (e.g.
