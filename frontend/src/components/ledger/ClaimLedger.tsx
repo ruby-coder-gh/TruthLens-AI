@@ -14,7 +14,7 @@ import type { Claim, Source, Contradiction } from '../../api/types';
 import { Stamp } from './Stamp';
 import { VERDICT_META } from './verdict';
 import { alignTokens } from './align';
-import { pairClaimConflicts, figureDiff, type ConflictPair } from './conflicts';
+import { pairClaimConflicts, conflictRowId, figureDiff, formatFigureDiff, type ConflictPair } from './conflicts';
 
 // Bold out currency/number figures in the claim cell — the thing a reader's
 // eye needs to catch fastest when two rows disagree.
@@ -64,12 +64,30 @@ function whyText(claim: Claim): string {
     case 'supported':
       return `The cited passage states the same thing (${pct}% entailment).`;
     case 'partial':
-      return `The source backs part of this claim, but some wording goes further than the passage says (${pct}% entailment). Words in the source are underlined; words the claim adds are flagged.`;
+      // No "(X% entailment)" here (BUG-26): the verdict is decided by how
+      // much of the claim the source backs, not by the single best
+      // entailment score, so that score can read near 0 on a claim that's
+      // legitimately partial — printing it next to "Partial" looked
+      // self-contradictory. The word-level alignment below is the real,
+      // accurate explanation.
+      return 'The source backs part of this claim, but some wording goes further than the passage says. Words in the source are underlined below; words the claim adds are flagged.';
     case 'unsupported':
       return 'No retrieved passage supports this claim.';
     case 'contradicted':
       return `The cited passage states the opposite (${Math.round(claim.contradiction * 100)}% contradiction).`;
   }
+}
+
+/** A conflict this claim row participates in — `partnerLabel` is either the
+ * cited partner claim's own number ("C2") or, when the partner chunk isn't
+ * cited by anything in this answer, the partner's own document title (BUG-5:
+ * the row still has to say *something* differs, even with no sibling claim
+ * to point at). `jumpToId` always resolves to a real row (the claim row when
+ * cited, else the discrepancy row itself). */
+interface ClaimXref {
+  key: string;
+  partnerLabel: string;
+  jumpToId: string;
 }
 
 function ClaimRow({
@@ -78,7 +96,7 @@ function ClaimRow({
   sources,
   allDocNames,
   workspaceId,
-  xrefTo,
+  xrefs,
   isOpen,
   onToggle,
   flashed,
@@ -88,7 +106,7 @@ function ClaimRow({
   sources: Source[];
   allDocNames: string[];
   workspaceId?: string;
-  xrefTo: number[]; // other 1-based claim numbers this row conflicts with
+  xrefs: ClaimXref[];
   isOpen: boolean;
   onToggle: () => void;
   flashed: boolean;
@@ -107,8 +125,16 @@ function ClaimRow({
       chunkId: claim.chunk_id,
       documentName: claim.document_name ?? undefined,
       pageNumber: claim.page_number ?? undefined,
+      highlightText: claim.evidence ?? undefined,
     });
   }, [canView, workspaceId, claim, openViewer]);
+
+  // BUG-26: the verdict is driven by the support *ratio*, not the single
+  // best entailment score, so a "Partial" claim can legitimately carry a
+  // near-0 entailment — showing that number next to the stamp read as the
+  // UI contradicting itself. Only supported/contradicted rows (where the
+  // number is the actual signal behind the verdict) get the score readout.
+  const showScore = claim.verdict !== 'partial';
 
   return (
     <li
@@ -116,7 +142,7 @@ function ClaimRow({
       className={clsx(
         'border-b border-border last:border-b-0 transition-colors',
         flashed && 'bg-primary/10',
-        xrefTo.length > 0 && 'bg-conflict-tint',
+        xrefs.length > 0 && 'bg-conflict-tint',
       )}
     >
       <div className="flex flex-col gap-2.5 px-2 py-4 sm:grid sm:grid-cols-[2.5rem_7.5rem_minmax(0,1fr)_minmax(0,1.1fr)_2.25rem] sm:items-start sm:gap-4">
@@ -124,32 +150,39 @@ function ClaimRow({
 
         <div className="flex flex-row items-center gap-3 sm:flex-col sm:items-start sm:gap-2">
           <Stamp verdict={claim.verdict} />
-          <span className="flex items-center gap-1.5 text-xs text-text-muted">
-            <span className="h-[3px] w-10 overflow-hidden rounded-full bg-border" aria-hidden="true">
-              <span
-                className={clsx('block h-full', VERDICT_META[claim.verdict].textClass.replace('text-', 'bg-'))}
-                style={{ width: `${Math.round(claim.entailment * 100)}%` }}
-              />
+          {showScore && (
+            <span className="flex items-center gap-1.5 text-xs text-text-muted">
+              <span className="h-[3px] w-10 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                {/* BUG-28: `bg-current` reads the colour from this span's own
+                    `text-v-*` class — no `bg-*` class is ever built from a
+                    string at runtime, so Tailwind's static scan always finds
+                    it (a `.replace('text-','bg-')` result never appears
+                    literally in source, so it never got generated at all). */}
+                <span
+                  className={clsx('block h-full bg-current', VERDICT_META[claim.verdict].textClass)}
+                  style={{ width: `${Math.round(claim.entailment * 100)}%` }}
+                />
+              </span>
+              <span className="tabular-nums">
+                <span className="sr-only">Entailment score </span>
+                {claim.entailment.toFixed(2)}
+              </span>
             </span>
-            <span className="tabular-nums">
-              <span className="sr-only">Entailment score </span>
-              {claim.entailment.toFixed(2)}
-            </span>
-          </span>
+          )}
         </div>
 
         <div className="min-w-0 text-sm leading-6 text-text">
           <span className="sr-only">Claim: </span>
           <EmphasizedFigures text={claim.text} />
-          {xrefTo.map((n) => (
+          {xrefs.map((x) => (
             <button
-              key={n}
+              key={x.key}
               type="button"
-              onClick={() => flashRowById(`row-C${n}`)}
+              onClick={() => flashRowById(x.jumpToId)}
               className="ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 align-middle text-xs font-medium text-conflict hover:bg-conflict-tint"
             >
               <Scale size={12} aria-hidden="true" />
-              Differs from C{n}
+              Differs from {x.partnerLabel}
             </button>
           ))}
         </div>
@@ -207,41 +240,47 @@ function ClaimRow({
   );
 }
 
-function DiscrepancyRow({ pair, claims, allDocNames, workspaceId }: { pair: ConflictPair; claims: Claim[]; allDocNames: string[]; workspaceId?: string }) {
+function DiscrepancyRow({ pair, number, claims, allDocNames, workspaceId }: { pair: ConflictPair; number: number; claims: Claim[]; allDocNames: string[]; workspaceId?: string }) {
   const { open: openViewer } = useSourceViewer();
-  const claimA = claims[pair.claimAIndex];
-  const claimB = claims[pair.claimBIndex];
-  const diff = figureDiff(claimA, claimB);
-  const titleA = claimA.document_name ? shortDocTitle(claimA.document_name, allDocNames) : `C${pair.claimAIndex + 1}`;
-  const titleB = claimB.document_name ? shortDocTitle(claimB.document_name, allDocNames) : `C${pair.claimBIndex + 1}`;
+  // Either side may be an uncited chunk (BUG-5) — fall back to the radar's
+  // own sentence/doc data, which every `Contradiction` side carries
+  // regardless of whether a claim in this answer happens to cite it.
+  const claimA = pair.claimAIndex !== -1 ? claims[pair.claimAIndex] : undefined;
+  const claimB = pair.claimBIndex !== -1 ? claims[pair.claimBIndex] : undefined;
+  const textA = claimA?.text ?? pair.contradiction.a.sentence;
+  const textB = claimB?.text ?? pair.contradiction.b.sentence;
+  const diff = figureDiff(textA, textB);
+  const titleA = shortDocTitle(pair.contradiction.a.document_name, allDocNames);
+  const titleB = shortDocTitle(pair.contradiction.b.document_name, allDocNames);
+  const rowLabelA = claimA ? `C${pair.claimAIndex + 1}` : titleA;
+  const rowLabelB = claimB ? `C${pair.claimBIndex + 1}` : titleB;
 
   const handleCompare = useCallback(() => {
-    if (!workspaceId || !claimA.document_id || !claimA.chunk_id) return;
+    if (!workspaceId) return;
     openViewer({
       workspaceId,
-      documentId: claimA.document_id,
-      chunkId: claimA.chunk_id,
-      documentName: claimA.document_name ?? undefined,
-      pageNumber: claimA.page_number ?? undefined,
+      documentId: pair.contradiction.a.document_id,
+      chunkId: pair.contradiction.a.chunk_id,
+      documentName: pair.contradiction.a.document_name,
+      pageNumber: pair.contradiction.a.page_number ?? undefined,
+      highlightText: textA,
     });
-  }, [workspaceId, claimA, openViewer]);
+  }, [workspaceId, pair, textA, openViewer]);
 
   return (
-    <li id={`row-D${pair.claimAIndex}${pair.claimBIndex}`} className="border-b border-border bg-conflict-tint px-2 py-4 last:border-b-0">
+    <li id={`row-D-${pair.contradiction.id}`} className="border-b border-border bg-conflict-tint px-2 py-4 last:border-b-0">
       <div className="flex flex-col gap-2.5 sm:grid sm:grid-cols-[2.5rem_7.5rem_minmax(0,1fr)_minmax(0,1.1fr)] sm:gap-4">
-        <span className="font-cond text-[13px] font-medium text-text-dim">D</span>
+        <span className="font-cond text-[13px] font-medium text-text-dim">D{number}</span>
         <Stamp verdict="conflict" />
         <div className="min-w-0 text-sm text-text">
-          <p className="font-medium">Sources disagree{diff ? '' : ` (C${pair.claimAIndex + 1} vs C${pair.claimBIndex + 1})`}</p>
+          <p className="font-medium">Sources disagree{diff || !(claimA && claimB) ? '' : ` (${rowLabelA} vs ${rowLabelB})`}</p>
           <p className="mt-0.5 text-[13px] leading-5 text-text-muted">
             {titleA} and {titleB} report different figures for the same thing. TruthLens shows both and doesn't pick one.
           </p>
-          {workspaceId && claimA.document_id && claimA.chunk_id && (
-            <button type="button" onClick={handleCompare} className="mt-2 inline-flex min-h-7 items-center gap-1.5 rounded-control border border-border-strong px-2 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11">
-              <ExternalLink size={12} aria-hidden="true" />
-              Compare the pages
-            </button>
-          )}
+          <button type="button" onClick={handleCompare} disabled={!workspaceId} className="mt-2 inline-flex min-h-7 items-center gap-1.5 rounded-control border border-border-strong px-2 text-xs font-medium text-text hover:bg-card-2 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent [@media(pointer:coarse)]:min-h-11">
+            <ExternalLink size={12} aria-hidden="true" />
+            Compare the pages
+          </button>
         </div>
         {diff && (
           <table className="w-full max-w-xs text-[13px]">
@@ -249,7 +288,7 @@ function DiscrepancyRow({ pair, claims, allDocNames, workspaceId }: { pair: Conf
             <tbody>
               <tr><th scope="row" className="pr-3 py-0.5 text-left font-normal text-text-muted">{titleA}</th><td className="py-0.5 text-right font-semibold tabular-nums text-text">{diff.a.raw}</td></tr>
               <tr><th scope="row" className="pr-3 py-0.5 text-left font-normal text-text-muted">{titleB}</th><td className="py-0.5 text-right font-semibold tabular-nums text-text">{diff.b.raw}</td></tr>
-              <tr className="border-t border-border-strong"><th scope="row" className="pr-3 pt-1 text-left font-normal text-conflict">Difference</th><td className="pt-1 text-right font-semibold tabular-nums text-conflict">{diff.diff.toLocaleString()}</td></tr>
+              <tr className="border-t border-border-strong"><th scope="row" className="pr-3 pt-1 text-left font-normal text-conflict">Difference</th><td className="pt-1 text-right font-semibold tabular-nums text-conflict">{formatFigureDiff(diff)}</td></tr>
             </tbody>
           </table>
         )}
@@ -291,10 +330,22 @@ export function ClaimLedger({ claims, sources, allDocNames, contradictions = [],
   const [openIndex, setOpenIndex] = useState<number | null>(initialOpenIndex);
   const pairs = pairClaimConflicts(claims, contradictions);
 
-  const xrefFor = (index: number): number[] =>
+  // BUG-5: a partner side with index -1 isn't a claim in this answer, so
+  // there's no "Cn" row to point at — jump to (and label from) the
+  // discrepancy row instead, using the radar's own document title.
+  const xrefFor = (index: number): ClaimXref[] =>
     pairs
       .filter((p) => p.claimAIndex === index || p.claimBIndex === index)
-      .map((p) => (p.claimAIndex === index ? p.claimBIndex : p.claimAIndex) + 1);
+      .map((p) => {
+        const isA = p.claimAIndex === index;
+        const partnerIndex = isA ? p.claimBIndex : p.claimAIndex;
+        const partnerSide = isA ? p.contradiction.b : p.contradiction.a;
+        return {
+          key: p.contradiction.id,
+          partnerLabel: partnerIndex !== -1 ? `C${partnerIndex + 1}` : shortDocTitle(partnerSide.document_name, allDocNames),
+          jumpToId: conflictRowId(p, isA ? 'b' : 'a'),
+        };
+      });
 
   return (
     <div className="overflow-hidden rounded-panel border border-border bg-solid">
@@ -307,14 +358,14 @@ export function ClaimLedger({ claims, sources, allDocNames, contradictions = [],
             sources={sources}
             allDocNames={allDocNames}
             workspaceId={workspaceId}
-            xrefTo={xrefFor(i)}
+            xrefs={xrefFor(i)}
             isOpen={openIndex === i}
             onToggle={() => setOpenIndex((v) => (v === i ? null : i))}
             flashed={false}
           />
         ))}
-        {pairs.map((pair) => (
-          <DiscrepancyRow key={`${pair.claimAIndex}-${pair.claimBIndex}`} pair={pair} claims={claims} allDocNames={allDocNames} workspaceId={workspaceId} />
+        {pairs.map((pair, i) => (
+          <DiscrepancyRow key={pair.contradiction.id} pair={pair} number={i + 1} claims={claims} allDocNames={allDocNames} workspaceId={workspaceId} />
         ))}
       </ol>
     </div>

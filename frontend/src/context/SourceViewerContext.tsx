@@ -16,10 +16,8 @@ export interface SourceTarget {
   chunkId: string;
   documentName?: string;
   pageNumber?: number | null;
-  /** C1: the specific cited sentence to highlight, e.g. a claim's evidence
-   *  text. When set, the drawer asks `/locate?text=` for just this
-   *  fragment's rects instead of the whole chunk (BUG-17 — highlights
-   *  otherwise cover the entire page/chunk, not the cited passage). */
+  /** The cited sentence to highlight (e.g. a claim's evidence): the drawer asks
+   *  `/locate?text=` for just its rects instead of the whole chunk. */
   highlightText?: string;
 }
 

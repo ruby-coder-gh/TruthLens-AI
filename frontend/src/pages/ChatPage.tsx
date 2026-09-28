@@ -14,14 +14,8 @@ import { clsx } from 'clsx';
 import {
   Send,
   Square,
-  Copy,
-  ThumbsUp,
-  ThumbsDown,
-  Clock,
-  Brain,
   AlertCircle,
   RotateCcw,
-  Download,
   RefreshCw,
   ChevronDown,
   FileText,
@@ -40,14 +34,15 @@ import { SealReceiptButton } from '../components/SealReceiptButton';
 import { SuggestedQuestions } from '../components/SuggestedQuestions';
 import { downloadBlob } from '../utils/download';
 import { AuditTrail, type AuditPhase } from '../components/ledger/AuditTrail';
-import { ClaimLedger, flashRows } from '../components/ledger/ClaimLedger';
+import { ClaimLedger } from '../components/ledger/ClaimLedger';
 import { ProseAnswer } from '../components/ledger/ProseAnswer';
 import { Exhibits } from '../components/ledger/Exhibits';
 import { TrustTotals } from '../components/ledger/TrustTotals';
-import { VERDICT_META, tallyClaims } from '../components/ledger/verdict';
+import { tallyClaims } from '../components/ledger/verdict';
 import { useAnswerView } from '../components/ledger/useAnswerView';
 import { citedSourceIndices } from '../components/ledger/citedSources';
 import { pairClaimConflicts } from '../components/ledger/conflicts';
+import { ClaimTallyChips, AnswerActionBar } from '../components/ledger/AnswerActions';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -88,6 +83,9 @@ interface ChatMessage {
   error: { code: string; message: string } | null;
   status: 'pending' | 'streaming' | 'complete' | 'error' | 'cancelled';
   claims: Claim[] | null;
+  /** BUG-6: honest "did the guardrail actually pass" state, from the WS
+   *  guardrail frame's `passed` field — `null` until it arrives. */
+  guardrailPassed: boolean | null;
   reconnectAttempt: number | null;
   edgeCase?: QueryEdgeCase | null;
   sufficiency?: SufficiencyVerdict | null;
@@ -107,11 +105,6 @@ interface StartQueryOptions {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatLatency(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
 function formatTimestamp(ts: string): string {
   const d = new Date(ts);
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -122,9 +115,20 @@ function liveWordCount(content: string): number {
   return trimmed ? trimmed.split(/\s+/).length : 0;
 }
 
+// BUG-32: must match Layout.tsx's sidebar `initials()` exactly — that one
+// takes the first letter of the first two *words* ("demo_analyst" → "DA"),
+// not the first two raw characters ("demo_analyst".slice(0,2) → "DE"), so the
+// question avatar used to disagree with the sidebar for every underscored
+// username.
 function initials(name: string | undefined): string {
   if (!name) return '?';
-  return name.slice(0, 2).toUpperCase();
+  const letters = name
+    .split(/[\s_.-]+/)
+    .filter((word) => /^[a-z0-9]/i.test(word))
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join('');
+  return letters || '?';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -228,6 +232,7 @@ function ChatPageForConversation() {
         status: 'complete',
         reconnectAttempt: null,
         claims: null,
+        guardrailPassed: null,
         phase: null,
         foundCount: null,
         keptCount: null,
@@ -274,9 +279,9 @@ function ChatPageForConversation() {
           );
         },
 
-        onGuardrail: (result: { claims: Claim[] }) => {
+        onGuardrail: (result: { passed: boolean; claims: Claim[] }) => {
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsgId ? { ...m, claims: result.claims } : m)),
+            prev.map((m) => (m.id === assistantMsgId ? { ...m, claims: result.claims, guardrailPassed: result.passed } : m)),
           );
         },
 
@@ -360,7 +365,7 @@ function ChatPageForConversation() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
-                ? { ...m, content: '', sources: [], claims: null, trustScore: null, trustComponents: {}, servedFromCache: false, queryId: null, error: null, phase: null, foundCount: null, keptCount: null, wordsCount: null }
+                ? { ...m, content: '', sources: [], claims: null, guardrailPassed: null, trustScore: null, trustComponents: {}, servedFromCache: false, queryId: null, error: null, phase: null, foundCount: null, keptCount: null, wordsCount: null }
                 : m,
             ),
           );
@@ -522,7 +527,14 @@ function ChatPageForConversation() {
             placeholder={`Ask about the ${workspace?.name ?? 'workspace'} documents`}
             disabled={isStreaming}
             rows={1}
-            className="block w-full resize-none border-0 bg-transparent px-4 pb-1 pt-3.5 text-sm text-text placeholder-text-dim focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            // overflow-hidden (BUG-52): the height is fully JS-driven (the
+            // onChange handler below), so the browser's own scrollbar
+            // heuristic has nothing to do — without this a `rows={1}`
+            // textarea can show a hairline vertical scrollbar even with no
+            // text (a sub-pixel scrollHeight/clientHeight mismatch from the
+            // padding), which was also nudging the send button off the
+            // trailing edge of its row.
+            className="block w-full resize-none overflow-hidden border-0 bg-transparent px-4 pb-1 pt-3.5 text-sm text-text placeholder-text-dim focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div className="flex items-center gap-2 px-2 pb-2 pt-1">
             <button
@@ -534,14 +546,19 @@ function ChatPageForConversation() {
               {workspace ? `All ${workspace.document_count} document${workspace.document_count === 1 ? '' : 's'}` : 'All documents'}
               <ChevronDown size={13} aria-hidden="true" />
             </button>
-            <span className="ml-auto hidden text-[11px] text-text-dim sm:inline">Enter to send, Shift + Enter for a new line</span>
+            <span className="hidden text-[11px] text-text-dim sm:inline">Enter to send, Shift + Enter for a new line</span>
+            {/* ml-auto lives on the send/stop button itself (BUG-52), not
+                only on the hint span above: the hint is `hidden` below `sm`,
+                and a `display:none` element contributes no margin, so on
+                mobile the button used to sit right after the document pill
+                instead of pinned to the trailing edge. */}
             {isStreaming ? (
               <button
                 type="button"
                 onClick={handleStop}
                 aria-label="Stop generating"
                 title="Stop generating"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-red/40 bg-card-2 text-text-muted transition-colors hover:border-red/60 hover:bg-red/12 hover:text-red [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+                className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-red/40 bg-card-2 text-text-muted transition-colors hover:border-red/60 hover:bg-red/12 hover:text-red [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
               >
                 <Square size={15} fill="currentColor" />
               </button>
@@ -550,7 +567,7 @@ function ChatPageForConversation() {
                 type="submit"
                 disabled={!inputValue.trim()}
                 aria-label="Send question"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-primary text-on-primary transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-card-2 disabled:text-text-dim [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+                className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-primary text-on-primary transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:bg-card-2 disabled:text-text-dim [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
               >
                 <Send size={16} />
               </button>
@@ -692,6 +709,7 @@ const AnswerTurn = memo(function AnswerTurn({
           modelUsed={message.modelUsed}
           startedAt={message.startedAt}
           latencyMs={message.status === 'complete' ? message.latencyMs : null}
+          guardrailPassed={message.guardrailPassed}
         />
       )}
 
@@ -748,23 +766,7 @@ const AnswerTurn = memo(function AnswerTurn({
                   Read as prose
                 </button>
               </div>
-              <div className="flex flex-wrap gap-0.5" role="group" aria-label="Claim summary">
-                {tally && tally.supported > 0 && (
-                  <TallyChip verdict="supported" count={tally.supported} label="verified" onClick={() => { setView('ledger'); flashRows(claims.map((c, i) => c.verdict === 'supported' ? `row-C${i + 1}` : null).filter((v): v is string => Boolean(v))); }} />
-                )}
-                {tally && tally.partial > 0 && (
-                  <TallyChip verdict="partial" count={tally.partial} label="partial" onClick={() => { setView('ledger'); flashRows(claims.map((c, i) => c.verdict === 'partial' ? `row-C${i + 1}` : null).filter((v): v is string => Boolean(v))); }} />
-                )}
-                {tally && tally.unsupported > 0 && (
-                  <TallyChip verdict="unsupported" count={tally.unsupported} label="unsupported" onClick={() => { setView('ledger'); flashRows(claims.map((c, i) => c.verdict === 'unsupported' ? `row-C${i + 1}` : null).filter((v): v is string => Boolean(v))); }} />
-                )}
-                {tally && tally.contradicted > 0 && (
-                  <TallyChip verdict="contradicted" count={tally.contradicted} label="contradicted" onClick={() => { setView('ledger'); flashRows(claims.map((c, i) => c.verdict === 'contradicted' ? `row-C${i + 1}` : null).filter((v): v is string => Boolean(v))); }} />
-                )}
-                {conflictPairs.length > 0 && (
-                  <TallyChip verdict="conflict" count={conflictPairs.length} label="conflict" onClick={() => { setView('ledger'); flashRows([`row-C${conflictPairs[0].claimAIndex + 1}`]); }} />
-                )}
-              </div>
+              <ClaimTallyChips claims={claims} tally={tally!} conflictPairs={conflictPairs} onSelectLedgerView={() => setView('ledger')} />
             </div>
           )}
 
@@ -775,35 +777,26 @@ const AnswerTurn = memo(function AnswerTurn({
           )}
 
           {message.sources.length > 0 && (
-            <Exhibits sources={message.sources} citedIndices={cited} allDocNames={allDocNames} workspaceId={workspaceId} />
+            <Exhibits sources={message.sources} citedIndices={cited} allDocNames={allDocNames} workspaceId={workspaceId} claims={message.claims} />
           )}
 
           {message.trustScore !== null && <TrustTotals score={message.trustScore} components={message.trustComponents} />}
 
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             {message.queryId && <SealReceiptButton queryId={message.queryId} />}
-            <ActionIconButton icon={Copy} label="Copy response" onClick={() => onCopy(message.content)} />
-            {message.queryId && (
-              <>
-                <ActionIconButton icon={Download} label="Export as Markdown" onClick={onExport} />
-                <ActionIconButton icon={ThumbsUp} label="Good answer" onClick={() => onFeedback(5)} hoverClass="hover:text-green" />
-                <ActionIconButton icon={ThumbsDown} label="Bad answer" onClick={() => onFeedback(1)} hoverClass="hover:text-red" />
-              </>
-            )}
-            {message.servedFromCache && <ActionIconButton icon={RotateCcw} label="Regenerate with fresh retrieval" onClick={onRegenerate} />}
-            <span className="ml-auto flex flex-wrap items-center gap-3 text-xs text-text-dim">
-              {message.servedFromCache && (
-                <span className="inline-flex items-center gap-1" title="Served from a valid cached result. Regenerate to run retrieval and generation again.">
-                  <Clock size={11} aria-hidden="true" /> Cached
-                </span>
-              )}
-              {message.modelUsed && (
-                <span className="inline-flex items-center gap-1">
-                  <Brain size={12} aria-hidden="true" /> {message.modelUsed}
-                </span>
-              )}
-              {message.latencyMs !== null && <span>{formatLatency(message.latencyMs)}</span>}
-            </span>
+            <AnswerActionBar
+              content={message.content}
+              onCopy={onCopy}
+              onExport={message.queryId ? onExport : undefined}
+              onFeedback={message.queryId ? onFeedback : undefined}
+              onRegenerate={onRegenerate}
+              // BUG-31: every complete answer with a queryId can be
+              // regenerated, not only ones served from cache.
+              canRegenerate={Boolean(message.queryId)}
+              servedFromCache={message.servedFromCache}
+              modelUsed={message.modelUsed}
+              latencyMs={message.latencyMs}
+            />
           </div>
         </>
       )}
@@ -826,31 +819,6 @@ const AnswerTurn = memo(function AnswerTurn({
     </motion.div>
   );
 });
-
-function TallyChip({ verdict, count, label, onClick }: { verdict: keyof typeof VERDICT_META; count: number; label: string; onClick: () => void }) {
-  const meta = VERDICT_META[verdict];
-  const Icon = meta.icon;
-  return (
-    <button type="button" onClick={onClick} className={clsx('inline-flex min-h-8 items-center gap-1.5 rounded px-2.5 text-sm font-medium hover:bg-card-2 [@media(pointer:coarse)]:min-h-11', meta.textClass)}>
-      <Icon size={14} aria-hidden="true" />
-      {count} {label}
-    </button>
-  );
-}
-
-function ActionIconButton({ icon: Icon, label, onClick, hoverClass }: { icon: typeof Copy; label: string; onClick: () => void; hoverClass?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className={clsx('flex h-9 w-9 items-center justify-center rounded-control text-text-dim transition-colors hover:bg-card-2 hover:text-text [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11', hoverClass)}
-    >
-      <Icon size={15} />
-    </button>
-  );
-}
 
 const RetryButton = memo(function RetryButton({ onClick }: { onClick: () => void }) {
   return (

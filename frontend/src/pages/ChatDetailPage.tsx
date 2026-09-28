@@ -10,12 +10,14 @@ import { ArrowLeft, Clock, GitCompareArrows, ExternalLink } from 'lucide-react';
 import { Button, Card, Badge, LoadingSpinner, ProgressBar } from '../components/ui';
 import { pageTransition, staggerItem } from '../components/motion';
 import { PageHeader, PageShell } from '../components/PageWrappers';
-import { queryApi, radarApi } from '../api/client';
+import { queryApi, radarApi, feedbackApi } from '../api/client';
 import type { QueryDetail, Source, QueryComparison, Contradiction } from '../api/types';
 import AnswerComparison from '../components/AnswerComparison';
 import AnnotationThread from '../components/AnnotationThread';
 import AbstentionCard from '../components/AbstentionCard';
 import { SealReceiptButton } from '../components/SealReceiptButton';
+import { useToast } from '../components/toast-context';
+import { downloadBlob } from '../utils/download';
 import { AuditTrail } from '../components/ledger/AuditTrail';
 import { ClaimLedger } from '../components/ledger/ClaimLedger';
 import { ProseAnswer } from '../components/ledger/ProseAnswer';
@@ -24,6 +26,8 @@ import { TrustTotals } from '../components/ledger/TrustTotals';
 import { tallyClaims } from '../components/ledger/verdict';
 import { useAnswerView } from '../components/ledger/useAnswerView';
 import { citedSourceIndices } from '../components/ledger/citedSources';
+import { pairClaimConflicts, countSourceConflicts } from '../components/ledger/conflicts';
+import { ClaimTallyChips, AnswerActionBar } from '../components/ledger/AnswerActions';
 import { clsx } from 'clsx';
 
 function formatDate(iso: string): string {
@@ -42,6 +46,7 @@ export default function ChatDetailPage() {
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [contradictions, setContradictions] = useState<Contradiction[]>([]);
   const [view, setView] = useAnswerView();
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (!queryId) return;
@@ -105,11 +110,57 @@ export default function ChatDetailPage() {
         excerpt: (s.excerpt as string) || (s.content as string) || '',
         relevance_score: (s.relevance_score as number) ?? (s.score as number) ?? 0,
         rerank_score: (s.rerank_score as number) ?? undefined,
+        // The persisted `response_sources` blob never carried a top-level
+        // page_number (only inside `metadata`, if at all) — Exhibits also
+        // backfills from a citing claim (`claims` prop below), but this
+        // covers a retrieved-and-not-cited source too (BUG-8).
+        page_number: (s.page_number as number) ?? (meta?.page_number as number) ?? undefined,
         confidence: (s.confidence as number) ?? undefined,
         matched_chunks: (s.matched_chunks as number) ?? undefined,
       };
     });
   }, [query]);
+
+  // BUG-22: a stored answer's persisted sources never carried a `conflicts`
+  // count (only live WS "sources" frames compute it); recompute it from the
+  // same open-contradictions list the ledger already fetches, so the
+  // Exhibits "Conflict" tag doesn't silently vanish on this page.
+  const sourcesWithConflicts = useMemo(() => countSourceConflicts(sources, contradictions), [sources, contradictions]);
+
+  const handleCopy = useCallback(
+    async (text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        addToast('Copied to clipboard', 'success');
+      } catch {
+        addToast('Failed to copy', 'error');
+      }
+    },
+    [addToast],
+  );
+
+  const handleExport = useCallback(async () => {
+    if (!query) return;
+    try {
+      const { blob, filename } = await queryApi.exportMarkdown(query.id);
+      downloadBlob(blob, filename);
+    } catch {
+      addToast('Failed to export', 'error');
+    }
+  }, [query, addToast]);
+
+  const handleFeedback = useCallback(
+    async (rating: number) => {
+      if (!query) return;
+      try {
+        await feedbackApi.submit(query.id, { rating });
+        addToast('Feedback submitted', 'success');
+      } catch {
+        addToast('Failed to submit feedback', 'error');
+      }
+    },
+    [query, addToast],
+  );
 
   if (loading) {
     return <LoadingSpinner text="Loading chat detail..." />;
@@ -145,6 +196,7 @@ export default function ChatDetailPage() {
   const claims = query.claims ?? [];
   const hasClaims = claims.length > 0;
   const tally = hasClaims ? tallyClaims(claims) : null;
+  const conflictPairs = hasClaims ? pairClaimConflicts(claims, contradictions) : [];
   const allDocNames = sources.map((s) => s.document_name).filter((n): n is string => Boolean(n));
   const cited = citedSourceIndices(query.response_text ?? '', query.claims);
 
@@ -197,33 +249,59 @@ export default function ChatDetailPage() {
                 modelUsed={query.model_used ?? null}
                 startedAt={null}
                 latencyMs={query.latency_ms ?? null}
+                guardrailPassed={query.guardrail_passed ?? null}
               />
             )}
 
             {hasClaims && (
-              <div className="inline-flex gap-0.5 rounded-control border border-border bg-card-2 p-0.5">
-                <button type="button" onClick={() => setView('ledger')} aria-pressed={view === 'ledger'} className={clsx('inline-flex min-h-8 items-center rounded px-2.5 text-sm font-medium', view === 'ledger' ? 'bg-solid text-text shadow-e1' : 'text-text-muted hover:text-text')}>
-                  Claim ledger
-                </button>
-                <button type="button" onClick={() => setView('prose')} aria-pressed={view === 'prose'} className={clsx('inline-flex min-h-8 items-center rounded px-2.5 text-sm font-medium', view === 'prose' ? 'bg-solid text-text shadow-e1' : 'text-text-muted hover:text-text')}>
-                  Read as prose
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex gap-0.5 rounded-control border border-border bg-card-2 p-0.5">
+                  <button type="button" onClick={() => setView('ledger')} aria-pressed={view === 'ledger'} className={clsx('inline-flex min-h-8 items-center rounded px-2.5 text-sm font-medium', view === 'ledger' ? 'bg-solid text-text shadow-e1' : 'text-text-muted hover:text-text')}>
+                    Claim ledger
+                  </button>
+                  <button type="button" onClick={() => setView('prose')} aria-pressed={view === 'prose'} className={clsx('inline-flex min-h-8 items-center rounded px-2.5 text-sm font-medium', view === 'prose' ? 'bg-solid text-text shadow-e1' : 'text-text-muted hover:text-text')}>
+                    Read as prose
+                  </button>
+                </div>
+                {/* BUG-22: the stored-answer page used to have no claim-summary
+                    chips at all — same component the live chat uses. */}
+                <ClaimTallyChips claims={claims} tally={tally!} conflictPairs={conflictPairs} onSelectLedgerView={() => setView('ledger')} />
               </div>
             )}
 
             {hasClaims && view === 'ledger' ? (
-              <ClaimLedger claims={claims} sources={sources} allDocNames={allDocNames} contradictions={contradictions} workspaceId={query.workspace_id} />
+              <ClaimLedger claims={claims} sources={sourcesWithConflicts} allDocNames={allDocNames} contradictions={contradictions} workspaceId={query.workspace_id} />
             ) : (
               <ProseAnswer content={query.response_text} sources={sources} claims={hasClaims ? claims : null} workspaceId={query.workspace_id} />
             )}
 
-            {sources.length > 0 && <Exhibits sources={sources} citedIndices={cited} allDocNames={allDocNames} workspaceId={query.workspace_id} />}
+            {sources.length > 0 && (
+              <Exhibits sources={sourcesWithConflicts} citedIndices={cited} allDocNames={allDocNames} workspaceId={query.workspace_id} claims={query.claims} />
+            )}
 
             {query.trust_score !== undefined && (
               <TrustTotals score={query.trust_score} components={query.trust_components ?? {}} />
             )}
 
-            <SealReceiptButton queryId={query.id} />
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <SealReceiptButton queryId={query.id} />
+              {/* BUG-22: same Copy/Export/feedback/Regenerate action bar as
+                  the live chat. "Regenerate" here re-runs the query and
+                  shows what changed (this page's own "Re-run comparison"
+                  below does the same thing) — there's no live WS on a stored
+                  answer to replace the shown content in place the way the
+                  chat's Regenerate does. */}
+              <AnswerActionBar
+                content={query.response_text}
+                onCopy={handleCopy}
+                onExport={handleExport}
+                onFeedback={handleFeedback}
+                onRegenerate={() => void runComparison()}
+                canRegenerate
+                modelUsed={query.model_used}
+                latencyMs={query.latency_ms ?? null}
+              />
+            </div>
           </>
         ) : (
           <p className="text-sm text-text-dim">No response</p>

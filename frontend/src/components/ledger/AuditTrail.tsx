@@ -20,7 +20,7 @@ export type AuditPhase = 'retrieval' | 'ranking' | 'generation' | 'guardrail';
 const PHASE_ORDER: AuditPhase[] = ['retrieval', 'ranking', 'generation', 'guardrail'];
 
 type StepId = 'search' | 'rank' | 'write' | 'verify';
-type StepStatus = 'pending' | 'active' | 'done' | 'stopped';
+export type StepStatus = 'pending' | 'active' | 'done' | 'stopped';
 const STEP_LABEL: Record<StepId, string> = {
   search: 'Searched passages',
   rank: 'Ranked passages',
@@ -54,6 +54,12 @@ export interface AuditTrailProps {
   startedAt: number | null;
   /** Final latency once the query completes. */
   latencyMs: number | null;
+  /** Did the generation guardrail actually pass? `null` when unknown (still
+   *  running, or an older stored answer with no guardrail_passed recorded).
+   *  BUG-6: a `false` here must never render as "Answer verified" with a
+   *  green shield — the receipt page for the same answer already says
+   *  "Guardrail failed", and the chat disagreeing with it is the bug. */
+  guardrailPassed?: boolean | null;
 }
 
 /** Exported for unit tests — see AuditTrail.test.ts. */
@@ -65,6 +71,29 @@ export function stepStatus(step: StepId, phase: AuditPhase | null, verified: boo
   if (currentIdx > stepIdx) return 'done';
   if (currentIdx === stepIdx) return stopped ? 'stopped' : 'active';
   return 'pending';
+}
+
+/** Exported for unit tests. A finished, verified answer counts as having
+ *  reached every step even when no `progress` frame ever moved `phase`
+ *  forward — true for a cached replay, whose WS protocol only re-sends
+ *  `sources`/`token`/`guardrail`, never `progress` (BUG-50: that used to
+ *  read "1 steps, 0.0 s" for a cache hit instead of "4 steps"). */
+export function effectivePhaseFor(phase: AuditPhase | null, running: boolean, stopped: boolean, verified: boolean): AuditPhase | null {
+  return !running && !stopped && verified ? 'guardrail' : phase;
+}
+
+/** Exported for unit tests — the header's one-line summary, including the
+ *  stop wording (BUG-50: cancelling mid "write" used to say "Stopped after 2
+ *  of 4 steps", implying only 2 ever started, instead of naming the step the
+ *  run was actually in when it was cancelled). */
+export function auditSummary(statuses: StepStatus[], running: boolean, stopped: boolean, elapsedMs: number): string {
+  const doneCount = statuses.filter((s) => s === 'done').length;
+  if (running) return `${formatElapsed(elapsedMs)} elapsed`;
+  if (stopped) {
+    const stoppedIdx = statuses.findIndex((s) => s === 'stopped');
+    return stoppedIdx !== -1 ? `Stopped during step ${stoppedIdx + 1} of 4` : `Stopped after ${doneCount} of 4 steps`;
+  }
+  return `${doneCount} steps, ${formatElapsed(elapsedMs)}`;
 }
 
 function stepDetail(step: StepId, status: StepStatus, p: AuditTrailProps): string {
@@ -114,7 +143,7 @@ function useElapsed(startedAt: number | null, running: boolean, frozenMs: number
 }
 
 export function AuditTrail(props: AuditTrailProps) {
-  const { running, stopped, phase, claimsTally, latencyMs, startedAt } = props;
+  const { running, stopped, phase, claimsTally, latencyMs, startedAt, guardrailPassed = null } = props;
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const [open, setOpen] = useState(running);
   // Auto-open while live, auto-collapse the instant it settles — but leave the
@@ -129,24 +158,21 @@ export function AuditTrail(props: AuditTrailProps) {
   }
 
   const verified = claimsTally != null;
+  const failed = guardrailPassed === false;
   const steps: StepId[] = ['search', 'rank', 'write', 'verify'];
-  const statuses = steps.map((s) => stepStatus(s, phase, verified, stopped));
+  const effectivePhase = effectivePhaseFor(phase, running, stopped, verified);
+  const statuses = steps.map((s) => stepStatus(s, effectivePhase, verified, stopped));
   const elapsedMs = useElapsed(startedAt, running, latencyMs);
 
-  const title = stopped ? 'Stopped before verification' : running ? 'Answering' : 'How this answer was verified';
-  const doneCount = statuses.filter((s) => s === 'done').length;
-  const summary = running
-    ? `${formatElapsed(elapsedMs)} elapsed`
-    : stopped
-      ? `Stopped after ${doneCount} of 4 steps`
-      : `${doneCount} steps, ${formatElapsed(elapsedMs)}`;
+  const title = stopped ? 'Stopped before verification' : running ? 'Answering' : failed ? 'Guardrail failed' : 'How this answer was verified';
+  const summary = auditSummary(statuses, running, stopped, elapsedMs);
 
   const liveAnnouncement = running
     ? STEP_LIVE_LABEL[steps[statuses.findIndex((s) => s === 'active')] ?? 'search']
     : stopped
       ? 'Stopped'
       : claimsTally
-        ? `Answer verified: ${stepDetail('verify', 'done', props)}`
+        ? `${failed ? 'Guardrail failed' : 'Answer verified'}: ${stepDetail('verify', 'done', props)}`
         : '';
 
   return (
@@ -159,7 +185,7 @@ export function AuditTrail(props: AuditTrailProps) {
         aria-controls="audit-trail-body"
         className="flex min-h-11 w-full items-center gap-2.5 rounded-card px-3.5 py-2 text-sm hover:bg-card-2"
       >
-        <ShieldCheck size={16} className={clsx(running ? 'text-primary-soft' : 'text-green')} aria-hidden="true" />
+        <ShieldCheck size={16} className={clsx(running ? 'text-primary-soft' : failed ? 'text-red' : 'text-green')} aria-hidden="true" />
         <span className="font-medium text-text">{title}</span>
         <span className="text-xs text-text-dim tabular-nums">{summary}</span>
         <ChevronDown

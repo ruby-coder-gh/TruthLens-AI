@@ -88,12 +88,46 @@ describe('ClaimLedger', () => {
     expect(screen.getByText('Conflict')).toBeInTheDocument();
     const c1Row = screen.getByText('C1').closest('li')!;
     expect(within(c1Row).getByRole('button', { name: /differs from c2/i })).toBeInTheDocument();
-    // The figure diff table computed from the two claims' numbers.
-    expect(screen.getByText('14')).toBeInTheDocument();
+    // The figure diff table computed from the two claims' numbers, labelled
+    // with its currency + scale unit, not a bare "14" (BUG-29).
+    expect(screen.getByText('€14M')).toBeInTheDocument();
   });
 
-  it('renders no discrepancy row when the answer only cites one side of a contradiction', () => {
+  it('still shows the discrepancy row when the answer only cites one side of a contradiction (BUG-5)', () => {
     renderWithProviders(<ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} contradictions={[contradiction]} />);
-    expect(screen.queryByText('Sources disagree')).not.toBeInTheDocument();
+    expect(screen.getByText(/Sources disagree/)).toBeInTheDocument();
+    // The radar's own doc name for the uncited side, read off `contradiction.b`.
+    expect(screen.getAllByText(/Q4 & FY2025 Results/).length).toBeGreaterThan(0);
+    // The lone cited claim's row gets a xref chip too, pointing at the
+    // discrepancy row (there's no sibling claim row to jump to instead).
+    const c1Row = screen.getByText('C1').closest('li')!;
+    expect(within(c1Row).getByRole('button', { name: /differs from .*fy2025 results/i })).toBeInTheDocument();
+  });
+
+  it('numbers multiple discrepancy rows D1, D2, … instead of a bare "D" (BUG-27)', () => {
+    const contradiction2: Contradiction = {
+      ...contradiction,
+      id: 'contra-2',
+      a: { ...contradiction.a, sentence: 'Emissions fell 34% versus 2020.' },
+      b: { ...contradiction.b, chunk_id: 'chunk-c', document_id: 'doc-3', document_name: 'Sustainability Report', sentence: 'Emissions fell 41% versus 2020.' },
+    };
+    renderWithProviders(
+      <ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} contradictions={[contradiction, contradiction2]} />,
+    );
+    expect(screen.getByText('D1')).toBeInTheDocument();
+    expect(screen.getByText('D2')).toBeInTheDocument();
+  });
+
+  it('does not show a numeric entailment score on a Partial row (BUG-26)', () => {
+    renderWithProviders(<ClaimLedger claims={[claim({ verdict: 'partial', entailment: 0.02 })]} sources={sources} allDocNames={allDocNames} />);
+    expect(screen.getByText('Partial')).toBeInTheDocument();
+    expect(screen.queryByText('0.02')).not.toBeInTheDocument();
+  });
+
+  it('fills the score bar with the verdict colour via bg-current, not a runtime-built class (BUG-28)', () => {
+    const { container } = renderWithProviders(<ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} />);
+    const fill = container.querySelector('.bg-current');
+    expect(fill).toBeInTheDocument();
+    expect(fill).toHaveClass('text-v-supported');
   });
 });

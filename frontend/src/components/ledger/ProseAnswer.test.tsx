@@ -41,4 +41,24 @@ describe('ProseAnswer', () => {
     const { container } = renderWithProviders(<ProseAnswer content="Writing" sources={[]} streaming />);
     expect(container.querySelector('.bg-primary-soft')).toBeInTheDocument();
   });
+
+  it('keeps a citation and its trailing punctuation on the same line as the sentence (BUG-4)', () => {
+    const { container } = renderWithProviders(
+      <ProseAnswer content="Revenue grew [source:1]. However, costs rose too." sources={sources} workspaceId="ws-1" />,
+    );
+    // One flowing paragraph, not "Revenue grew" / [1] / ". However…" split
+    // into separate blocks (the old per-fragment ReactMarkdown behaviour).
+    const paragraphs = container.querySelectorAll('.prose-answer > p');
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0]).toHaveTextContent('Revenue grew 1. However, costs rose too.');
+  });
+
+  it('keeps citations inline while streaming, before claims land (BUG-4)', () => {
+    const { container } = renderWithProviders(
+      <ProseAnswer content="Third quarter of 2027 [source:1]. Growth continued." sources={sources} workspaceId="ws-1" streaming />,
+    );
+    const paragraphs = container.querySelectorAll('.prose-answer > p');
+    expect(paragraphs).toHaveLength(1);
+    expect(paragraphs[0]).toHaveTextContent('Third quarter of 2027 1. Growth continued.');
+  });
 });
