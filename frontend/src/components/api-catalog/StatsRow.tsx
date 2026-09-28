@@ -35,7 +35,7 @@ const statsConfig = [
     suffix: '%',
     label: 'Uptime',
     icon: <ShieldCheck size={16} />,
-    color: 'from-green-500/20 to-green-500/5 border-green-500/25',
+    color: 'from-green/15 to-green/5 border-green/25',
     iconColor: 'text-green',
   },
 ];

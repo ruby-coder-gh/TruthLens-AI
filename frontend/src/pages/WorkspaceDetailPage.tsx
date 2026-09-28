@@ -177,15 +177,9 @@ function UploadProgressArea({
 // ─── Workspace Avatar Fallback ───────────────────────────────────────────────
 function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const sizes = { sm: 'h-9 w-9 text-sm', md: 'h-12 w-12 text-lg', lg: 'h-16 w-16 text-2xl' };
-  const gradientPairs = [
-    'from-primary to-accent',
-    'from-accent to-accent-2',
-    'from-primary to-gold',
-    'from-accent-2 to-primary',
-  ];
-  const idx = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % gradientPairs.length;
+  // Same ink-on-ground tile as the workspace mark in the top bar.
   return (
-    <div className={`${sizes[size]} rounded-xl bg-gradient-to-br ${gradientPairs[idx]} flex items-center justify-center font-bold text-on-primary shadow-e1 shrink-0`}>
+    <div className={`${sizes[size]} rounded-control bg-text font-cond font-semibold text-bg flex items-center justify-center shrink-0`}>
       {name.charAt(0).toUpperCase()}
     </div>
   );
@@ -196,39 +190,12 @@ function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
 // ═════════════════════════════════════════════════════════════════════════════
 
 function DashboardStats({ workspace }: { workspace: Workspace }) {
+  // Figures in ink on flat surfaces — status hues are reserved for status.
   const stats = [
-    {
-      label: 'Documents',
-      value: workspace.document_count ?? 0,
-      icon: <FileText size={18} />,
-      gradient: 'from-primary/20 to-primary/5',
-      border: 'border-primary/20',
-      textColor: 'text-primary-soft',
-    },
-    {
-      label: 'Members',
-      value: workspace.member_count ?? 1,
-      icon: <Users size={18} />,
-      gradient: 'from-accent/20 to-accent/5',
-      border: 'border-accent/20',
-      textColor: 'text-accent',
-    },
-    {
-      label: 'AI Queries',
-      value: '—',
-      icon: <Brain size={18} />,
-      gradient: 'from-gold/20 to-gold/5',
-      border: 'border-gold/20',
-      textColor: 'text-gold',
-    },
-    {
-      label: 'Storage Used',
-      value: '—',
-      icon: <HardDrive size={18} />,
-      gradient: 'from-accent-2/20 to-accent-2/5',
-      border: 'border-accent-2/20',
-      textColor: 'text-accent-2',
-    },
+    { label: 'Documents', value: workspace.document_count ?? 0, icon: <FileText size={18} /> },
+    { label: 'Members', value: workspace.member_count ?? 1, icon: <Users size={18} /> },
+    { label: 'AI Queries', value: '—', icon: <Brain size={18} /> },
+    { label: 'Storage Used', value: '—', icon: <HardDrive size={18} /> },
   ];
 
   return (
@@ -239,24 +206,19 @@ function DashboardStats({ workspace }: { workspace: Workspace }) {
           initial={{ opacity: 0.99, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
-          className={`relative overflow-hidden rounded-xl border ${stat.border} bg-gradient-to-br ${stat.gradient} p-4 backdrop-blur-sm`}
+          className="relative overflow-hidden rounded-xl border border-border bg-solid p-4"
         >
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              {/* `text-text-muted`, not `text-text-dim`: these labels sit on a
-                  tinted gradient card, not the plain ground, where dim ink
-                  measured 3.76–3.89:1 (QA S3-1). */}
               <p className="text-xs font-medium text-text-muted tracking-wide">{stat.label}</p>
-              <p className={`text-2xl font-bold ${stat.textColor}`}>
+              <p className="text-2xl font-semibold text-text">
                 {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
               </p>
             </div>
-            <div className={`p-2 rounded-lg bg-card-2 ${stat.textColor}`}>
+            <div className="p-2 rounded-lg bg-card-2 text-text-muted">
               {stat.icon}
             </div>
           </div>
-          {/* Subtle shimmer line */}
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
         </motion.div>
       ))}
     </div>
@@ -838,7 +800,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
           onDrop={handleDrop}
           className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
             dragOver
-              ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
+              ? 'border-primary bg-primary/10'
               : 'border-border hover:border-primary/40 hover:bg-card-2'
           }`}
           whileHover={{ scale: 1.003 }}
@@ -897,7 +859,7 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
         onDrop={handleDrop}
         className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
           dragOver
-            ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
+            ? 'border-primary bg-primary/10'
             : 'border-border hover:border-primary/30 hover:bg-card-2'
         }`}
         whileHover={{ scale: 1.003 }}
@@ -1019,7 +981,7 @@ function DocumentRow({ doc, onDelete }: { doc: Document; onDelete: () => void })
       transition={{ duration: 0.2 }}
     >
       {/* Icon */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/10 to-accent/10 text-text-dim">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-card-2 text-text-dim">
         {isProcessing ? (
           <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}>
             <FileText size={18} />
@@ -1153,18 +1115,6 @@ function MembersTab({
     setTimeout(() => setCopiedId(null), 2000);
   }
 
-  const memberGradient = (username: string) => {
-    const pairs = [
-      'from-primary to-accent',
-      'from-accent to-accent-2',
-      'from-primary to-gold',
-      'from-gold to-accent-2',
-      'from-accent-2 to-primary',
-    ];
-    const idx = username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % pairs.length;
-    return pairs[idx];
-  };
-
   // Loading skeleton
   if (members.length === 0 && !addOpen) {
     return (
@@ -1245,13 +1195,10 @@ function MembersTab({
                 exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
               >
-                <div className="group relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-card-2 to-transparent p-4 transition-all duration-200 hover:border-border hover:shadow-e2">
-                  {/* Subtle gradient accent line */}
-                  <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-
+                <div className="group relative overflow-hidden rounded-xl border border-border bg-solid p-4 transition-all duration-200 hover:shadow-e2">
                   <div className="flex items-start gap-3.5">
-                    {/* Avatar */}
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${memberGradient(member.username)} text-on-primary text-sm font-bold shadow-e1`}>
+                    {/* Avatar — the sidebar's account avatar */}
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-semibold text-primary">
                       {member.username.charAt(0).toUpperCase()}
                     </div>
 

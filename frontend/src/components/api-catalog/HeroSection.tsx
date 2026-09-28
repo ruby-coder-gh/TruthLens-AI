@@ -12,6 +12,9 @@ function ParticleField() {
     if (!ctx) return;
 
     let animationId: number;
+    // Marks follow the theme's accent token; one still frame under reduced motion.
+    const ink = getComputedStyle(canvas).getPropertyValue('--color-primary').trim() || '#2350B5';
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const particles: { x: number; y: number; vx: number; vy: number; size: number; alpha: number }[] = [];
 
     const resize = () => {
@@ -50,7 +53,8 @@ function ParticleField() {
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba( 99,  102,  241, ${p.alpha})`;
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = ink;
         ctx.fill();
 
         // Draw connections
@@ -62,14 +66,15 @@ function ParticleField() {
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = `rgba( 99,  102,  241, ${0.06 * (1 - dist / 120)})`;
+            ctx.globalAlpha = 0.06 * (1 - dist / 120);
+            ctx.strokeStyle = ink;
             ctx.lineWidth = 0.5;
             ctx.stroke();
           }
         }
       });
 
-      animationId = requestAnimationFrame(animate);
+      if (!reduceMotion) animationId = requestAnimationFrame(animate);
     };
     animate();
 
@@ -98,34 +103,23 @@ function FloatingCube() {
     >
       {/* Cube faces */}
       {[
-        { translate: 'translateZ(40px)', bg: 'rgba(99,102,241,0.15)', border: 'rgba(99,102,241,0.4)' },
-        { translate: 'translateZ(-40px)', bg: 'rgba(52,211,153,0.1)', border: 'rgba(52,211,153,0.3)' },
-        { translate: 'rotateY(90deg) translateZ(40px)', bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.35)' },
-        { translate: 'rotateY(90deg) translateZ(-40px)', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.35)' },
-        { translate: 'rotateX(90deg) translateZ(40px)', bg: 'rgba(52,211,153,0.12)', border: 'rgba(52,211,153,0.35)' },
-        { translate: 'rotateX(90deg) translateZ(-40px)', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.3)' },
+        { translate: 'translateZ(40px)', hue: 'var(--color-primary)' },
+        { translate: 'translateZ(-40px)', hue: 'var(--color-green-mark)' },
+        { translate: 'rotateY(90deg) translateZ(40px)', hue: 'var(--color-primary)' },
+        { translate: 'rotateY(90deg) translateZ(-40px)', hue: 'var(--color-primary)' },
+        { translate: 'rotateX(90deg) translateZ(40px)', hue: 'var(--color-green-mark)' },
+        { translate: 'rotateX(90deg) translateZ(-40px)', hue: 'var(--color-primary)' },
       ].map((face, i) => (
         <div
           key={i}
-          className="absolute inset-0 rounded-xl backdrop-blur-sm border"
+          className="absolute inset-0 rounded-xl border"
           style={{
             transform: face.translate,
-            background: face.bg,
-            borderColor: face.border,
-            boxShadow: `0 0 20px ${face.bg}`,
+            background: `color-mix(in srgb, ${face.hue} 12%, transparent)`,
+            borderColor: `color-mix(in srgb, ${face.hue} 38%, transparent)`,
           }}
         />
       ))}
-
-      {/* Inner glow */}
-      <div
-        className="absolute inset-0 rounded-xl"
-        style={{
-          background: 'radial-gradient(circle, rgba(99,102,241,0.2), transparent)',
-          transform: 'translateZ(20px)',
-          filter: 'blur(4px)',
-        }}
-      />
     </motion.div>
   );
 }
@@ -134,15 +128,6 @@ export default function HeroSection() {
   return (
     <div className="relative overflow-hidden rounded-2xl glass border border-glass-border min-h-[220px]">
       <ParticleField />
-
-      {/* Aurora gradient overlay */}
-      <div
-        className="absolute inset-0 opacity-30"
-        style={{
-          background:
-            'radial-gradient(ellipse 80% 60% at 30% 30%, rgba(99,102,241,0.15), transparent), radial-gradient(ellipse 60% 80% at 70% 70%, rgba(52,211,153,0.1), transparent), radial-gradient(ellipse 50% 50% at 50% 50%, rgba(99,102,241,0.08), transparent)',
-        }}
-      />
 
       <div className="relative z-10 flex items-center gap-6 sm:gap-10 p-6 sm:p-8">
         {/* Cube */}
@@ -167,7 +152,7 @@ export default function HeroSection() {
                 <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                 API v1.0
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/15 border border-green-500/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-green">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green/12 border border-green/28 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-green">
                 <span className="w-1.5 h-1.5 rounded-full bg-green animate-pulse-dot" />
                 Operational
               </span>
@@ -180,7 +165,7 @@ export default function HeroSection() {
             transition={{ duration: 0.4, delay: 0.15 }}
             className="text-2xl sm:text-3xl lg:text-4xl font-bold text-text"
           >
-            API <span className="gradient-text">Reference</span>
+            API Reference
           </motion.h1>
 
           <motion.p
