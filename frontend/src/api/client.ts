@@ -237,6 +237,18 @@ function isPublicAuthPath(path: string): boolean {
   return PUBLIC_AUTH_PATHS.has(path) || PUBLIC_AUTH_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
+// BUG-56: authenticated endpoints where a 401 means "the credential you just
+// supplied is wrong", not "your session expired" — the access token/cookie
+// is fine, so attempting a refresh (which will succeed) and retrying (which
+// 401s again for the same reason) just doubles the round-trip before the
+// real error ever reaches the user. Unlike PUBLIC_AUTH_PATHS these DO carry
+// a session; only the refresh-and-retry dance is skipped.
+const CREDENTIAL_CHECK_PATHS = new Set(['/auth/change-password']);
+
+function isCredentialCheckPath(path: string): boolean {
+  return CREDENTIAL_CHECK_PATHS.has(path);
+}
+
 // ─── Core request function (JSON) ───────────────────────────────────────────
 async function request<T>(
   path: string,
@@ -251,8 +263,10 @@ async function request<T>(
   });
 
   // Auto-refresh on 401 for authenticated flows only.
-  // Keep the backend's real 401 message for public/unauthenticated auth endpoints.
-  if (res.status === 401 && !isPublicAuthPath(path)) {
+  // Keep the backend's real 401 message for public/unauthenticated auth
+  // endpoints, and for authenticated ones where the 401 is a credential
+  // check, not an expired session (BUG-56).
+  if (res.status === 401 && !isPublicAuthPath(path) && !isCredentialCheckPath(path)) {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
       res = await fetch(`${API_BASE}${path}`, {

@@ -193,7 +193,11 @@ export default function SettingsPage() {
                     error={passwordErrors.current}
                     icon={<Key size={15} />}
                     actionButton={
-                      <InputActionButton onClick={() => setShowPasswords((p) => !p)} active={showPasswords}>
+                      <InputActionButton
+                        onClick={() => setShowPasswords((p) => !p)}
+                        active={showPasswords}
+                        aria-label={showPasswords ? 'Hide passwords' : 'Show passwords'}
+                      >
                         {showPasswords ? <EyeOff size={13} /> : <Eye size={13} />}
                       </InputActionButton>
                     }

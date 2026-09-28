@@ -63,6 +63,22 @@ describe('api/client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('BUG-56: never attempts a refresh for /auth/change-password — a 401 there is a wrong current password, not an expired session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Incorrect current password' }), { status: 401 }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { api } = await import('./client');
+    await expect(
+      api.auth.changePassword({ current_password: 'wrong', new_password: 'NewPassw0rd' }),
+    ).rejects.toMatchObject({ message: 'Incorrect current password', status: 401 });
+
+    // Exactly one call — no refresh attempt, no replay, no generic
+    // "Session expired" message masking the real error.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('ApiError carries the HTTP status and backend detail', async () => {
     // A fresh Response per call — a Response body stream can only be read
     // once, and `handleResponse` calls `.json()` on it.
