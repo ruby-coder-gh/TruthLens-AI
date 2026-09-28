@@ -82,8 +82,35 @@ def _receipt_sources(sources: list[dict[str, Any]], indices: set[int]) -> list[d
     return result
 
 
-def build_payload(query: Query, claims: list[dict[str, Any]], workspace: Workspace) -> dict[str, Any]:
-    """Build the canonical Truth Receipt payload for a finished query."""
+def cited_chunk_ids(query: Query, claims: list[dict[str, Any]]) -> list[str]:
+    """Chunk ids of the sources actually cited in `query`'s answer (K5).
+
+    The caller uses this to look up open Radar contradictions before calling
+    `build_payload` — kept separate so `build_payload` stays a pure function
+    (no DB access) and existing callers/tests are unaffected.
+    """
+    answer = query.response_text or ""
+    sources = _load_sources(query)
+    indices = _cited_indices(answer, claims)
+    return [
+        str(source["chunk_id"])
+        for i, source in enumerate(sources, start=1)
+        if i in indices and source.get("chunk_id")
+    ]
+
+
+def build_payload(
+    query: Query,
+    claims: list[dict[str, Any]],
+    workspace: Workspace,
+    conflicts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the canonical Truth Receipt payload for a finished query.
+
+    `conflicts` (K5) is the caller-resolved list of open Radar contradictions
+    touching the answer's cited chunks — see `cited_chunk_ids` and
+    `app.radar.open_conflicts_for_chunks`.
+    """
     answer = query.response_text or ""
     sources = _load_sources(query)
     indices = _cited_indices(answer, claims)
@@ -93,6 +120,7 @@ def build_payload(query: Query, claims: list[dict[str, Any]], workspace: Workspa
         "answer": answer,
         "claims": claims,
         "sources": _receipt_sources(sources, indices),
+        "conflicts": conflicts or [],
         "trust": {"score": query.trust_score, "components": query.trust_components or {}},
         "guardrail": {"passed": query.guardrail_passed, "score": query.guardrail_score},
         "model_used": query.model_used,
