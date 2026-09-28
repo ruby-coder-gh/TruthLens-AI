@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -284,6 +285,7 @@ function PromoteGoldenModal({
 export default function ReviewQueuePage() {
   const { id: workspaceId } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState('queue');
@@ -364,11 +366,15 @@ export default function ReviewQueuePage() {
           review_note: notes[item.id]?.trim() || undefined,
         });
         setItems((current) => current.filter((entry) => entry.id !== item.id));
+        // BUG-51: the sidebar's "N to review" badge (Layout.tsx) is a
+        // separate react-query cache entry — it kept showing the stale
+        // count after Mark reviewed/Dismiss without this.
+        queryClient.invalidateQueries({ queryKey: ['review-queue', workspaceId, 'count'] });
       } finally {
         setActing(null);
       }
     },
-    [workspaceId, notes],
+    [workspaceId, notes, queryClient],
   );
 
   const toggleEnabled = useCallback(async () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
-import { renderWithProviders } from '../test/utils';
+import { createTestQueryClient, renderWithProviders } from '../test/utils';
 import ReviewQueuePage from './ReviewQueuePage';
 import type { QuarantinedChunk, ReviewQueueItem } from '../api/types';
 import type { ToastContextValue } from '../components/toast-context';
@@ -312,5 +312,26 @@ describe('ReviewQueuePage', () => {
     expect(
       await within(screen.getByRole('dialog')).findByRole('alert'),
     ).toHaveTextContent('A reviewer-written reference answer is required for an abstention.');
+  });
+
+  it('refreshes the sidebar review-queue count after Mark reviewed (BUG-51)', async () => {
+    mockReview.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
+      </Routes>,
+      { route: '/workspaces/ws-1/review-queue', queryClient },
+    );
+
+    await user.click(await screen.findByRole('button', { name: /mark reviewed/i }));
+
+    await waitFor(() => expect(mockReview).toHaveBeenCalledTimes(1));
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['review-queue', 'ws-1', 'count'] }),
+    );
   });
 });
