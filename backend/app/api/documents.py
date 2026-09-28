@@ -31,6 +31,7 @@ from app.models.contradiction import Contradiction
 from app.models.document import Document
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
+from app.receipts import revoke_receipts_for_document
 from app.schemas.common import PaginatedResponse
 from app.schemas.document import (
     ChunkInfo,
@@ -360,6 +361,10 @@ async def delete_document(
     await bump_workspace_document_version(db, workspace_id)
     # SQLite runs without `PRAGMA foreign_keys=ON`, so the FK cascade is not enforced.
     await db.execute(delete(Contradiction).where(or_(Contradiction.doc_a_id == doc_id, Contradiction.doc_b_id == doc_id)))
+    # A public receipt must not keep quoting evidence that no longer exists.
+    await revoke_receipts_for_document(
+        db, workspace_id=workspace_id, document_id=doc_id, document_name=doc.original_filename
+    )
     await db.delete(doc)
 
 
