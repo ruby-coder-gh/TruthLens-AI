@@ -335,7 +335,9 @@ interface ModalProps {
   className?: string;
 }
 
-const FOCUSABLE_SELECTOR =
+// Exported so other roving-focus surfaces (e.g. Layout's mobile drawer) reuse
+// the same definition instead of drifting out of sync with Modal's.
+export const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({ open, onClose, title, children, className }: ModalProps) {

@@ -18,6 +18,10 @@ export interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+// BUG-48: exported (not just a local const in AuthContext.tsx) so tests can
+// seed/assert it directly — mirrors THEME_STORAGE_KEY's split in theme-context.ts.
+export const HAD_SESSION_KEY = 'truthlens:had-session';
+
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) {
