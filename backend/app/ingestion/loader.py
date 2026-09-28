@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import re
 import unicodedata
@@ -152,19 +153,39 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
     # chunk), header repeated as "Column: value; …" text on every row so a
     # single row stays retrievable on its own instead of being buried inside
     # a single whole-file chunk.
+    #
+    # BUG-7: a bare "col: value; col: value" row has almost no lexical or
+    # semantic overlap with a natural-language question about the table (the
+    # real reranker scored it 0.0004 against "which projects are under
+    # construction?", far under SUFFICIENCY_MIN_RERANK_SCORE) -- the model has
+    # nothing to match the question's framing against. Every row is prefixed
+    # with the filename and a short table description to give it that framing
+    # (0.39-0.89 in the same repro, depending on the description). The CSV can
+    # opt into a stronger, hand-written description via a `# ...` leading
+    # comment line (stripped before parsing, never a data row); otherwise the
+    # description is generic (derived from the column headers).
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    description = None
+    if raw.startswith("#"):
+        comment_line, _, raw = raw.partition("\n")
+        description = comment_line.lstrip("#").strip()
+
     pages: list[dict[str, Any]] = []
-    with open(path, newline="", encoding="utf-8", errors="replace") as f:
-        reader = csv.DictReader(f)
-        headers = reader.fieldnames or []
-        for i, row in enumerate(reader):
-            fields = "; ".join(f"{h}: {(row.get(h) or '').strip()}" for h in headers)
-            if not fields.strip():
-                continue
-            pages.append({
-                "text": fields,
-                "page_number": None,
-                "metadata": {"source": path.name, "row_index": i},
-            })
+    reader = csv.DictReader(io.StringIO(raw))
+    headers = reader.fieldnames or []
+    if description is None:
+        description = f"Table with columns: {', '.join(headers)}." if headers else ""
+    prefix = f"{path.name}. {description}\n" if description else f"{path.name}.\n"
+
+    for i, row in enumerate(reader):
+        fields = "; ".join(f"{h}: {(row.get(h) or '').strip()}" for h in headers)
+        if not fields.strip():
+            continue
+        pages.append({
+            "text": prefix + fields,
+            "page_number": None,
+            "metadata": {"source": path.name, "row_index": i},
+        })
 
     logger.info("csv_loaded", rows=len(pages), path=str(path))
     return pages

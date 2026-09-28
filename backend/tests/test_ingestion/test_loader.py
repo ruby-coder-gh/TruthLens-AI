@@ -65,9 +65,46 @@ async def test_load_csv_one_chunk_per_row(tmp_path: Path):
     path.write_text("project,status\nAurora,construction\nKestrel Ridge,commissioned\n")
     pages = await load(path, "text/csv")
 
+    prefix = "rows.csv. Table with columns: project, status.\n"
     assert len(pages) == 2
-    assert pages[0]["text"] == "project: Aurora; status: construction"
-    assert pages[1]["text"] == "project: Kestrel Ridge; status: commissioned"
+    assert pages[0]["text"] == prefix + "project: Aurora; status: construction"
+    assert pages[1]["text"] == prefix + "project: Kestrel Ridge; status: commissioned"
+
+
+@pytest.mark.asyncio
+async def test_load_csv_row_chunks_are_prefixed_with_filename_and_description(tmp_path: Path):
+    """BUG-7: a bare 'col: value; col: value' row scored near-zero against a
+    natural-language question on the real reranker ("which projects are
+    under construction" vs "name: Aurora; ...; status: construction" scored
+    0.0004, threshold 0.35). Prefixing every row with the filename and a
+    short table description gave every row real lexical/semantic overlap
+    with a natural-language question about the table (0.39-0.89 in a repro
+    against the real BAAI/bge-reranker-v2-m3 model, see FIX-round2 report)."""
+    path = tmp_path / "projects.csv"
+    path.write_text("name,status\nAurora,construction\n")
+    pages = await load(path, "text/csv")
+
+    assert pages[0]["text"].startswith("projects.csv. Table with columns: name, status.\n")
+
+
+@pytest.mark.asyncio
+async def test_load_csv_uses_its_own_leading_comment_line_as_the_description(tmp_path: Path):
+    """BUG-7: a CSV can opt into a stronger, hand-written table description
+    (real domain phrasing scored far higher than the generic column-name
+    fallback in the real-reranker repro) via a `# ...` first line -- which
+    is not treated as a data row."""
+    path = tmp_path / "projects.csv"
+    path.write_text(
+        "# Renewable energy project pipeline and construction status.\n"
+        "name,status\nAurora,construction\n"
+    )
+    pages = await load(path, "text/csv")
+
+    assert len(pages) == 1
+    assert pages[0]["text"] == (
+        "projects.csv. Renewable energy project pipeline and construction status.\n"
+        "name: Aurora; status: construction"
+    )
 
 
 @pytest.mark.asyncio
