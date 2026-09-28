@@ -111,8 +111,11 @@ describe('ClaimLedger', () => {
       a: { ...contradiction.a, sentence: 'Emissions fell 34% versus 2020.' },
       b: { ...contradiction.b, chunk_id: 'chunk-c', document_id: 'doc-3', document_name: 'Sustainability Report', sentence: 'Emissions fell 41% versus 2020.' },
     };
+    // Two claims, each about the fact its own contradiction disputes (R2-3:
+    // a single claim no longer pairs with every contradiction on its chunk).
+    const claims = [claim({}), claim({ text: 'Emissions fell 34% versus 2020.', evidence: 'Emissions fell 34% versus 2020.' })];
     renderWithProviders(
-      <ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} contradictions={[contradiction, contradiction2]} />,
+      <ClaimLedger claims={claims} sources={sources} allDocNames={allDocNames} contradictions={[contradiction, contradiction2]} />,
     );
     expect(screen.getByText('D1')).toBeInTheDocument();
     expect(screen.getByText('D2')).toBeInTheDocument();

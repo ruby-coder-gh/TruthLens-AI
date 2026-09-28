@@ -242,14 +242,16 @@ function ClaimRow({
 
 function DiscrepancyRow({ pair, number, claims, allDocNames, workspaceId }: { pair: ConflictPair; number: number; claims: Claim[]; allDocNames: string[]; workspaceId?: string }) {
   const { open: openViewer } = useSourceViewer();
-  // Either side may be an uncited chunk (BUG-5) — fall back to the radar's
-  // own sentence/doc data, which every `Contradiction` side carries
-  // regardless of whether a claim in this answer happens to cite it.
+  // R2-3: diff and highlight the radar's own evidence sentences, not the
+  // model's claim wording — a claim can paraphrase or lead with an unrelated
+  // number (BUG-29's "2,025 pts" came from diffing claim prose), while
+  // `contradiction.a/b.sentence` is always the verbatim source sentence.
+  // claimA/claimB are only used for the "Cn vs Cm" row labels below.
   const claimA = pair.claimAIndex !== -1 ? claims[pair.claimAIndex] : undefined;
   const claimB = pair.claimBIndex !== -1 ? claims[pair.claimBIndex] : undefined;
-  const textA = claimA?.text ?? pair.contradiction.a.sentence;
-  const textB = claimB?.text ?? pair.contradiction.b.sentence;
-  const diff = figureDiff(textA, textB);
+  const sentenceA = pair.contradiction.a.sentence;
+  const sentenceB = pair.contradiction.b.sentence;
+  const diff = figureDiff(sentenceA, sentenceB);
   const titleA = shortDocTitle(pair.contradiction.a.document_name, allDocNames);
   const titleB = shortDocTitle(pair.contradiction.b.document_name, allDocNames);
   const rowLabelA = claimA ? `C${pair.claimAIndex + 1}` : titleA;
@@ -263,9 +265,9 @@ function DiscrepancyRow({ pair, number, claims, allDocNames, workspaceId }: { pa
       chunkId: pair.contradiction.a.chunk_id,
       documentName: pair.contradiction.a.document_name,
       pageNumber: pair.contradiction.a.page_number ?? undefined,
-      highlightText: textA,
+      highlightText: sentenceA,
     });
-  }, [workspaceId, pair, textA, openViewer]);
+  }, [workspaceId, pair, sentenceA, openViewer]);
 
   return (
     <li id={`row-D-${pair.contradiction.id}`} className="border-b border-border bg-conflict-tint px-2 py-4 last:border-b-0">
