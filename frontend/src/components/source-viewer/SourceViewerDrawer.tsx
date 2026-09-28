@@ -213,7 +213,7 @@ function SourceViewerPanelContent({ target, onClose, pdfCacheRef }: SourceViewer
                 <FileWarning size={14} /> Couldn&apos;t render the PDF page — showing the matched text instead.
               </div>
             )}
-            <TextPassage contextBefore={location.context_before} content={location.content} contextAfter={location.context_after} />
+            <TextPassage contextBefore={location.context_before} content={location.content} contextAfter={location.context_after} highlight={location.highlight} />
           </>
         )}
 

@@ -120,6 +120,9 @@ export default function RadarPanel({ workspaceId, canModerate }: { workspaceId: 
       chunkId: side.chunk_id,
       documentName: side.document_name,
       pageNumber: side.page_number,
+      // BUG-17: without this, the viewer had no `text=` to locate and fell
+      // back to marking the whole chunk/page.
+      highlightText: side.sentence,
     });
   }
 

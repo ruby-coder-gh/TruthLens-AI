@@ -183,4 +183,18 @@ describe('RadarPanel', () => {
     expect(screen.getByRole('button', { name: /View this passage in Policy A/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /View this passage in Policy B/i })).toBeInTheDocument();
   });
+
+  it('passes the side\'s own sentence as highlightText so the viewer marks only that span (BUG-17)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(radarApi.get).mockResolvedValue(
+      radarState({ contradictions: [makeContradiction()], counts: { open: 1, dismissed: 0, resolved: 0 } }),
+    );
+
+    renderPanel();
+    await user.click(await screen.findByRole('button', { name: /View this passage in Policy A/i }));
+
+    expect(mockOpenSource).toHaveBeenCalledWith(
+      expect.objectContaining({ chunkId: 'ch1', highlightText: 'The fee is $50 per month.' }),
+    );
+  });
 });
