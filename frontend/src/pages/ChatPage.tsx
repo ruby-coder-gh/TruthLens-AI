@@ -796,7 +796,7 @@ const AnswerTurn = memo(function AnswerTurn({
           {message.trustScore !== null && <TrustTotals score={message.trustScore} components={message.trustComponents} />}
 
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            {message.queryId && <SealReceiptButton queryId={message.queryId} />}
+            {message.queryId && <SealReceiptButton queryId={message.queryId} workspaceId={workspaceId} />}
             <AnswerActionBar
               content={message.content}
               onCopy={onCopy}

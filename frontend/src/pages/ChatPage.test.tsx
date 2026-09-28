@@ -48,7 +48,10 @@ vi.mock('../api/client', () => ({
   // Empty suggestions → SuggestedQuestions falls back to EXAMPLE_QUESTIONS.
   demoApi: { suggestions: vi.fn().mockResolvedValue({ questions: [] }) },
   receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
-  workspaceApi: { get: vi.fn().mockResolvedValue({ id: 'ws-1', name: 'Test Workspace', description: '', owner_id: 'u1', member_count: 1, document_count: 3, created_at: '', updated_at: '' }) },
+  workspaceApi: {
+    get: vi.fn().mockResolvedValue({ id: 'ws-1', name: 'Test Workspace', description: '', owner_id: 'u1', member_count: 1, document_count: 3, created_at: '', updated_at: '' }),
+    listMembers: vi.fn().mockResolvedValue({ data: [] }),
+  },
   radarApi: { get: vi.fn().mockResolvedValue({ latest_scan: null, contradictions: [], counts: { open: 0, dismissed: 0, resolved: 0 } }) },
 }));
 
@@ -288,6 +291,21 @@ describe('ChatPage', () => {
     expect(screen.getAllByText('What was installed capacity?')).toHaveLength(1);
     expect(screen.getByText('1.9 GW installed.')).toBeInTheDocument();
     expect(screen.queryByText('1.8 GW installed.')).not.toBeInTheDocument();
+  });
+
+  it('shows Seal receipt for the workspace owner on a completed answer (R2-6)', async () => {
+    const user = userEvent.setup();
+    renderChatPage('demo_analyst');
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onToken?.('Revenue grew.');
+      instances[0].callbacks.onComplete?.({ query_id: 'q-owner', latency_ms: 500, model_used: 'qwen3:4b', token_count: 3, from_cache: false });
+    });
+
+    expect(await screen.findByRole('button', { name: /seal receipt/i })).toBeInTheDocument();
   });
 
   it('shows the sidebar-consistent two-word initials on the question avatar (BUG-32)', async () => {

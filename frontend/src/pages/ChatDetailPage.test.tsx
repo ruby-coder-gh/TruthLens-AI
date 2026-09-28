@@ -6,11 +6,14 @@ import { renderWithProviders } from '../test/utils';
 import ChatDetailPage from './ChatDetailPage';
 import { __resetAnswerViewForTests } from '../components/ledger/useAnswerView';
 import type { QueryDetail, Claim } from '../api/types';
+import type { AuthContextValue } from '../context/auth-context';
 
-const { getAnywhere, exportMarkdown, feedbackSubmit } = vi.hoisted(() => ({
+const { getAnywhere, exportMarkdown, feedbackSubmit, mockWorkspaceGet, mockListMembers } = vi.hoisted(() => ({
   getAnywhere: vi.fn(),
   exportMarkdown: vi.fn().mockResolvedValue({ blob: new Blob(['#']), filename: 'a.md' }),
   feedbackSubmit: vi.fn().mockResolvedValue({}),
+  mockWorkspaceGet: vi.fn(),
+  mockListMembers: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
@@ -20,6 +23,8 @@ vi.mock('../api/client', () => ({
   receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
   // ChatDetailPage mounts <AnnotationThread>, which counts annotations on mount.
   annotationApi: { count: vi.fn().mockResolvedValue({ count: 0 }), list: vi.fn().mockResolvedValue({ items: [] }) },
+  // SealReceiptButton (R2-6) resolves the caller's role from these.
+  workspaceApi: { get: mockWorkspaceGet, listMembers: mockListMembers },
 }));
 
 vi.mock('../context/SourceViewerContext', () => ({
@@ -60,12 +65,14 @@ function makeQuery(overrides: Partial<QueryDetail> = {}): QueryDetail {
   };
 }
 
-function renderDetail(queryId = 'q-1') {
+const OWNER_USER = { id: 'user-1', email: 'owner@x.com', username: 'owner', role: 'analyst' as const, is_active: true, created_at: '', updated_at: '' };
+
+function renderDetail(queryId = 'q-1', authValue: Partial<AuthContextValue> = { user: OWNER_USER, isAuthenticated: true }) {
   return renderWithProviders(
     <Routes>
       <Route path="/chat/:queryId" element={<ChatDetailPage />} />
     </Routes>,
-    { route: `/chat/${queryId}` },
+    { route: `/chat/${queryId}`, authValue },
   );
 }
 
@@ -74,6 +81,8 @@ describe('ChatDetailPage', () => {
     getAnywhere.mockReset();
     exportMarkdown.mockClear();
     feedbackSubmit.mockClear();
+    mockWorkspaceGet.mockReset().mockResolvedValue({ id: 'ws-1', name: 'WS', description: '', owner_id: 'user-1', member_count: 1, document_count: 1, created_at: '', updated_at: '' });
+    mockListMembers.mockReset().mockResolvedValue({ data: [] });
     // The Markdown export clicks a generated <a download>; jsdom can't
     // navigate and logs "Not implemented" for it.
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -183,5 +192,23 @@ describe('ChatDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText(/enough evidence/)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Claim ledger' })).not.toBeInTheDocument();
+  });
+
+  it('shows Seal receipt for the workspace owner (R2-6)', async () => {
+    getAnywhere.mockResolvedValue(makeQuery({ response_sources: [] }));
+    renderDetail();
+
+    expect(await screen.findByRole('button', { name: /seal receipt/i })).toBeInTheDocument();
+  });
+
+  it('hides Seal receipt for a viewer of the workspace (R2-6)', async () => {
+    getAnywhere.mockResolvedValue(makeQuery({ response_sources: [] }));
+    mockListMembers.mockResolvedValue({ data: [{ id: 'm-1', workspace_id: 'ws-1', user_id: 'user-2', role: 'viewer', username: 'viewer2', email: 'v@x.com', joined_at: '' }] });
+    const VIEWER_USER = { id: 'user-2', email: 'v@x.com', username: 'viewer2', role: 'analyst' as const, is_active: true, created_at: '', updated_at: '' };
+
+    renderDetail('q-1', { user: VIEWER_USER, isAuthenticated: true });
+
+    await waitFor(() => expect(screen.getByText('How did revenue perform?')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /seal receipt/i })).not.toBeInTheDocument());
   });
 });
