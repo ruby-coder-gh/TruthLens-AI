@@ -742,8 +742,10 @@ export const receiptApi = {
   create: (queryId: string): Promise<ReceiptCreated> =>
     request(`/queries/${queryId}/receipts`, { method: 'POST' }),
 
+  // Backend returns a `{data: [...]}` envelope (ListResponse) — unwrap here so
+  // callers (SealReceiptButton) can keep treating this as a bare array.
   listForQuery: (queryId: string): Promise<ReceiptSummary[]> =>
-    request(`/queries/${queryId}/receipts`),
+    request<ListResponse<ReceiptSummary>>(`/queries/${queryId}/receipts`).then((res) => res.data),
 
   // PUBLIC — no session required; served to anyone holding the token.
   get: (token: string): Promise<ReceiptView> =>
