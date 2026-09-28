@@ -145,19 +145,23 @@ def _load_markdown(path: Path) -> list[dict[str, Any]]:
 
 
 def _load_csv(path: Path) -> list[dict[str, Any]]:
+    # C7: one page per data row (chunker below turns each page into its own
+    # chunk), header repeated as "Column: value; …" text on every row so a
+    # single row stays retrievable on its own instead of being buried inside
+    # a single whole-file chunk.
     pages: list[dict[str, Any]] = []
     with open(path, newline="", encoding="utf-8", errors="replace") as f:
-        reader = csv.reader(f)
-        rows: list[str] = []
-        for row in reader:
-            rows.append(", ".join(row))
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames or []
+        for i, row in enumerate(reader):
+            fields = "; ".join(f"{h}: {(row.get(h) or '').strip()}" for h in headers)
+            if not fields.strip():
+                continue
+            pages.append({
+                "text": fields,
+                "page_number": None,
+                "metadata": {"source": path.name, "row_index": i},
+            })
 
-    if rows:
-        pages.append({
-            "text": "\n".join(rows),
-            "page_number": None,
-            "metadata": {"source": path.name, "row_count": len(rows)},
-        })
-
-    logger.info("csv_loaded", rows=len(rows), path=str(path))
+    logger.info("csv_loaded", rows=len(pages), path=str(path))
     return pages
