@@ -59,6 +59,23 @@ def test_build_docx_produces_a_readable_document(tmp_path: Path):
     assert "Q1 2028" in full_text or "first quarter of 2028" in full_text.lower() or "2028" in full_text
 
 
+def test_build_docx_renders_markdown_paragraphs_and_bold(tmp_path: Path):
+    """Real demo seed: the radar quoted "…estimated at **€1.1 billion**…" verbatim, and each
+    hard-wrapped source line had become its own DOCX paragraph."""
+    dest = tmp_path / "board-memo-aurora.docx"
+    build_docx(CORPUS_DIR / "board-memo-aurora.md", dest)
+
+    paragraphs = DocxDocument(str(dest)).paragraphs
+    texts = [p.text for p in paragraphs]
+    assert not [t for t in texts if "**" in t]
+    budget = next(p for p in paragraphs if p.text.startswith("Total project capital expenditure"))
+    assert budget.text.endswith("though this will be kept under review.")
+    assert [r.text for r in budget.runs if r.bold] == ["€1.1 billion"]
+    assert "To: Board of Directors" in texts
+    risk = next(t for t in texts if t.startswith("Fabrication yard capacity."))
+    assert risk.endswith("remaining monopiles not yet started.")
+
+
 def test_build_corpus_files_writes_every_manifest_doc_with_expected_extension(tmp_path: Path):
     built = build_corpus_files(tmp_path)
     manifest = load_manifest()

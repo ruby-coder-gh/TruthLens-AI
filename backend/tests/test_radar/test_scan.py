@@ -434,6 +434,136 @@ def test_sentences_drop_headings_and_keep_terminated_sentences():
     assert _sentences(text) == [REVENUE_A, STAFF, "Aurora commissioning is planned for Q3 2027."]
 
 
+def test_sentences_break_at_heading_lines_and_rejoin_soft_wrapped_prose():
+    """Real demo seed: a heading line with no blank line after it was glued onto the claim
+    ("Aurora Project Update Aurora is expected to commission in the third quarter of 2...")."""
+    from app.radar.scan import _sentences
+
+    text = (
+        "Aurora Project Update\n"
+        "Aurora is expected to commission in the third quarter of 2027. The project remains\n"
+        "600 MW of contracted capacity backed by a 20-year power\n"
+        "purchase agreement.\n"
+        "**Dana Whitfield — Chief Executive Officer**\n"
+        "Dana Whitfield became Chief Executive Officer in January 2022."
+    )
+
+    assert _sentences(text) == [
+        "Aurora is expected to commission in the third quarter of 2027.",
+        "The project remains 600 MW of contracted capacity backed by a 20-year power purchase agreement.",
+        "Dana Whitfield became Chief Executive Officer in January 2022.",
+    ]
+
+
+def test_sentences_rejoin_a_wrap_after_a_lowercase_word_or_comma():
+    """Hard-wrapped markdown (leadership page) left fragments like "€2 billion of renewable
+    energy transactions." when the next line opened with a capital or a currency sign."""
+    from app.radar.scan import _sentences
+
+    text = (
+        "Marcus joined in 2020 from a fund, where he led over\n"
+        "€2 billion of renewable energy transactions. Before joining\n"
+        "Northwind Renewables, Dana spent eleven years at a developer.\n"
+        "Executive Committee\n"
+        "Dana Whitfield became Chief Executive Officer in January 2022."
+    )
+
+    assert _sentences(text) == [
+        "Marcus joined in 2020 from a fund, where he led over €2 billion of renewable energy transactions.",
+        "Before joining Northwind Renewables, Dana spent eleven years at a developer.",
+        "Dana Whitfield became Chief Executive Officer in January 2022.",
+    ]
+
+
+def test_sentences_strip_markdown_emphasis():
+    from app.radar.scan import _sentences
+
+    text = "Total project capital expenditure is now estimated at **€1.1 billion**, up from __€980 million__."
+
+    assert _sentences(text) == [
+        "Total project capital expenditure is now estimated at €1.1 billion, up from €980 million."
+    ]
+
+
+def test_sentences_drop_table_rows_and_short_fragments():
+    """Real demo seed: "2020 −34% −27% −7 pts Revenue growth was driven by…" reached NLI as a sentence."""
+    from app.radar.scan import _sentences
+
+    text = (
+        "Emissions intensity vs. 2020 −34% −27% −7 pts.\n\n"
+        "Fabrication yard capacity.\n\n"
+        "Revenue was €398 million."
+    )
+
+    assert _sentences(text) == ["Revenue was €398 million."]
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "same"),
+    [
+        ("Revenue in 2025 was €412 million.", "Revenue in 2025 was €398 million.", True),
+        ("Emissions intensity was 34% below the 2020 baseline.",
+         "Emissions intensity was 41% below the 2020 baseline.", True),
+        ("Aurora is expected to commission in the third quarter of 2027.",
+         "Aurora is now expected to commission in the first quarter of 2028.", True),
+        ("Dana Whitfield became Chief Executive Officer in March 2021.",
+         "Dana Whitfield became Chief Executive Officer in January 2022.", True),
+        # Real demo false positives (NLI 0.96-0.999): related topic, different quantity.
+        ("Group capital expenditure guidance for 2026 is €640–680M, weighted toward Aurora "
+         "construction and the Fjellheim repowering programme.",
+         "Total project capital expenditure is now estimated at €1.1 billion, compared with the "
+         "€980 million sanctioned at final investment decision in 2023.", False),
+        ("This was driven by the retirement of two older gas-backed balancing contracts and a full "
+         "year of operation from the Kestrel Ridge onshore wind expansion.",
+         "Onshore wind generation was broadly flat year over year on a same-asset basis, with growth "
+         "coming entirely from the Kestrel Ridge expansion, which contributed a full twelve months of "
+         "output in 2025 versus roughly nine months in 2024.", False),
+    ],
+)
+def test_same_subject_keeps_numeric_conflicts_and_rejects_different_quantities(a, b, same):
+    from app.radar.scan import _same_subject
+
+    assert _same_subject(a, b) is same
+    assert _same_subject(b, a) is same
+
+
+@pytest.mark.asyncio
+async def test_one_directional_contradiction_is_not_a_finding(seeded, radar, test_db):
+    """Real demo seed: '"2025 was a year of steady execution," said Dana Whitfield, Chief Executive
+    Officer.' vs 'Dana Whitfield became Chief Executive Officer in March 2021.' scored contradiction
+    0.977 one way and 0.001 the other. Every planted conflict scored >= 0.998 both ways."""
+    from app.radar.scan import run_scan
+
+    workspace, doc_a, doc_b, _user = seeded
+
+    def one_way(pairs):
+        return [(0.01, 0.02, 0.97) if premise == REVENUE_A else (0.01, 0.98, 0.01) for premise, _ in pairs]
+
+    radar([
+        _record(doc_a, 0, REVENUE_A, unit(1, 0, 0)),
+        _record(doc_b, 0, REVENUE_B, unit(1, 0, 0)),
+    ], nli=one_way)
+
+    await run_scan(workspace.id)
+
+    assert await _rows(test_db, workspace.id) == []
+
+
+@pytest.mark.asyncio
+async def test_different_subject_sentences_are_not_sent_to_nli(seeded, radar, test_db):
+    from app.radar.scan import run_scan
+
+    workspace, doc_a, doc_b, _user = seeded
+    _collection, nli = radar([
+        _record(doc_a, 0, "Group revenue guidance for 2026 is €640 million, weighted toward construction.", unit(1, 0, 0)),
+        _record(doc_b, 0, "Project revenue is now estimated at €1.1 billion after the schedule slip.", unit(1, 0, 0)),
+    ])
+
+    await run_scan(workspace.id)
+
+    assert nli.calls == []
+
+
 @pytest.mark.asyncio
 async def test_loosely_related_sentences_are_not_sent_to_nli(seeded, radar, test_db, monkeypatch):
     """Real-model eval: an unrelated CEO sentence (cosine 0.56) drew NLI contradiction 0.99; true conflicts sat >= 0.65."""

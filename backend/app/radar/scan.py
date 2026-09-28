@@ -50,12 +50,36 @@ MAX_SENTENCE_CHARS = 400
 # 0.56 drew a 0.99 NLI "contradiction".
 MIN_SENTENCE_SIMILARITY = 0.6
 
-# Sentence ends, paragraph breaks, and line-leading list/heading/table markers.
-_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n\s*\n|\n(?=\s*[-*•#|>])")
+MIN_SENTENCE_WORDS = 4
+# Jaccard overlap of the two sentences' content words (numbers, dates and
+# stopwords removed). Tuned on the demo corpus: planted conflicts share their
+# subject (0.67-1.0); NLI's other >= 0.87 pairs were same-topic sentences about
+# something else (group capex guidance vs project capex estimate, 0.0-0.19).
+MIN_SUBJECT_OVERLAP = 0.34
+
+# A single line break inside a hard-wrapped sentence: the line ends on a
+# lowercase word or a comma, or the next opens with a lowercase letter, digit,
+# "(" or currency sign. Any other break (blank line, heading, label, list item,
+# table row) ends a sentence.
+# ponytail: a sentence-case heading ending in a lowercase word ("Project update")
+# with no blank line after it still glues on; loaders emit blank lines between blocks.
+_SOFT_WRAP = re.compile(r"(\b[a-z][\w'’-]*,?|,)[ \t]*\n[ \t]*(?=\S)|[ \t]*\n[ \t]*(?=[a-z0-9(€$£])")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n")
 _LEADING_MARKUP = re.compile(r"^[-*•#|>\s]+")
+_EMPHASIS = re.compile(r"\*\*|__")
 # Only whole sentences: headings, titles and chunk-boundary fragments carry no
 # claim, and NLI calls two different titles a 0.99 contradiction.
 _TERMINATED = re.compile(r"[.!?][\"')\]]*$")
+_WORD = re.compile(r"[a-z]+")
+# Function words, plus month names: a date is the value a conflict differs in
+# ("in March 2021" vs "in January 2022"), not part of its subject.
+_NOT_SUBJECT = frozenset(
+    "a about after also an and are as at be been before being but by can could did do does for from "
+    "had has have he her his if in into is it its more most not now of on or our over per she so than "
+    "that the their them then there these they this those through to under up was we were what when "
+    "which while who will with would year years "
+    "january february march april may june july august september october november december".split()
+)
 
 # Process-local scan tasks and the documents queued behind them (auto-scans
 # that arrived while one was running).
@@ -340,16 +364,37 @@ def _candidate_pairs(collection: Any, chunks: list[tuple[_Chunk, Any]]) -> list[
 
 
 def _sentences(text: str) -> list[str]:
+    """Whole prose sentences of a chunk: no headings, labels, table rows or cut-off fragments."""
     out: list[str] = []
-    for part in _SENTENCE_BREAK.split(text):
+    unwrapped = _SOFT_WRAP.sub(lambda m: (m.group(1) or "") + " ", _EMPHASIS.sub("", text))
+    for part in _SENTENCE_BREAK.split(unwrapped):
         sentence = _LEADING_MARKUP.sub("", " ".join(part.split()))
+        words = sentence.split()
+        numeric = sum(not any(ch.isalpha() for ch in word) for word in words)
         if (
             MIN_SENTENCE_CHARS <= len(sentence) <= MAX_SENTENCE_CHARS
             and _TERMINATED.search(sentence)
+            and len(words) >= MIN_SENTENCE_WORDS
+            and numeric * 2 < len(words)  # mostly figures = a table row, not a claim
             and sentence not in out
         ):
             out.append(sentence)
     return out
+
+
+def _subject_words(sentence: str) -> set[str]:
+    return {w for w in _WORD.findall(sentence.lower()) if len(w) > 2 and w not in _NOT_SUBJECT}
+
+
+def _same_subject(a: str, b: str) -> bool:
+    """Do two sentences talk about the same thing? NLI alone flags any two figures on one topic.
+
+    ponytail: bag-of-words Jaccard; misses paraphrases with no shared content
+    word ("sales" vs "revenue"). A lemmatiser/synonym map would lift recall.
+    """
+    words_a, words_b = _subject_words(a), _subject_words(b)
+    union = words_a | words_b
+    return bool(union) and len(words_a & words_b) / len(union) >= MIN_SUBJECT_OVERLAP
 
 
 def _embed_sentences(sentences: list[str]) -> np.ndarray:
@@ -361,7 +406,10 @@ def _embed_sentences(sentences: list[str]) -> np.ndarray:
 
 
 def _top_sentence_pairs(similarity: np.ndarray, a: list[str], b: list[str]) -> list[tuple[int, int]]:
-    """Greedy best matches (each sentence used once) with cosine >= 0.5; identical sentences skipped."""
+    """Greedy best matches (each sentence used once) above `MIN_SENTENCE_SIMILARITY` that share a subject.
+
+    Identical sentences are skipped.
+    """
     picks: list[tuple[int, int]] = []
     used_a: set[int] = set()
     used_b: set[int] = set()
@@ -369,7 +417,7 @@ def _top_sentence_pairs(similarity: np.ndarray, a: list[str], b: list[str]) -> l
         i, j = divmod(int(flat), similarity.shape[1])
         if similarity[i, j] < MIN_SENTENCE_SIMILARITY or len(picks) == settings.RADAR_SENTENCE_PAIRS:
             break
-        if i in used_a or j in used_b or a[i] == b[j]:
+        if i in used_a or j in used_b or a[i] == b[j] or not _same_subject(a[i], b[j]):
             continue
         picks.append((i, j))
         used_a.add(i)
@@ -415,7 +463,9 @@ def _score_pairs(batch: list[tuple[float, _Chunk, _Chunk]], vectors: dict[str, n
     findings = []
     for k, (similarity, a, sentence_a, b, sentence_b) in enumerate(candidates):
         (e_ab, _, c_ab), (e_ba, _, c_ba) = scores[2 * k], scores[2 * k + 1]
-        contradiction, entailment = max(c_ab, c_ba), max(e_ab, e_ba)
+        # Contradiction is symmetric: demo-corpus conflicts scored >= 0.998 both
+        # ways, while NLI's false alarms were one-way (0.98 vs 0.001).
+        contradiction, entailment = min(c_ab, c_ba), max(e_ab, e_ba)
         if contradiction >= settings.RADAR_MIN_CONTRADICTION and contradiction > entailment:
             findings.append(_finding(a, sentence_a, b, sentence_b, contradiction, similarity))
     return findings
