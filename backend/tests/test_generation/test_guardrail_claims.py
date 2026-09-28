@@ -136,7 +136,7 @@ class TestCheckClaims:
         assert len(calls) == 1
         pairs = set(calls[0])
         hypotheses = {"Revenue grew 12% in fiscal 2025.", "The farm produces 40 MW of power."}
-        assert pairs == {(c["content"], h) for c in contexts for h in hypotheses}
+        assert pairs == {(guardrail._premise_prefix(c) + c["content"], h) for c in contexts for h in hypotheses}
 
     async def test_relevant_multi_sentence_chunk_also_gets_its_best_window(self):
         """Long chunks go neutral in NLI, so the best-overlap window is scored too."""
@@ -151,8 +151,8 @@ class TestCheckClaims:
         )
         premises = [p for p, _ in calls[0]]
         window = "The office moved in 2019. Parental leave is 16 weeks at full pay. Sick leave needs a certificate."
-        assert premises.count(chunk) == 1
-        assert window in premises
+        assert premises.count("Doc 0: " + chunk) == 1
+        assert "Doc 0: " + window in premises
         # The unrelated context gets only its full-chunk pair.
         assert len(premises) == 3
 
@@ -297,7 +297,9 @@ class TestCheckClaims:
         contexts = [_ctx(i, f"Context paragraph number {i}.") for i in range(10)]
         result, calls = await _run(answer, contexts, [])
         assert len({h for _, h in calls[0]}) == guardrail.MAX_CLAIMS == 12
-        assert {p for p, _ in calls[0]} == {c["content"] for c in contexts[: guardrail.MAX_CONTEXTS]}
+        assert {p for p, _ in calls[0]} == {
+            guardrail._premise_prefix(c) + c["content"] for c in contexts[: guardrail.MAX_CONTEXTS]
+        }
         assert len(result.claims) == 12
 
     async def test_evidence_prefers_the_sentence_sharing_the_claims_numbers(self):
@@ -340,3 +342,10 @@ class TestCheckClaims:
     async def test_early_returns_have_empty_claims(self):
         assert (await check("", [_ctx(0, "x")])).claims == []
         assert (await check("Some answer here.", [])).claims == []
+
+
+def test_premise_prefix_names_the_document():
+    """Chunks rarely name their subject; the title lets NLI confirm "Northwind's revenue…"."""
+    assert guardrail._premise_prefix({"document_name": "Northwind — Annual Report 2025.pdf"}) == "Northwind — Annual Report 2025: "
+    assert guardrail._premise_prefix({"metadata": {"document_name": "notes.md"}}) == "notes: "
+    assert guardrail._premise_prefix({}) == ""

@@ -155,6 +155,22 @@ def _context_text(ctx: dict[str, Any]) -> str:
     return content if isinstance(content, str) else ""
 
 
+_DOC_EXT_RE = re.compile(r"\.(pdf|docx|txt|md|csv|json)$", re.IGNORECASE)
+
+
+def _premise_prefix(ctx: dict[str, Any]) -> str:
+    """Document title to prepend to a premise.
+
+    Chunks rarely name their subject ("Revenue in 2025 was €412 million."), so NLI
+    can't confirm "Northwind's revenue was €412M" from them (entailment ~0.00);
+    with the title in front it does (~0.998) and catches "€398M" as a
+    contradiction (~0.995).
+    """
+    name = ctx.get("document_name") or (ctx.get("metadata") or {}).get("document_name") or ""
+    title = _DOC_EXT_RE.sub("", str(name)).strip()
+    return f"{title}: " if title else ""
+
+
 def _claim_object(
     text: str, start: int, end: int, verdict: str, entailment: float, contradiction: float,
     index: int, ctx: dict[str, Any], evidence: str,
@@ -297,19 +313,20 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     related: set[tuple[int, int]] = set()
     for c, (claim, _, _) in enumerate(spans):
         claim_words, claim_numbers = _words(claim), _numbers(claim)
-        for k, (_, _, text) in enumerate(scored):
+        for k, (_, ctx, text) in enumerate(scored):
             sents = sentences[k]
+            prefix = _premise_prefix(ctx)
             # Shared numbers count twice: they pin down which sentence a claim is about.
             overlaps = [len(claim_words & _words(s)) + len(claim_numbers & _numbers(s)) for s in sents]
             best = overlaps.index(max(overlaps))
             evidence[c, k] = sents[best] if overlaps[best] else ""
-            pairs.append((text, claim))
+            pairs.append((prefix + text, claim))
             owners.append((c, k))
             if overlaps[best] >= WINDOW_MIN_OVERLAP:
                 related.add((c, k))
                 window = " ".join(sents[max(0, best - 1): best + 2])
                 if window != flat[k]:
-                    pairs.append((window, claim))
+                    pairs.append((prefix + window, claim))
                     owners.append((c, k))
 
     scores = await asyncio.to_thread(nli_batch, pairs)
