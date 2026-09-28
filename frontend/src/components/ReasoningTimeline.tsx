@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   AlertTriangle,
   Brain,
@@ -92,6 +94,22 @@ function formatScore(score: number | undefined): string | null {
 
 function displaySourceName(source: Source): string {
   return source.document_name || `Document ${source.document_id.slice(0, 8)}`;
+}
+
+// BUG-10 residual: a sub-answer's raw `**bold**` and `[source:N]` markers
+// rendered as literal characters — the case file's own report already gets
+// real markdown + a stripped `[N]` citation form (InvestigationPage.tsx's
+// renderReportText); this mirrors that same treatment for the trace.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
+
+function PartialAnswer({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-border/80 bg-card-2 p-3 text-sm leading-relaxed text-text-muted [&_li]:mt-0.5 [&_ol]:ml-5 [&_ol]:list-decimal [&_strong]:font-semibold [&_strong]:text-text [&_ul]:ml-5 [&_ul]:list-disc">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripCitationMarkers(text)}</ReactMarkdown>
+    </div>
+  );
 }
 
 function phaseClassName(phase: string): string {
@@ -188,7 +206,7 @@ function SubQuestionAuditDetail({ subQuestion }: { subQuestion: InvestigationSub
         {subQuestion.guardrail_passed != null && <span>{subQuestion.guardrail_passed ? 'Guardrail passed' : 'Guardrail flagged'}</span>}
         <span>{citations.length} cited passage{citations.length === 1 ? '' : 's'}</span>
       </div>
-      {subQuestion.partial_answer && <p className="rounded-lg border border-border/80 bg-card-2 p-3 text-sm leading-relaxed text-text-muted">{subQuestion.partial_answer}</p>}
+      {subQuestion.partial_answer && <PartialAnswer text={subQuestion.partial_answer} />}
       {sources.length > 0 && (
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-dim">Sources consulted ({sources.length})</p>
