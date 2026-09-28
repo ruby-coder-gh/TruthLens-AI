@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Mail, ArrowLeft, CheckCircle, Shield } from 'lucide-react';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput from '../components/premium/AnimatedInput';
@@ -103,28 +103,20 @@ export default function ForgotPasswordPage() {
                   </p>
                 </div>
                 <Link to="/login">
-                  <PremiumButton className="w-full" variant="secondary">
-                    <ArrowLeft size={16} />
+                  {/* BUG-45: icon passed as the `icon` prop, not a child —
+                      PremiumButton's flex layout only covers icon+label when
+                      the icon goes through that prop; as a child it fell
+                      outside the flex row and dropped to its own line. */}
+                  <PremiumButton className="w-full" variant="secondary" icon={<ArrowLeft size={16} />}>
                     Back to login
                   </PremiumButton>
                 </Link>
               </motion.div>
             ) : (
               <form onSubmit={handleSubmit} noValidate className="space-y-5">
-                <AnimatePresence>
-                  {error && (
-                    <motion.div
-                      initial={{ opacity: 0.99, y: -12, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -12, scale: 0.95 }}
-                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      className="rounded-control border border-red/28 bg-red/10 px-4 py-3 text-sm text-red"
-                      role="alert"
-                    >
-                      {error}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {/* BUG-45: the field-level error below (AnimatedInput's own
+                    `error` prop) already announces this via aria-describedby
+                    — a second banner here duplicated the same message. */}
 
                 <motion.div
                   variants={{ animate: { transition: { staggerChildren: 0.08, delayChildren: 0.2 } } }}
@@ -152,8 +144,7 @@ export default function ForgotPasswordPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.45, duration: 0.4 }}
                 >
-                  <PremiumButton type="submit" loading={loading} className="w-full" size="lg">
-                    <Mail size={18} />
+                  <PremiumButton type="submit" loading={loading} className="w-full" size="lg" icon={<Mail size={18} />}>
                     Send reset link
                   </PremiumButton>
                 </motion.div>
@@ -162,13 +153,16 @@ export default function ForgotPasswordPage() {
           </Card>
         </motion.div>
 
-        {/* Footer */}
-        <motion.p className="mt-6 text-center text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }}>
-          <Link to="/login" className="relative font-medium text-primary-soft hover:text-primary transition-colors inline-flex items-center gap-1.5">
-            <ArrowLeft size={14} />
-            Back to login
-          </Link>
-        </motion.p>
+        {/* Footer — BUG-45: the success card above already offers "Back to
+            login" once `sent`, so this duplicate is hidden then. */}
+        {!sent && (
+          <motion.p className="mt-6 text-center text-sm text-text-muted" initial={{ opacity: 0.99 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }}>
+            <Link to="/login" className="relative font-medium text-primary-soft hover:text-primary transition-colors inline-flex items-center gap-1.5">
+              <ArrowLeft size={14} />
+              Back to login
+            </Link>
+          </motion.p>
+        )}
 
       </div>
     </motion.div>

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Home } from 'lucide-react';
-import { Button, Card } from '../components/ui';
+import { buttonClassName, Card } from '../components/ui';
 
 export default function NotFoundPage() {
   return (
@@ -29,19 +29,17 @@ export default function NotFoundPage() {
 
           <p className="mt-3 text-xl font-medium text-text">Page not found</p>
           <p className="mx-auto mt-2 max-w-sm text-sm text-text-dim">
-            Route does not exist or moved. Use one links below to continue.
+            {/* BUG-46: was "Use one links below" — a dropped word. */}
+            This route doesn&rsquo;t exist or has moved. Use one of the links below to continue.
           </p>
 
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link to="/">
-              <Button size="lg" className="gap-2">
-                <Home size={18} />
-                Go home
-              </Button>
+            {/* Styled Links, not <Link><Button> — an <a> can't contain a <button>. */}
+            <Link to="/" className={buttonClassName('primary', 'lg', 'gap-2')}>
+              <Home size={18} />
+              Go home
             </Link>
-            <Link to="/login">
-              <Button variant="secondary" size="lg">Sign in</Button>
-            </Link>
+            <Link to="/login" className={buttonClassName('secondary', 'lg')}>Sign in</Link>
           </div>
         </Card>
       </motion.div>
