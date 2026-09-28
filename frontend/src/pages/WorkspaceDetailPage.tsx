@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type FormEvent, type DragEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1116,6 +1117,15 @@ function DocumentRow({ doc, onDelete }: { doc: Document; onDelete: () => void })
 //  MEMBERS TAB (Redesigned — Professional Cards)
 // ═════════════════════════════════════════════════════════════════════════════
 
+// R3-3: `AnimatePresence` decides what's present via `isValidElement`, and a
+// bare `createPortal(...)` return value isn't a `ReactElement` — passed
+// directly as an `AnimatePresence` child it gets silently filtered out and
+// never mounts. A real component (this one) is what `AnimatePresence` needs
+// to see; it just forwards its children into the portal itself.
+function MenuPortal({ children }: { children: React.ReactNode }) {
+  return createPortal(children, document.body);
+}
+
 function MembersTab({
   workspaceId,
   isOwner,
@@ -1133,12 +1143,29 @@ function MembersTab({
   const [newRole, setNewRole] = useState('editor');
   const [addError, setAddError] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
+  // R3-3: the menu used to be an `absolute` child of the member card, which
+  // has `overflow-hidden` — the role picker and "Remove member" routinely
+  // got clipped. Rendered through a portal instead, positioned from the
+  // trigger button's own viewport rect, so it's never bounded by any
+  // ancestor's overflow/stacking context.
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // R2-9: the menu panel itself — used to scope the outside-click check
   // below. Only one member's menu is ever mounted at a time (`actionMenuOpen`
   // holds a single id), so one shared ref is enough.
   const menuRef = useRef<HTMLDivElement>(null);
+
+  function closeActionMenu() {
+    setActionMenuOpen(null);
+    setMenuPosition(null);
+  }
+
+  function openActionMenu(memberId: string, trigger: HTMLButtonElement) {
+    const rect = trigger.getBoundingClientRect();
+    setMenuPosition({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setActionMenuOpen(memberId);
+  }
 
   // R2-9: Esc closes the menu, and a click anywhere outside it closes it too
   // — no full-screen blocking backdrop, so the rest of the tab stays
@@ -1147,11 +1174,11 @@ function MembersTab({
     if (!actionMenuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setActionMenuOpen(null);
+        closeActionMenu();
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setActionMenuOpen(null);
+      if (event.key === 'Escape') closeActionMenu();
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -1339,7 +1366,7 @@ function MembersTab({
                       <div className="relative shrink-0">
                         <motion.button
                           type="button"
-                          onClick={() => setActionMenuOpen(isMenuOpen ? null : member.id)}
+                          onClick={(e) => (isMenuOpen ? closeActionMenu() : openActionMenu(member.id, e.currentTarget))}
                           className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-card-hover hover:text-text"
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
@@ -1348,15 +1375,30 @@ function MembersTab({
                           <MoreHorizontal size={15} />
                         </motion.button>
 
+                        {/* R3-3: portalled to <body> and positioned from the
+                            trigger's own viewport rect (`openActionMenu`) —
+                            the card this button lives in has `overflow-hidden`
+                            for its own rounded corners, which clipped the
+                            role picker and "Remove member" when the menu was
+                            a plain absolutely-positioned descendant.
+                            `AnimatePresence` tracks presence via `isValidElement`
+                            (`onlyElements` in its source), which a bare
+                            `createPortal(...)` return value fails — it isn't a
+                            `ReactElement`, so `AnimatePresence` silently drops
+                            it and the menu never mounts at all. `MenuPortal`
+                            (a real component) is what `AnimatePresence` sees;
+                            it just forwards its children into the portal. */}
                         <AnimatePresence>
-                          {isMenuOpen && (
+                          {isMenuOpen && menuPosition && (
+                            <MenuPortal>
                             <motion.div
                               ref={menuRef}
                               initial={{ opacity: 0.99, scale: 0.95, y: -4 }}
                               animate={{ opacity: 1, scale: 1, y: 0 }}
                               exit={{ opacity: 0, scale: 0.95, y: -4 }}
                               transition={{ duration: 0.15 }}
-                              className="absolute right-0 top-10 z-40 min-w-[170px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
+                              style={{ top: menuPosition.top, right: menuPosition.right }}
+                              className="fixed z-40 min-w-[170px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
                             >
                               {/* BUG-15: role-change control, using the
                                   existing owner-only PUT endpoint. */}
@@ -1374,7 +1416,7 @@ function MembersTab({
                                   onChange={(e) => {
                                     const role = e.target.value;
                                     if (role !== member.role) roleMutation.mutate({ userId: member.user_id, role });
-                                    setActionMenuOpen(null);
+                                    closeActionMenu();
                                   }}
                                   aria-label={`Change ${member.username}'s role`}
                                   className="w-full appearance-none rounded-chip border border-border bg-solid px-2 py-1 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -1388,7 +1430,7 @@ function MembersTab({
                                   type="button"
                                   onClick={() => {
                                     handleCopyUserId(member.user_id);
-                                    setActionMenuOpen(null);
+                                    closeActionMenu();
                                   }}
                                   className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
                                 >
@@ -1403,7 +1445,7 @@ function MembersTab({
                                   type="button"
                                   onClick={() => {
                                     removeMemberMutation.mutate(member.user_id);
-                                    setActionMenuOpen(null);
+                                    closeActionMenu();
                                   }}
                                   disabled={removeMemberMutation.isPending}
                                   className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
@@ -1413,6 +1455,7 @@ function MembersTab({
                                 </button>
                               </div>
                             </motion.div>
+                            </MenuPortal>
                           )}
                         </AnimatePresence>
                       </div>

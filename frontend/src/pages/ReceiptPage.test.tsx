@@ -249,16 +249,23 @@ describe('ReceiptPage', () => {
     expect(await screen.findByText('Verified Answer Receipt')).toBeInTheDocument();
   });
 
+  const revenueConflict = {
+    a: { document_name: 'Annual Report 2025', page_number: 1, sentence: 'Revenue in 2025 was €412 million.' },
+    b: { document_name: 'Q4 2025 Press Release', page_number: 1, sentence: 'Revenue in 2025 was €398 million.' },
+    score: 0.9,
+  };
+
   it('shows the K5 conflicts a reader would otherwise never learn about', async () => {
+    const base = makePayload();
     const payload = {
-      ...makePayload(),
-      conflicts: [
-        {
-          a: { document_name: 'Annual Report 2025', page_number: 1, sentence: 'Revenue in 2025 was €412 million.' },
-          b: { document_name: 'Q4 2025 Press Release', page_number: 1, sentence: 'Revenue in 2025 was €398 million.' },
-          score: 0.9,
-        },
+      ...base,
+      // A claim that's actually about the disputed figure, not just any
+      // claim in the answer (R3-6 — see the "unrelated" test below).
+      claims: [
+        ...base.claims,
+        { text: 'The letter states full-year revenue of €412 million.', start: 0, end: 0, verdict: 'supported' as const, entailment: 0.9, contradiction: 0.01, source_index: 1, chunk_id: 'c2', document_id: 'ar', document_name: 'Annual Report 2025', page_number: 1, evidence: 'Full-year revenue reached €412 million for the period.' },
       ],
+      conflicts: [revenueConflict],
     };
     const view = await makeView({ payload });
     mockGet.mockResolvedValue(view);
@@ -279,5 +286,22 @@ describe('ReceiptPage', () => {
 
     await screen.findByText(view.payload.question);
     expect(screen.queryByText(/sources disagree/i)).not.toBeInTheDocument();
+  });
+
+  // R3-6/BUG-R3-6: `open_conflicts_for_chunks` returns every open
+  // contradiction touching a cited chunk, not just the ones this answer's
+  // claims are actually about — a receipt whose only claim is the notice
+  // period must not tell a public reader the (unrelated) revenue figures
+  // disagree.
+  it('hides a conflict none of the receipt claims are actually about (R3-6)', async () => {
+    const payload = { ...makePayload(), conflicts: [revenueConflict] };
+    const view = await makeView({ payload });
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    await screen.findByText(view.payload.question);
+    expect(screen.queryByText(/sources disagree/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Revenue in 2025 was €412 million\./)).not.toBeInTheDocument();
   });
 });

@@ -277,4 +277,36 @@ describe('WorkspaceDetailPage — Members tab actions menu (BUG-15/R2-9)', () =>
     await testUser.click(screen.getByRole('button', { name: /invite member/i }));
     expect(await screen.findByLabelText(/email/i)).toBeInTheDocument();
   });
+
+  // R3-3: the menu used to be an `absolute` descendant of the member card,
+  // which has `overflow-hidden` for its own rounded corners — the role
+  // picker and "Remove member" were routinely clipped. It's now portalled to
+  // <body>, so it's never inside that card's overflow context, and every
+  // item stays reachable.
+  it('renders the menu outside the clipped member card and keeps every item reachable (R3-3)', async () => {
+    vi.mocked(workspaceApi.removeMember).mockResolvedValue(undefined);
+    const testUser = userEvent.setup();
+    renderPage('/workspaces/ws-1');
+    await testUser.click(await screen.findByRole('tab', { name: /^Members$/i }));
+    await testUser.click(await screen.findByRole('button', { name: /member actions/i }));
+
+    const roleSelect = await screen.findByLabelText(/change val's role/i);
+    const removeButton = screen.getByRole('button', { name: /remove member/i });
+    const copyButton = screen.getByRole('button', { name: /copy user id/i });
+
+    // The member card ("val", the editor whose menu is open) is the nearest
+    // `overflow-hidden` ancestor of the trigger — the menu must not be
+    // inside it.
+    const card = screen.getByText('val').closest('.overflow-hidden');
+    expect(card).not.toBeNull();
+    expect(card!.contains(roleSelect)).toBe(false);
+    expect(card!.contains(removeButton)).toBe(false);
+
+    // Every item is present and actually clickable (not just rendered).
+    expect(roleSelect).toBeVisible();
+    expect(removeButton).toBeVisible();
+    expect(copyButton).toBeVisible();
+    await testUser.click(removeButton);
+    await waitFor(() => expect(workspaceApi.removeMember).toHaveBeenCalledWith('ws-1', 'u2'));
+  });
 });

@@ -9,7 +9,7 @@
 //      Document, ...). Anchoring it inside the top bar instead means it can
 //      never again collide with a page's header row.
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ChevronDown, ChevronUp, X, ArrowRight } from 'lucide-react';
 import { Badge, type BadgeColor } from './ui';
@@ -139,6 +139,21 @@ export function DemoTourButton() {
   const [state, setState] = useState<TourState>(() => loadState());
   const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const location = useLocation();
+  // R3-2: "Go" already collapses on click (below), but that only covers
+  // navigating through the tour's *own* links — any other navigation while
+  // the panel was open (browser back, a different header control, a stray
+  // click that both closes the panel and follows a link) left it floating
+  // over whatever page came next. Layout never unmounts this button across
+  // routes, so close on every route change, not just the tour's own "Go".
+  // Derived during render (React's documented "adjusting state when a prop
+  // changes" bail-out pattern), not an effect — an effect here would commit
+  // the still-open panel for a frame before closing it.
+  const [lastPathname, setLastPathname] = useState(location.pathname);
+  if (location.pathname !== lastPathname) {
+    setLastPathname(location.pathname);
+    if (!state.collapsed) setState((prev) => ({ ...prev, collapsed: true }));
+  }
 
   useEffect(() => {
     saveState(state);
@@ -203,14 +218,19 @@ export function DemoTourButton() {
         onClick={toggleCollapsed}
         aria-expanded={!state.collapsed}
         aria-controls="demo-tour-panel"
-        className="flex items-center gap-1.5 rounded-control border border-border bg-card-2 px-2.5 py-1.5 text-xs font-semibold text-text transition-colors hover:bg-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-control border border-border bg-card-2 px-2.5 py-1.5 text-xs font-semibold text-text transition-colors hover:bg-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         Tour {doneCount}/{STEP_COUNT}
         {state.collapsed ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronUp size={13} aria-hidden="true" />}
       </button>
 
-      {/* Opens downward, anchored to the trigger — never the viewport — so
-          it can't drift over a page's own header controls. */}
+      {/* R3-10: below `sm`, `right-0` under a trigger that isn't flush with
+          the viewport's own right edge pushed the panel's left edge
+          off-screen negative (the button sits mid-header, not at x=0, so a
+          320px-wide panel anchored to *its* right edge ran out of room).
+          `fixed inset-x-4` clamps the panel to the viewport itself — it can
+          never go off either edge — then `sm:` reverts to the original
+          trigger-anchored popover once there's room for one. */}
       <AnimatePresence>
         {!state.collapsed && (
           <motion.div
@@ -219,7 +239,7 @@ export function DemoTourButton() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl"
+            className="fixed inset-x-4 top-14 z-40 w-auto rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 sm:max-w-[calc(100vw-2rem)]"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-text">Presenter tour</p>

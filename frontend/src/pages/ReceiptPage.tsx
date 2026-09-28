@@ -32,7 +32,7 @@ import type { ReceiptView, ClaimVerdict } from '../api/types';
 // have its own "Supported"/"Partially supported" labels that read as a
 // different vocabulary for the same thing ("Verified"/"Partial" there).
 import { VERDICT_META as LEDGER_VERDICT_META } from '../components/ledger/verdict';
-import { figureDiff, formatFigureDiff } from '../components/ledger/conflicts';
+import { figureDiff, formatFigureDiff, isConflictRelevantToClaims } from '../components/ledger/conflicts';
 
 type PageState = 'loading' | 'loaded' | 'not_found' | 'revoked' | 'error';
 
@@ -249,6 +249,12 @@ export default function ReceiptPage() {
   const sourceCount = payload.sources.length;
   const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
   const trustComponents = payload.trust.components ? Object.entries(payload.trust.components) : [];
+  // R3-6: `open_conflicts_for_chunks` returns every open contradiction that
+  // merely *touches* one of this answer's cited chunks, not just the ones
+  // its claims are actually about (BUG-R3-6) — apply the same relevance
+  // filter the Claim Ledger uses (`pairClaimConflicts`'s `isAboutSameFact`)
+  // before showing "Sources disagree" to a public reader.
+  const relevantConflicts = (payload.conflicts ?? []).filter((conflict) => isConflictRelevantToClaims(payload.claims, conflict));
 
   return (
     <div className="relative min-h-screen bg-bg px-4 py-10 sm:py-14 print:px-0 print:py-6">
@@ -359,13 +365,13 @@ export default function ReceiptPage() {
         {/* K5: open Radar contradictions touching this answer's own cited
             sources — a public reader must learn the sources disagree, not
             just whoever saw the "N conflict" tally in the live chat (R2-16). */}
-        {payload.conflicts && payload.conflicts.length > 0 && (
+        {relevantConflicts.length > 0 && (
           <Card className="space-y-3 border-conflict/30 bg-conflict-tint p-5 break-inside-avoid">
             <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-conflict">
               <Scale size={12} /> Sources disagree
             </p>
             <ul className="space-y-2.5">
-              {payload.conflicts.map((conflict, i) => {
+              {relevantConflicts.map((conflict, i) => {
                 const diff = figureDiff(conflict.a.sentence, conflict.b.sentence);
                 return (
                   <li key={i} className="rounded-control border border-border bg-card-2 p-3">

@@ -147,6 +147,26 @@ describe('AdminDocumentsPage — bulk document ops', () => {
     expect(screen.getByText('u-legacy-id')).toBeInTheDocument();
   });
 
+  // BUG-38: the list table scrolled ~35px horizontally at 1280px, and the
+  // squeeze wrapped file sizes like "171 KB" onto two lines. jsdom doesn't
+  // lay out real pixel widths, so this locks in the narrowed columns (Name/
+  // Tags/Uploaded By) and the `whitespace-nowrap` that stops the size column
+  // from wrapping — a real viewport check is still needed to confirm the
+  // 35px is actually gone.
+  it('keeps the file size on one line and caps the wide columns (BUG-38)', async () => {
+    mockListAll.mockResolvedValue({
+      data: [{ ...baseDoc, id: 'doc-1', original_filename: 'Contract.pdf', tags: [], file_size: 175104 }],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderWithProviders(<AdminDocumentsPage />);
+
+    const sizeCell = (await screen.findByText(/171/)).closest('td')!;
+    expect(sizeCell.className).toContain('whitespace-nowrap');
+
+    const nameSpan = screen.getByText('Contract.pdf');
+    expect(nameSpan.className).toContain('max-w-[190px]');
+  });
+
   it('regression: typed search text is passed to documentApi.listAll', async () => {
     const user = userEvent.setup();
     await renderPage();

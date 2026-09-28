@@ -126,7 +126,13 @@ export function SealReceiptButton({
   );
 
   const fullLink = created ? `${window.location.origin}${created.url_path}` : null;
-  const activeExisting = existing.filter((r) => r.token !== created?.token);
+  // R3-11: this used to exclude the just-created token, so the only place a
+  // receipt could ever be revoked from (the "Existing receipts" list below)
+  // never showed it — a receipt sealed this session was stuck un-revokable
+  // until the dialog was closed and reopened (which reloads the real list
+  // and includes it). `handleCreate` already prepends it into `existing`;
+  // just stop filtering it back out.
+  const activeExisting = existing;
 
   if (!canSeal) return null;
 

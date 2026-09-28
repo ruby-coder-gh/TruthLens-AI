@@ -392,10 +392,10 @@ export default function AdminDocumentsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-primary-soft shrink-0" />
-                      <span className="text-text truncate max-w-[220px] block">{doc.original_filename}</span>
+                      <span className="text-text truncate max-w-[190px] block">{doc.original_filename}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text-muted">{getFileType(doc.mime_type)}</td>
+                  <td className="px-4 py-3 text-text-muted whitespace-nowrap">{getFileType(doc.mime_type)}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
@@ -406,10 +406,14 @@ export default function AdminDocumentsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text tabular-nums">{doc.chunk_count ?? '—'}</td>
-                  <td className="px-4 py-3 text-text-muted tabular-nums">{formatFileSize(doc.file_size)}</td>
+                  <td className="px-4 py-3 text-text tabular-nums whitespace-nowrap">{doc.chunk_count ?? '—'}</td>
+                  {/* BUG-38: `whitespace-nowrap` — without it, once the row's
+                      other columns got tight, this was the flexible one the
+                      table layout squeezed, wrapping "171 KB" onto two
+                      lines. */}
+                  <td className="px-4 py-3 text-text-muted tabular-nums whitespace-nowrap">{formatFileSize(doc.file_size)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1 max-w-[160px]">
+                    <div className="flex flex-wrap gap-1 max-w-[120px]">
                       {(doc.tags ?? []).length === 0 ? (
                         <span className="text-xs text-text-dim">—</span>
                       ) : (
@@ -421,7 +425,7 @@ export default function AdminDocumentsPage() {
                       also shrinks this column enough that the table stops
                       scrolling horizontally at 1280px. */}
                   <td className="px-4 py-3 text-text-muted text-xs">
-                    <span className="block max-w-[140px] truncate" title={doc.uploaded_by}>
+                    <span className="block max-w-[110px] truncate" title={doc.uploaded_by}>
                       {doc.uploaded_by_name ?? doc.uploaded_by}
                     </span>
                   </td>

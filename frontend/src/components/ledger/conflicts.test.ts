@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pairClaimConflicts, conflictRowId, countSourceConflicts, extractFigure, figureDiff, formatFigureDiff } from './conflicts';
+import { pairClaimConflicts, conflictRowId, countSourceConflicts, extractFigure, figureDiff, formatFigureDiff, isAboutSameFact, isConflictRelevantToClaims } from './conflicts';
 import type { Claim, Contradiction, Source } from '../../api/types';
 
 function claim(overrides: Partial<Claim>): Claim {
@@ -104,6 +104,80 @@ describe('pairClaimConflicts', () => {
     const claims = [claim({ chunk_id: 'ar-p1', text: 'Installed capacity reached 1.8 GW at the end of 2025.', evidence: 'Installed capacity reached 1.8 GW.' })];
     const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, CEO_CONTRADICTION, EMISSIONS_CONTRADICTION]);
     expect(pairs).toHaveLength(0);
+  });
+
+  // R3: `isAboutSameFact` accepted a single shared word, so an Aurora answer
+  // whose claim merely *mentions* "revenue" in passing on the same page
+  // wrongly pulled in the revenue D-row too. Real sentences verbatim from
+  // `backend/app/demo/corpus/annual-report-2025.md`.
+  it('R3: an Aurora answer does not pull the revenue pair just because one claim mentions "revenue" in passing', () => {
+    const claims = [
+      // Real sentence (Financial Highlights section, same page/chunk as the
+      // revenue figure) that shares exactly one word ("revenue") with the
+      // revenue contradiction's sentence — not enough on its own.
+      claim({
+        chunk_id: 'ar-p1',
+        text: "Higher revenue was partially offset by increased development spend ahead of Aurora's construction phase.",
+        evidence: "as higher revenue was partially offset by increased development spend ahead of Aurora's construction phase.",
+      }),
+      // The actual Aurora claim, cited from the Aurora contradiction's own chunk.
+      claim({ chunk_id: 'ar-p2', text: 'Aurora is expected to commission in the third quarter of 2027.', evidence: 'Aurora is expected to commission in the third quarter of 2027.' }),
+    ];
+    const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, CEO_CONTRADICTION, EMISSIONS_CONTRADICTION, AURORA_CONTRADICTION]);
+    expect(pairs.map((p) => p.contradiction.id)).toEqual(['aurora']);
+  });
+
+  it('R3: a revenue answer still keeps the revenue pair (€14M)', () => {
+    const claims = [claim({ chunk_id: 'ar-p1', text: 'Northwind Renewables reported revenue of €412 million for 2025.', evidence: 'Revenue in 2025 was €412 million.' })];
+    const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, CEO_CONTRADICTION, EMISSIONS_CONTRADICTION, AURORA_CONTRADICTION]);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].contradiction.id).toBe('revenue');
+    const diff = figureDiff(pairs[0].contradiction.a.sentence, pairs[0].contradiction.b.sentence)!;
+    expect(formatFigureDiff(diff)).toBe('€14M');
+  });
+
+  it('R3: an emissions answer still keeps the emissions pair (7 pts)', () => {
+    const claims = [claim({ chunk_id: 'ar-p1', text: 'Emissions intensity was 34% below the 2020 baseline, per the sustainability disclosure.', evidence: 'Emissions intensity was 34% below the 2020 baseline.' })];
+    const pairs = pairClaimConflicts(claims, [REVENUE_CONTRADICTION, CEO_CONTRADICTION, EMISSIONS_CONTRADICTION, AURORA_CONTRADICTION]);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].contradiction.id).toBe('emissions');
+    const diff = figureDiff(pairs[0].contradiction.a.sentence, pairs[0].contradiction.b.sentence)!;
+    expect(formatFigureDiff(diff)).toBe('7 pts');
+  });
+});
+
+describe('isAboutSameFact', () => {
+  it('R3: rejects a single shared generic word', () => {
+    expect(isAboutSameFact({ text: 'higher revenue was partially offset by Aurora spend', evidence: null }, REVENUE_CONTRADICTION.a.sentence)).toBe(false);
+  });
+
+  it('R3: accepts a single shared number', () => {
+    expect(isAboutSameFact({ text: 'the figure was €412 million per the letter', evidence: null }, REVENUE_CONTRADICTION.a.sentence)).toBe(true);
+  });
+
+  it('R3: accepts two or more shared words with no number at all', () => {
+    expect(isAboutSameFact({ text: 'Dana Whitfield became Chief Executive Officer that spring', evidence: null }, CEO_CONTRADICTION.a.sentence)).toBe(true);
+  });
+
+  it('R3: ignores doc-title words like "Northwind"/"Renewables"', () => {
+    expect(isAboutSameFact({ text: 'Northwind Renewables continues to grow its offshore pipeline', evidence: null }, REVENUE_CONTRADICTION.a.sentence)).toBe(false);
+  });
+});
+
+// R3-6: the public receipt's `conflicts` payload has no chunk_id to
+// pre-filter on (`backend/app/radar/__init__.py`'s `open_conflicts_for_chunks`
+// only ever serialized `{document_name, page_number, sentence}` per side) —
+// `isConflictRelevantToClaims` applies the same word/number relevance test
+// the ledger uses, scoped to just the two sentences available.
+describe('isConflictRelevantToClaims', () => {
+  it('drops a conflict none of the receipt claims are actually about', () => {
+    const claims = [{ text: 'Aurora is expected to commission in the third quarter of 2027.', evidence: null }];
+    expect(isConflictRelevantToClaims(claims, REVENUE_CONTRADICTION)).toBe(false);
+  });
+
+  it('keeps a conflict a receipt claim is about', () => {
+    const claims = [{ text: 'Northwind Renewables reported revenue of €412 million for 2025.', evidence: 'Revenue in 2025 was €412 million.' }];
+    expect(isConflictRelevantToClaims(claims, REVENUE_CONTRADICTION)).toBe(true);
   });
 });
 

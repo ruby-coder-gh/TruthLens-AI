@@ -634,7 +634,13 @@ interface TabsProps {
 
 export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   return (
-    <div className={clsx('inline-flex gap-1 rounded-control glass p-1', className)} role="tablist">
+    // R3-9: with enough tabs (Documents/Members/Radar/Activity…), the bar's
+    // natural content width exceeds a 375px viewport — with no overflow
+    // boundary of its own, that overflow bubbled up into the *page*, making
+    // the whole route scroll sideways. `max-w-full` caps it to whatever
+    // width its container actually has and `overflow-x-auto` lets the tabs
+    // scroll inside that instead.
+    <div className={clsx('inline-flex max-w-full gap-1 overflow-x-auto rounded-control glass p-1', className)} role="tablist">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
@@ -645,7 +651,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             aria-selected={isActive}
             onClick={() => onChange(tab.id)}
             className={clsx(
-              'relative flex h-[30px] items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150',
+              'relative flex h-[30px] shrink-0 items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150',
               isActive ? 'font-semibold text-primary-soft' : 'text-text-muted hover:text-text',
             )}
           >

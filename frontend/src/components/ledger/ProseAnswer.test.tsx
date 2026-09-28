@@ -73,4 +73,26 @@ describe('ProseAnswer', () => {
     expect(paragraphs).toHaveLength(1);
     expect(paragraphs[0]).toHaveTextContent('Third quarter of 2027 1. Growth continued.');
   });
+
+  // R3-5: the old "claims present" branch skipped ReactMarkdown entirely and
+  // dumped the whole answer as plain text into one `<p>`, so a bulleted list
+  // rendered as literal "- item" dashes collapsed onto a single line.
+  it('keeps a markdown list as real list items once claims are present (R3-5)', () => {
+    const claims: Claim[] = [
+      { text: 'Aurora remains on schedule', start: 77, end: 103, verdict: 'supported', entailment: 0.9, contradiction: 0.01, source_index: 1, chunk_id: 'chunk-a', document_id: 'doc-1', document_name: 'Annual Report', page_number: 3, evidence: 'Aurora remains on schedule.' },
+    ];
+    const content = 'Key risks include:\n\n- Weather delays construction\n- Supply chain disruption\n\nAurora remains on schedule overall.';
+    const { container } = renderWithProviders(
+      <ProseAnswer content={content} sources={sources} claims={claims} workspaceId="ws-1" />,
+    );
+
+    const items = container.querySelectorAll('.prose-answer li');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('Weather delays construction');
+    expect(items[1]).toHaveTextContent('Supply chain disruption');
+    // The bullets must be real <li>s, not dashes flattened into running text.
+    expect(container.querySelector('.prose-answer')).not.toHaveTextContent('- Weather delays');
+    // The verdict icon for the trailing claim still lands correctly.
+    expect(screen.getByText('(verified)')).toBeInTheDocument();
+  });
 });

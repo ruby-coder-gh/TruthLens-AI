@@ -60,3 +60,44 @@ describe('AdminDashboard — Avg Trust Score (BUG-50/C8)', () => {
     expect(await screen.findByText('N/A')).toBeInTheDocument();
   });
 });
+
+// BUG-36: the `/admin` dashboard's own Audit Logs tab (distinct from the
+// dedicated `/admin/audit-log` page, which already did this) still showed
+// the raw, truncated `user_id` instead of the resolved `user_name`.
+describe('AdminDashboard — Audit tab shows user_name (BUG-36)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stats.mockResolvedValue({
+      total_users: 5, total_workspaces: 2, total_documents: 10, total_queries: 20, total_chunks: 100,
+      avg_trust_score: 0.49, total_feedback: 0, query_cache_hits: 0,
+    });
+    evaluation.mockResolvedValue({ faithfulness: null, answer_relevance: null, context_precision: null, context_recall: null });
+    getQueriesOverTime.mockResolvedValue([]);
+    getTrustScoreDistribution.mockResolvedValue([]);
+  });
+
+  it('shows the resolved username instead of the raw user id', async () => {
+    logs.mockResolvedValue({
+      data: [
+        { id: 'log-1', user_id: 'a1b2c3d4e5f67890aaaabbbbccccdddd', user_name: 'demo_analyst', action: 'query.create', resource_type: 'query', resource_id: null, details: null, created_at: '2026-09-01T00:00:00Z' },
+      ],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderPage();
+
+    expect(await screen.findByText('demo_analyst')).toBeInTheDocument();
+    expect(screen.queryByText(/a1b2c3d4/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the truncated user id when user_name is absent (deleted user / older backend)', async () => {
+    logs.mockResolvedValue({
+      data: [
+        { id: 'log-2', user_id: 'a1b2c3d4e5f67890aaaabbbbccccdddd', action: 'query.create', resource_type: 'query', resource_id: null, details: null, created_at: '2026-09-01T00:00:00Z' },
+      ],
+      meta: { page: 1, page_size: 20, total: 1 },
+    });
+    renderPage();
+
+    expect(await screen.findByText('a1b2c3d4e5f6…')).toBeInTheDocument();
+  });
+});

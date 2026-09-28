@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSourceViewer } from '../../context/SourceViewerContext';
 import type { Claim, Source } from '../../api/types';
-import { VERDICT_META } from './verdict';
+import { VERDICT_META, type LedgerVerdict } from './verdict';
 
 function CitationChip({ index, source, workspaceId }: { index: number; source: Source | undefined; workspaceId?: string }) {
   const { open: openViewer } = useSourceViewer();
@@ -59,6 +59,39 @@ function StreamingCaret() {
   );
 }
 
+// R3-5: claim verdict icons used the same trick as BUG-4/R2-20 above in
+// reverse — the old "claims present" branch skipped ReactMarkdown entirely
+// (plain-text offset splicing into one `<p>`), so a bulleted list in the
+// answer rendered as literal `- item` dashes collapsed onto a single line
+// instead of an actual `<ul>`. Encoding each claim's end offset as the same
+// kind of zero-width sentinel image (`#verdict-N-verdict`) lets the *whole*
+// answer make one ReactMarkdown pass — lists, paragraphs, everything — with
+// the verdict icon landing inline at the right character offset either way.
+const VERDICT_HREF_RE = /^#verdict-(\d+)-([a-z]+)$/;
+
+function VerdictIcon({ verdict }: { verdict: LedgerVerdict }) {
+  const meta = VERDICT_META[verdict];
+  const Icon = meta.icon;
+  return (
+    <>
+      <Icon size={12} className={clsx('mx-0.5 inline align-baseline', meta.textClass)} aria-hidden="true" />
+      <span className="sr-only">({meta.label.toLowerCase()})</span>
+    </>
+  );
+}
+
+/** Splices a `![](#verdict-N-verdict)` sentinel right after each claim's own
+ * span, working back-to-front so earlier insertions never shift the offsets
+ * later claims were computed against. */
+function encodeClaimVerdicts(content: string, claims: Array<{ claim: Claim; index: number }>): string {
+  let result = content;
+  for (let i = claims.length - 1; i >= 0; i--) {
+    const { claim, index } = claims[i];
+    result = `${result.slice(0, claim.end)}![](#verdict-${index}-${claim.verdict})${result.slice(claim.end)}`;
+  }
+  return result;
+}
+
 /** Turns a raw `[source:N]` marker into standard markdown link syntax
  * (`[N](#cite-N)`) so a *single* ReactMarkdown parse renders it as an inline
  * element within its sentence's own paragraph — BUG-4's root cause was the
@@ -81,20 +114,29 @@ function citationAwareLink(sources: Source[], workspaceId: string | undefined) {
   };
 }
 
-// ponytail: plain text, not markdown, for text sitting inline beside a claim's
-// verdict icon (running full ReactMarkdown there would wrap it in a block
-// `<p>`, breaking the inline flow) — same limitation the old Truth Lens
-// overlay had while its lens was on. Upgrade to an offset-aware markdown-AST
-// walker if bold/italic inside a claim turns out to matter for the demo corpus.
-function withCitationsInline(text: string, sources: Source[], workspaceId: string | undefined, keySeed: string): ReactNode {
-  const parts = text.split(/(\[source:\d+\])/gi);
-  if (parts.length <= 1) return text;
-  return parts.map((part, i) => {
-    const m = part.match(/\[source:(\d+)\]/i);
-    if (!m) return <span key={`${keySeed}-t${i}`}>{part}</span>;
-    const idx = parseInt(m[1], 10);
-    return <CitationChip key={`${keySeed}-c${i}`} index={idx} source={sources[idx - 1]} workspaceId={workspaceId} />;
-  });
+/** ReactMarkdown's `img` renderer: the streaming caret and every claim's
+ * verdict-icon sentinel both ride in as zero-width images (see
+ * `CARET_MARKDOWN` / `encodeClaimVerdicts`) so they land inline at the exact
+ * offset they were spliced at, through the same single markdown parse as
+ * everything else — a real image would never point at one of these hrefs. */
+function sentinelImage({ src }: { src?: string }): ReactNode {
+  if (src === CARET_HREF) return <StreamingCaret />;
+  const m = src ? VERDICT_HREF_RE.exec(src) : null;
+  if (m) return <VerdictIcon verdict={m[2] as LedgerVerdict} />;
+  return null;
+}
+
+// R3-5: list/heading/paragraph structure needs explicit classes on both
+// branches below — Tailwind's preflight strips default `<ul>`/`<ol>` marker
+// and spacing styles, same reasoning as `reportMarkdownComponents` in
+// InvestigationPage.tsx.
+function markdownComponents(sources: Source[], workspaceId: string | undefined) {
+  return {
+    a: citationAwareLink(sources, workspaceId),
+    img: sentinelImage,
+    ul: ({ children }: { children?: ReactNode }) => <ul className="ml-5 list-disc space-y-1">{children}</ul>,
+    ol: ({ children }: { children?: ReactNode }) => <ol className="ml-5 list-decimal space-y-1">{children}</ol>,
+  };
 }
 
 export interface ProseAnswerProps {
@@ -110,31 +152,9 @@ export interface ProseAnswerProps {
 export function ProseAnswer({ content, sources, claims, workspaceId, streaming = false }: ProseAnswerProps) {
   const claimList = claims ?? [];
 
-  // No claims yet (streaming, or an answer that had none) — full markdown
-  // with clickable citation chips, same as before Truth Lens existed. One
-  // ReactMarkdown pass over the whole answer (BUG-4) keeps citations inline
-  // within their own sentence instead of splitting the text into a
-  // paragraph-per-fragment.
-  if (claimList.length === 0) {
-    const displayContent = streaming ? `${content}${CARET_MARKDOWN}` : content;
-    return (
-      <div className="prose-answer text-[15px] leading-7 text-text">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: citationAwareLink(sources, workspaceId),
-            img: ({ src }) => (src === CARET_HREF ? <StreamingCaret /> : null),
-          }}
-        >
-          {encodeCitationLinks(displayContent)}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-
-  // Claims present — walk the text once, inserting a small verdict icon
-  // right after each claim's own span (offset-based, matches the guardrail's
-  // char offsets into the raw answer text).
+  // Non-overlapping, in-bounds claims only (offset-based, matching the
+  // guardrail's char offsets into the raw answer text) — same filter as
+  // before, now used to splice verdict sentinels instead of slicing spans.
   const placed = claimList
     .map((claim, index) => ({ claim, index }))
     .filter(({ claim }) => claim.start >= 0 && claim.end > claim.start && claim.end <= content.length)
@@ -148,26 +168,18 @@ export function ProseAnswer({ content, sources, claims, workspaceId, streaming =
     }
   }
 
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  nonOverlapping.forEach(({ claim, index }, i) => {
-    if (claim.start > cursor) {
-      nodes.push(<span key={`plain${i}`}>{withCitationsInline(content.slice(cursor, claim.start), sources, workspaceId, `plain${i}`)}</span>);
-    }
-    const meta = VERDICT_META[claim.verdict];
-    const Icon = meta.icon;
-    nodes.push(
-      <span key={`claim${index}`}>
-        {withCitationsInline(content.slice(claim.start, claim.end), sources, workspaceId, `claim${index}`)}
-        <Icon size={12} className={clsx('mx-0.5 inline align-baseline', meta.textClass)} aria-hidden="true" />
-        <span className="sr-only">({meta.label.toLowerCase()})</span>
-      </span>,
-    );
-    cursor = claim.end;
-  });
-  if (cursor < content.length) {
-    nodes.push(<span key="tail">{withCitationsInline(content.slice(cursor), sources, workspaceId, 'tail')}</span>);
-  }
+  // One ReactMarkdown pass over the *whole* answer, claims or not (BUG-4,
+  // R2-20, R3-5) — lists, headings and paragraphs all parse correctly
+  // instead of the old claims-present branch's plain-text-in-one-`<p>`
+  // fallback, which flattened a bulleted list onto a single line.
+  const withVerdicts = encodeClaimVerdicts(content, nonOverlapping);
+  const displayContent = streaming && claimList.length === 0 ? `${withVerdicts}${CARET_MARKDOWN}` : withVerdicts;
 
-  return <div className="prose-answer text-[15px] leading-7 text-text"><p>{nodes}</p></div>;
+  return (
+    <div className="prose-answer text-[15px] leading-7 text-text">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(sources, workspaceId)}>
+        {encodeCitationLinks(displayContent)}
+      </ReactMarkdown>
+    </div>
+  );
 }
