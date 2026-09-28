@@ -47,6 +47,9 @@ class AdminStatsResponse(BaseModel):
 class AuditLogResponse(BaseModel):
     id: str
     user_id: str | None = None
+    # K3: the actor's display name (username, else email), so the admin UI's
+    # USER column shows a name instead of a raw user id (BUG-36).
+    user_name: str | None = None
     action: str
     resource_type: str
     resource_id: str | None = None

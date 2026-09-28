@@ -45,6 +45,9 @@ class DocumentResponse(_SearchabilityMixin):
     status: str
     error_message: str | None = None
     uploaded_by: str | None = None
+    # K3: username (else email) of the uploader, so the admin UI shows a name
+    # instead of a raw user id (BUG-38).
+    uploaded_by_name: str | None = None
     tags: list[str] = []
     quarantined_chunk_count: int = 0
     # BUG-18: the collection picker needs to know which documents are already
@@ -78,6 +81,8 @@ class DocumentDetailResponse(_SearchabilityMixin):
     chunk_count: int
     status: str
     quarantined_chunk_count: int = 0
+    uploaded_by: str | None = None
+    uploaded_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
     chunks: list[ChunkInfo] = []

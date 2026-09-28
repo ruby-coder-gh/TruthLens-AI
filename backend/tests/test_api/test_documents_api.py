@@ -171,6 +171,57 @@ async def test_list_documents(client: AsyncClient, auth_headers: dict[str, str],
 
 
 @pytest.mark.asyncio
+async def test_list_documents_includes_uploaded_by_name(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """K3/BUG-38: the list carries the uploader's display name (username),
+    not just their opaque user id, so the admin UI can show a name instead
+    of a raw UUID."""
+    await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("uploader_name.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    assert resp.status_code == 200
+    row = next(d for d in resp.json()["data"] if d["original_filename"] == "uploader_name.txt")
+    assert row["uploaded_by_name"] == "authtest"
+
+
+@pytest.mark.asyncio
+async def test_list_documents_uploaded_by_name_falls_back_to_email(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str, test_db: AsyncSession
+):
+    """K3: when a user row has no username, uploaded_by_name falls back to email."""
+    from app.models.document import Document
+    from app.models.user import User
+
+    no_username = User(
+        email="no-username@example.com", username="", password_hash="x", role="user", is_active=True
+    )
+    test_db.add(no_username)
+    await test_db.commit()
+    await test_db.refresh(no_username)
+
+    test_db.add(Document(
+        workspace_id=workspace_id,
+        filename="no_username.txt",
+        original_filename="no_username.txt",
+        mime_type="text/plain",
+        file_size=4,
+        status="ready",
+        uploaded_by=no_username.id,
+    ))
+    await test_db.commit()
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    assert resp.status_code == 200
+    row = next(d for d in resp.json()["data"] if d["original_filename"] == "no_username.txt")
+    assert row["uploaded_by_name"] == "no-username@example.com"
+
+
+@pytest.mark.asyncio
 async def test_list_documents_reports_collection_id(
     client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
 ):
@@ -298,6 +349,26 @@ async def test_get_document(client: AsyncClient, auth_headers: dict[str, str], w
     )
     assert resp.status_code == 200
     assert resp.json()["id"] == doc_id
+
+
+@pytest.mark.asyncio
+async def test_get_document_includes_uploaded_by_name(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """K3: the document detail view also carries uploaded_by_name (BUG-38)."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("detail_uploader.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["uploaded_by_name"] == "authtest"
 
 
 @pytest.mark.asyncio

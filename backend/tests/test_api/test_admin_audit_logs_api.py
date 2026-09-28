@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
+from app.models.user import User
 
 
 async def _seed_logs(test_db: AsyncSession) -> None:
@@ -136,6 +137,67 @@ async def test_audit_logs_created_at_is_tz_aware(
         parsed = datetime.fromisoformat(created_at_raw.replace("Z", "+00:00"))
         assert parsed.tzinfo is not None
         assert parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_include_user_name(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """K3/BUG-36: rows carry the actor's display name (username), not just the
+    raw user_id, so the admin UI's USER column can show a name."""
+    actor = User(
+        email="al-actor@example.com", username="alactor", password_hash="x", role="user", is_active=True
+    )
+    test_db.add(actor)
+    await test_db.commit()
+    await test_db.refresh(actor)
+
+    test_db.add(AuditLog(
+        user_id=actor.id, action="document.upload", resource_type="document", resource_id="doc-name-x",
+    ))
+    await test_db.commit()
+
+    resp = await client.get("/api/admin/logs?action=document.upload", headers=admin_headers)
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["data"] if r["resource_id"] == "doc-name-x")
+    assert row["user_name"] == "alactor"
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_user_name_falls_back_to_email(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """K3: when the actor's user row has no username, user_name falls back to email."""
+    actor = User(
+        email="al-noname@example.com", username="", password_hash="x", role="user", is_active=True
+    )
+    test_db.add(actor)
+    await test_db.commit()
+    await test_db.refresh(actor)
+
+    test_db.add(AuditLog(
+        user_id=actor.id, action="document.upload", resource_type="document", resource_id="doc-name-y",
+    ))
+    await test_db.commit()
+
+    resp = await client.get("/api/admin/logs?action=document.upload", headers=admin_headers)
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["data"] if r["resource_id"] == "doc-name-y")
+    assert row["user_name"] == "al-noname@example.com"
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_user_name_null_for_system_actions(
+    client: AsyncClient, admin_headers: dict[str, str], test_db: AsyncSession
+):
+    """K3: a row with no user_id (system-generated) has user_name: null, not an error."""
+    test_db.add(AuditLog(action="document.upload", resource_type="document", resource_id="doc-name-z"))
+    await test_db.commit()
+
+    resp = await client.get("/api/admin/logs?action=document.upload", headers=admin_headers)
+    assert resp.status_code == 200
+    row = next(r for r in resp.json()["data"] if r["resource_id"] == "doc-name-z")
+    assert row["user_name"] is None
 
 
 # ─── SEC-1 (LOW): LIKE wildcards in the `q` filter ───────────────────
