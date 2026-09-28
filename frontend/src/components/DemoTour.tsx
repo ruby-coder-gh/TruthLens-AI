@@ -10,7 +10,6 @@
 //      never again collide with a page's header row.
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ChevronDown, ChevronUp, X, ArrowRight } from 'lucide-react';
 import { Badge, type BadgeColor } from './ui';
 import { useReady, type UseReadyResult } from '../hooks/useReady';
@@ -231,14 +230,13 @@ export function DemoTourButton() {
           `fixed inset-x-4` clamps the panel to the viewport itself — it can
           never go off either edge — then `sm:` reverts to the original
           trigger-anchored popover once there's room for one. */}
-      <AnimatePresence>
-        {!state.collapsed && (
-          <motion.div
+      {/* Plain element, no exit animation: under Framer Motion v12 (WAAPI) an
+          exit animation can stall, so AnimatePresence never unmounted the
+          panel — it stayed on screen at opacity 1 over the next page and
+          blocked header clicks (R3-2, QA4). */}
+      {!state.collapsed && (
+          <div
             id="demo-tour-panel"
-            initial={{ opacity: 0.99, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="fixed inset-x-4 top-14 z-40 w-auto rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 sm:max-w-[calc(100vw-2rem)]"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
@@ -285,9 +283,8 @@ export function DemoTourButton() {
                 </li>
               ))}
             </ol>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+      )}
     </div>
   );
 }
