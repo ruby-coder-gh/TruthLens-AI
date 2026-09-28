@@ -7,7 +7,7 @@
 // progress, never as a failure state.
 //
 // Exports both the component and its pure step-derivation helper (for a
-// fast unit test) — same pattern as AnswerBody's test-only export.
+// fast unit test).
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';

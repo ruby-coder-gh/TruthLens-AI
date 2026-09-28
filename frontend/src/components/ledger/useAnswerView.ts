@@ -1,7 +1,6 @@
 // Claim Ledger (Lane D1) — "Claim ledger | Read as prose" toggle. One
 // module-level, localStorage-persisted flag shared by every answer on the
-// page (and by ChatDetailPage), same pub-sub pattern the old Truth Lens
-// toggle used in AnswerBody. Defaults to the ledger — that's the hero view.
+// page (and by ChatDetailPage). Defaults to the ledger — that's the hero view.
 import { useSyncExternalStore } from 'react';
 
 export type AnswerView = 'ledger' | 'prose';

@@ -4,8 +4,7 @@
 //
 // The chat-local header (old "VeritasRAG" title + "Chat active" pill +
 // Sources button + panel toggle) is gone — the top bar is now D2's Layout.
-// EvidenceSidebar is no longer mounted here (kept for ChatDetailPage/other
-// callers, not deleted). Every claim's evidence now lives inline in the
+// Every claim's evidence now lives inline in the
 // Claim Ledger; every source lives in the Exhibits list below it.
 import { useState, useRef, useEffect, useCallback, useMemo, memo, type FormEvent, type KeyboardEvent } from 'react';
 import { useParams, useLocation } from 'react-router-dom';

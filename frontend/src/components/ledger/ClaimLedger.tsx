@@ -3,8 +3,7 @@
 // exact evidence sentence it cites. Design brief item 4 (+5 for conflicts).
 //
 // Exports two DOM-lookup helpers (flashRowById/flashRows) alongside the
-// component, for the answer-head tally chips — same pattern as AnswerBody's
-// test-only export.
+// component, for the answer-head tally chips.
 /* eslint-disable react-refresh/only-export-components */
 import { useCallback, useState } from 'react';
 import { clsx } from 'clsx';
