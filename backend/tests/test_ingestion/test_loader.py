@@ -140,6 +140,16 @@ async def test_load_docx_separates_paragraphs_with_blank_lines(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_load_markdown_separates_blocks_with_blank_lines(tmp_path: Path):
+    path = tmp_path / "update.md"
+    path.write_text("## Project update\nAurora is expected to commission in\nthe third quarter of 2027.\n")
+
+    pages = await load(path, "text/markdown")
+
+    assert pages[0]["text"] == "Project update\n\nAurora is expected to commission in\nthe third quarter of 2027."
+
+
+@pytest.mark.asyncio
 async def test_load_pdf_rejoins_words_hyphenated_across_lines(tmp_path: Path):
     import fitz
 

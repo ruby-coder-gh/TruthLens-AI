@@ -126,9 +126,9 @@ def _load_markdown(path: Path) -> list[dict[str, Any]]:
     raw = path.read_text(encoding="utf-8", errors="replace")
     # Strip markdown formatting to plain text
     html = markdown.markdown(raw)
-    # Simple HTML-to-text extraction
-    import re
-    text = re.sub(r"<[^>]+>", "", html)
+    # Simple HTML-to-text extraction; blank line between blocks (headings,
+    # paragraphs, list items), as for PDF/DOCX.
+    text = re.sub(r"<[^>]+>", "", html.replace(">\n<", ">\n\n<"))
     text = text.strip()
 
     if not text:

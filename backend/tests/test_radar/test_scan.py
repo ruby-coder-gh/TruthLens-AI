@@ -455,6 +455,26 @@ def test_sentences_break_at_heading_lines_and_rejoin_soft_wrapped_prose():
     ]
 
 
+def test_sentences_rejoin_a_wrap_after_a_lowercase_word_or_comma():
+    """Hard-wrapped markdown (leadership page) left fragments like "€2 billion of renewable
+    energy transactions." when the next line opened with a capital or a currency sign."""
+    from app.radar.scan import _sentences
+
+    text = (
+        "Marcus joined in 2020 from a fund, where he led over\n"
+        "€2 billion of renewable energy transactions. Before joining\n"
+        "Northwind Renewables, Dana spent eleven years at a developer.\n"
+        "Executive Committee\n"
+        "Dana Whitfield became Chief Executive Officer in January 2022."
+    )
+
+    assert _sentences(text) == [
+        "Marcus joined in 2020 from a fund, where he led over €2 billion of renewable energy transactions.",
+        "Before joining Northwind Renewables, Dana spent eleven years at a developer.",
+        "Dana Whitfield became Chief Executive Officer in January 2022.",
+    ]
+
+
 def test_sentences_strip_markdown_emphasis():
     from app.radar.scan import _sentences
 

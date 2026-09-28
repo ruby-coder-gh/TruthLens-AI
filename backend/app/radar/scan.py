@@ -57,9 +57,13 @@ MIN_SENTENCE_WORDS = 4
 # something else (group capex guidance vs project capex estimate, 0.0-0.19).
 MIN_SUBJECT_OVERLAP = 0.34
 
-# A line break before a lowercase letter, digit or "(" continues a hard-wrapped
-# sentence; any other line break (heading, label, list item, table row) ends one.
-_SOFT_WRAP = re.compile(r"[ \t]*\n[ \t]*(?=[a-z0-9(])")
+# A single line break inside a hard-wrapped sentence: the line ends on a
+# lowercase word or a comma, or the next opens with a lowercase letter, digit,
+# "(" or currency sign. Any other break (blank line, heading, label, list item,
+# table row) ends a sentence.
+# ponytail: a sentence-case heading ending in a lowercase word ("Project update")
+# with no blank line after it still glues on; loaders emit blank lines between blocks.
+_SOFT_WRAP = re.compile(r"(\b[a-z][\w'’-]*,?|,)[ \t]*\n[ \t]*(?=\S)|[ \t]*\n[ \t]*(?=[a-z0-9(€$£])")
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n")
 _LEADING_MARKUP = re.compile(r"^[-*•#|>\s]+")
 _EMPHASIS = re.compile(r"\*\*|__")
@@ -362,7 +366,8 @@ def _candidate_pairs(collection: Any, chunks: list[tuple[_Chunk, Any]]) -> list[
 def _sentences(text: str) -> list[str]:
     """Whole prose sentences of a chunk: no headings, labels, table rows or cut-off fragments."""
     out: list[str] = []
-    for part in _SENTENCE_BREAK.split(_SOFT_WRAP.sub(" ", _EMPHASIS.sub("", text))):
+    unwrapped = _SOFT_WRAP.sub(lambda m: (m.group(1) or "") + " ", _EMPHASIS.sub("", text))
+    for part in _SENTENCE_BREAK.split(unwrapped):
         sentence = _LEADING_MARKUP.sub("", " ".join(part.split()))
         words = sentence.split()
         numeric = sum(not any(ch.isalpha() for ch in word) for word in words)
