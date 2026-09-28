@@ -1015,6 +1015,8 @@ export interface ReadyStatus {
   warm: boolean;
   ollama: { reachable: boolean; model: string; model_present: boolean };
   models: { embedder: ModelWarmState; reranker: ModelWarmState; nli: ModelWarmState };
+  /** Present when a demo corpus has been seeded (lane L9). */
+  demo_workspace_id?: string | null;
 }
 
 export type DemoPersona = 'analyst' | 'admin';
