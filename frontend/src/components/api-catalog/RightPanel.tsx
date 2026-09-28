@@ -137,15 +137,11 @@ function LiveStatus() {
           <span className="text-text-muted">Background Jobs</span>
           <span className="flex items-center gap-1.5 text-accent-2">
             <span className="w-1.5 h-1.5 rounded-full bg-accent-2 animate-pulse-dot" />
-            2 Active
+            {CATALOG_STATS.backgroundJobs} Active
           </span>
         </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-text-muted">Uptime</span>
-          <span className="flex items-center gap-1.5 text-text font-mono">
-            {CATALOG_STATS.uptime}%
-          </span>
-        </div>
+        {/* BUG-44: dropped a fabricated "Uptime %" — this app has no SLA
+            tracking behind that number. */}
       </div>
     </div>
   );
