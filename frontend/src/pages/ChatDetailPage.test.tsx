@@ -4,12 +4,15 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import ChatDetailPage from './ChatDetailPage';
+import { __resetAnswerViewForTests } from '../components/ledger/useAnswerView';
 import type { QueryDetail, Claim } from '../api/types';
 
 const { getAnywhere } = vi.hoisted(() => ({ getAnywhere: vi.fn() }));
 
 vi.mock('../api/client', () => ({
   queryApi: { getAnywhere },
+  radarApi: { get: vi.fn().mockResolvedValue({ latest_scan: null, contradictions: [], counts: { open: 0, dismissed: 0, resolved: 0 } }) },
+  receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
   // ChatDetailPage mounts <AnnotationThread>, which counts annotations on mount.
   annotationApi: { count: vi.fn().mockResolvedValue({ count: 0 }), list: vi.fn().mockResolvedValue({ items: [] }) },
 }));
@@ -64,9 +67,10 @@ function renderDetail(queryId = 'q-1') {
 describe('ChatDetailPage', () => {
   beforeEach(() => {
     getAnywhere.mockReset();
+    __resetAnswerViewForTests();
   });
 
-  it('renders the answer as markdown with resolved citations, not raw [source:N] markers', async () => {
+  it('renders the answer as prose with resolved citations, not raw [source:N] markers', async () => {
     getAnywhere.mockResolvedValue(
       makeQuery({ response_text: 'Revenue **grew** 12%. [source:1]', response_sources: [] }),
     );
@@ -83,7 +87,7 @@ describe('ChatDetailPage', () => {
     expect(screen.queryByText(/\[source:1\]/)).not.toBeInTheDocument();
   });
 
-  it('shows the Truth Lens summary chip and toggle when the query carries claims', async () => {
+  it('shows the claim ledger by default when the query carries claims', async () => {
     getAnywhere.mockResolvedValue(
       makeQuery({
         response_text: 'Revenue grew 12%.',
@@ -94,35 +98,47 @@ describe('ChatDetailPage', () => {
 
     renderDetail();
 
-    await waitFor(() => expect(screen.getByText('1 claim · 1 verified')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /truth lens/i })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('C1')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Claim ledger' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Read as prose' })).toBeInTheDocument();
   });
 
-  it('toggling the lens renders a verdict-styled span for the claim', async () => {
+  it('switching to "Read as prose" renders the claim text with a verdict icon, not a ledger row', async () => {
     const user = userEvent.setup();
     getAnywhere.mockResolvedValue(
       makeQuery({
         response_text: 'Revenue grew 12%. Costs were stable.',
         response_sources: [],
-        claims: [makeClaim({ text: 'Revenue grew 12%.', verdict: 'supported' })],
+        claims: [makeClaim({ text: 'Revenue grew 12%.', start: 0, end: 18, verdict: 'supported' })],
       }),
     );
 
     renderDetail();
 
-    await waitFor(() => screen.getByRole('button', { name: /truth lens/i }));
-    await user.click(screen.getByRole('button', { name: /truth lens/i }));
+    await waitFor(() => screen.getByRole('button', { name: 'Read as prose' }));
+    await user.click(screen.getByRole('button', { name: 'Read as prose' }));
 
-    const span = screen.getByRole('button', { name: /supported claim/i });
-    expect(span).toHaveTextContent('Revenue grew 12%.');
+    expect(screen.queryByText('C1')).not.toBeInTheDocument();
+    expect(screen.getByText('(verified)')).toBeInTheDocument();
   });
 
-  it('renders nothing Truth-Lens-related when the query has no claims', async () => {
+  it('renders no ledger/prose toggle when the query has no claims', async () => {
     getAnywhere.mockResolvedValue(makeQuery({ response_sources: [] }));
 
     renderDetail();
 
     await waitFor(() => expect(screen.getByText('How did revenue perform?')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /truth lens/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Claim ledger' })).not.toBeInTheDocument();
+  });
+
+  it('shows an abstention card instead of the ledger when the query abstained', async () => {
+    getAnywhere.mockResolvedValue(
+      makeQuery({ response_text: "I don't have enough evidence to answer that.", edge_case: 'insufficient_evidence', response_sources: [] }),
+    );
+
+    renderDetail();
+
+    await waitFor(() => expect(screen.getByText(/enough evidence/)).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Claim ledger' })).not.toBeInTheDocument();
   });
 });

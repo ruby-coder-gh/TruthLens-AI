@@ -26,6 +26,15 @@ export interface QueryCompleteResult {
   sufficiency?: SufficiencyVerdict | null;
 }
 
+/** Counters attached to a `progress` frame — which fields are set depends on
+ *  the phase (see backend/app/api/ws.py's `sink.emit("progress", …)` calls). */
+export interface QueryProgressDetail {
+  found: number | null;
+  kept: number | null;
+  words: number | null;
+  elapsedMs: number | null;
+}
+
 export interface QueryWebSocketCallbacks {
   onToken?: (token: string) => void;
   onSource?: (source: Source) => void;
@@ -40,7 +49,13 @@ export interface QueryWebSocketCallbacks {
   onTrustScore?: (score: number, components: Record<string, number>) => void;
   onComplete?: (result: QueryCompleteResult) => void;
   onError?: (code: string, message: string) => void;
-  onProgress?: (phase: string, progress: number) => void;
+  /**
+   * `detail` carries whatever counters the backend attached to this phase's
+   * frame (see api/ws.py) — Claim Ledger's audit trail (Lane D1) uses them for
+   * "16 found", "kept the top 5", word/claim tallies. Always present (possibly
+   * all-null) so callers don't need an `undefined` check on top of each field.
+   */
+  onProgress?: (phase: string, progress: number, detail: QueryProgressDetail) => void;
   /** The socket dropped mid-stream; attempt `attempt` of `WS_RECONNECT_MAX` is pending. */
   onReconnecting?: (attempt: number) => void;
   /** A reconnect succeeded and the stream is flowing again — clear any "reconnecting" UI. */
@@ -100,6 +115,11 @@ interface WSMessagePayload {
   message?: string;
   phase?: string;
   progress?: number;
+  /** `progress` frame counters — see QueryProgressDetail. */
+  found?: number;
+  kept?: number;
+  words?: number;
+  elapsed_ms?: number;
   index?: number;
   /** `resumed` only — the `last_seq` the replay started from. */
   from_seq?: number;
@@ -499,7 +519,12 @@ export class QueryWebSocket {
       }
 
       case 'progress': {
-        this.callbacks.onProgress?.(payload.phase ?? '', payload.progress ?? 0);
+        this.callbacks.onProgress?.(payload.phase ?? '', payload.progress ?? 0, {
+          found: payload.found ?? null,
+          kept: payload.kept ?? null,
+          words: payload.words ?? null,
+          elapsedMs: payload.elapsed_ms ?? null,
+        });
         break;
       }
 
