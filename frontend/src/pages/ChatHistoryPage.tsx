@@ -46,7 +46,9 @@ export default function ChatHistoryPage() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    queryApi.listAll()
+    // K6/R2-1: without `mine`, /chats returned every workspace member's
+    // queries — a viewer could see (and delete) the owner's chat history.
+    queryApi.listAll({ mine: true })
       .then((result) => {
         setChats(result.data || []);
         setLoading(false);
