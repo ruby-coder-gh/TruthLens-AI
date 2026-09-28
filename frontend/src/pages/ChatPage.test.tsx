@@ -163,6 +163,16 @@ describe('ChatPage', () => {
     expect(screen.getByText('What would you like to verify?')).toBeInTheDocument();
   });
 
+  it('scrolls only inside <main> — no second overflow container (R2-8)', () => {
+    const { container } = renderChatPage();
+
+    // `<main>` (Layout.tsx) is the sole scroll container; this page must not
+    // add its own `overflow-y-auto` region, which used to draw a second,
+    // nested scrollbar.
+    expect(container.querySelector('#chat-scroll')).not.toHaveClass('overflow-y-auto');
+    expect(document.querySelectorAll('.overflow-y-auto')).toHaveLength(0);
+  });
+
   it('constructs a QueryWebSocket with the workspace id + text and connects on Enter', async () => {
     const user = userEvent.setup();
     renderChatPage();

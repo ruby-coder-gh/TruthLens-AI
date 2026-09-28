@@ -474,43 +474,46 @@ function ChatPageForConversation() {
     onError: () => addToast('Failed to submit feedback', 'error'),
   });
 
+  // R2-8: `<main>` (Layout.tsx, not this lane's file) already scrolls the
+  // page — this used to *also* scroll internally (`#chat-scroll` +
+  // `h-full flex-col`), drawing two nested scrollbars. Now there's a single
+  // scroll container (`<main>`); the composer sticks to its bottom edge
+  // instead of being pinned by a flex-1/h-full split.
   return (
-    <div className="-m-4 flex h-full flex-col lg:-m-6">
-      <div className="min-h-0 flex-1 overflow-y-auto" id="chat-scroll">
-        <div className="mx-auto max-w-[880px] px-4 py-8 sm:px-6">
-          {messages.length === 0 ? (
-            <EmptyChatState workspaceId={workspaceId} workspace={workspace} onPick={(q) => startQuery(q)} />
-          ) : (
-            <div className="space-y-10">
-              <AnimatePresence initial={false}>
-                {messages.map((msg) =>
-                  msg.role === 'user' ? (
-                    <UserTurn key={msg.id} message={msg} username={user?.username} />
-                  ) : (
-                    <AnswerTurn
-                      key={msg.id}
-                      message={msg}
-                      workspaceId={workspaceId}
-                      documentCount={workspace?.document_count ?? null}
-                      contradictions={contradictions}
-                      onCopy={handleCopy}
-                      onExport={() => msg.queryId && handleExport(msg.queryId)}
-                      onFeedback={(rating) => msg.queryId && feedbackMutation.mutate({ queryId: msg.queryId, rating })}
-                      onRetry={() => handleRetry(msg.id)}
-                      onRegenerate={() => handleRegenerate(msg.id)}
-                      onRephrase={handleRephrase}
-                    />
-                  ),
-                )}
-              </AnimatePresence>
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
+    <div className="-m-4 lg:-m-6">
+      <div className="mx-auto max-w-[880px] px-4 py-8 sm:px-6" id="chat-scroll">
+        {messages.length === 0 ? (
+          <EmptyChatState workspaceId={workspaceId} workspace={workspace} onPick={(q) => startQuery(q)} />
+        ) : (
+          <div className="space-y-10">
+            <AnimatePresence initial={false}>
+              {messages.map((msg) =>
+                msg.role === 'user' ? (
+                  <UserTurn key={msg.id} message={msg} username={user?.username} />
+                ) : (
+                  <AnswerTurn
+                    key={msg.id}
+                    message={msg}
+                    workspaceId={workspaceId}
+                    documentCount={workspace?.document_count ?? null}
+                    contradictions={contradictions}
+                    onCopy={handleCopy}
+                    onExport={() => msg.queryId && handleExport(msg.queryId)}
+                    onFeedback={(rating) => msg.queryId && feedbackMutation.mutate({ queryId: msg.queryId, rating })}
+                    onRetry={() => handleRetry(msg.id)}
+                    onRegenerate={() => handleRegenerate(msg.id)}
+                    onRephrase={handleRephrase}
+                  />
+                ),
+              )}
+            </AnimatePresence>
+            <div ref={messagesEndRef} />
+          </div>
+        )}
       </div>
 
       {/* ─── Composer ────────────────────────────────────────────────────── */}
-      <div className="flex-none px-4 pb-4 pt-2 sm:px-6">
+      <div className="sticky bottom-0 z-10 bg-bg px-4 pb-4 pt-2 sm:px-6">
         <form onSubmit={handleSubmit} className="mx-auto max-w-[832px] rounded-panel border border-border-strong bg-solid shadow-e1 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--color-primary-tint)]">
           <label htmlFor="ask" className="sr-only">Ask a question about this workspace</label>
           <textarea
