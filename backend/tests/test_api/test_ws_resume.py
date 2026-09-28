@@ -179,6 +179,7 @@ class TestSeqNumbering:
             guardrail_score=0.9,
             guardrail_passed=True,
             trust_score=0.8,
+            trust_components=None,
             model_used="mock-model",
             token_count=3,
         )

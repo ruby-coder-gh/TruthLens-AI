@@ -38,7 +38,16 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | D1 Claim Ledger | merged | 7f8440e; FE gate 228 → aaba770 deleted dead AnswerBody/EvidenceSidebar/ReportBuilderWizard/ComparisonMatrix (225 tests, green). Live check OK; 8 known issues added to QA brief |
 | Full backend suite | pass | 1053 passed + 1 env-dependent fixed (68ccdfb) → effectively all green, 2 skipped; ruff clean |
 | User 2026-09-28 | directive | "fix all bugs and merge on main, test also admin panel" → QA told to cover every /admin route deeply |
-| Playwright QA round 1 | running | fresh demo seed ws ae7efa84-…; backend bound to localhost (sec fix confirmed); reports → reports/QA-playwright-{bugs,report}.md |
+| Playwright QA round 1 | FAIL | 43 routes (34 pass), 62 bugs S1 3 / S2 22 / S3 37; admin: Settings + Collections fail. reports committed 0359436 |
+| Fix round 1 | running | brief FIX-round1.md (contracts C1–C8), base 4ed2a08; lanes B, F1a, F1b, F2, F3 in worktrees; demo stopped for RAM |
+| Fix F1b | merged | 742122c — BUG-1,2,4,9,17,47 (231 tests) |
+| Fix F3 admin | merged | 62cb38a — BUG-11,18(edit/delete),23,35,36,37,38,39(role/rollback),40,42,44,57 (239 tests). DEFERRED → follow-up lane: BUG-18 add-docs-to-collection (needs BE endpoint), BUG-39 restore built-in default prompt (needs BE endpoint), BUG-43 pricing footnote (.env.example ships gpt-4o-mini pricing → set {} + local $0 copy) |
+| Fix F1a chat | merged | 0e52696 — BUG-4,5,6,8,9(chat),22,26,27,28,29,31,32,50(part),52,C1; SourceViewerContext conflict resolved; FE gate 280 green. FOLLOW-UP: cached replay trust components {} in ws.py _send_cached_query (BUG-50 BE); detail-page Regenerate = comparison re-run (product note) |
+| Fix B backend | merged | d2b5033 — 468 passed. BUG-7,9,11,15,16(partial),17,19,24,34,35,59,60 fixed; BUG-1 FE-only; BUG-10 async progress deferred (feature); BUG-16 residual synonym gap → next sprint |
+| Follow-up G | merged | c2342b5 — BUG-18, 39, 43, 50(BE) fixed; local backend/.env pricing set {} |
+| Fix F2 shell/pages | merged | 27 bugs; integrated FE gate: 319 tests, tsc/lint/build green |
+| Investigation async (BUG-10) | running | lane H: 202 + background job + progress registry + polling UI + sub-question caps |
+| Playwright QA round 1 (detail) | done | fresh demo seed ws ae7efa84-…; backend bound to localhost (sec fix confirmed); reports → reports/QA-playwright-{bugs,report}.md |
 | Merge + gates | in progress | next: full suite → restart demo → Playwright QA → fix → re-sweep → PR+merge; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
 | Security + review | pending | |
 | Playwright full sweep | pending | user explicit ask |
