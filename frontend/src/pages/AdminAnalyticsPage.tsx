@@ -404,10 +404,23 @@ export default function AdminAnalyticsPage() {
   // faster later one (e.g. "model") and clobber the table with stale rows.
   const usageRequestIdRef = useRef(0);
 
+  // BUG-57. An inverted range (`from` after `to`) reached the API and came
+  // back with zero rows, which rendered as the ordinary "No usage recorded"
+  // empty state — indistinguishable from a real empty period.
+  const usageDateRangeInvalid = usageDateFrom > usageDateTo;
+
   const loadUsage = useCallback(async () => {
     const requestId = usageRequestIdRef.current + 1;
     usageRequestIdRef.current = requestId;
     const isStale = () => usageRequestIdRef.current !== requestId;
+
+    if (usageDateFrom > usageDateTo) {
+      setUsageLoading(false);
+      setUsageError(null);
+      setUsageRows([]);
+      setUsageTotals(ZERO_USAGE_TOTALS);
+      return;
+    }
 
     setUsageLoading(true);
     setUsageError(null);
@@ -1047,7 +1060,11 @@ export default function AdminAnalyticsPage() {
                   </div>
                 </div>
 
-                {usageLoading ? (
+                {usageDateRangeInvalid ? (
+                  <StateBlock tone="danger" role="alert">
+                    The &quot;From&quot; date is after the &quot;To&quot; date — pick a valid range.
+                  </StateBlock>
+                ) : usageLoading ? (
                   <StateBlock role="status">Loading usage report…</StateBlock>
                 ) : usageError ? (
                   <StateBlock tone="danger" role="alert">{usageError}</StateBlock>

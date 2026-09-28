@@ -235,6 +235,23 @@ describe('AdminAnalyticsPage — Usage tab', () => {
     });
   });
 
+  // BUG-57: an inverted range used to reach the API and come back as an
+  // ordinary empty result, indistinguishable from "nothing happened".
+  it('flags an inverted date range instead of silently fetching it', async () => {
+    renderWithProviders(<AdminAnalyticsPage />);
+    await openUsageTab();
+
+    await waitFor(() => expect(mockedAdminApi.getUsage).toHaveBeenCalledTimes(1));
+    mockedAdminApi.getUsage.mockClear();
+
+    // Default "From" is 30 days ago — one change to "To" landing before it
+    // is enough to invert the range in a single update.
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-01' } });
+
+    expect(await screen.findByText(/after the .To. date/i)).toBeInTheDocument();
+    expect(mockedAdminApi.getUsage).not.toHaveBeenCalled();
+  });
+
   it('ignores a stale response when a newer group-by fetch resolves out of order', async () => {
     const pending: Record<string, (value: UsageReportResponse) => void> = {};
     mockedAdminApi.getUsage.mockImplementation(
