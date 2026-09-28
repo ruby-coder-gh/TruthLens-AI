@@ -288,6 +288,101 @@ async def test_delete_query_no_access(
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_delete_query_viewer_cannot_delete_others_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6/R2-1: a viewer member can't delete another member's query (only
+    their own, or an owner/editor/admin can)."""
+    owner = User(email="del-owner@example.com", username="delowner", password_hash="x", role="user", is_active=True)
+    viewer = User(email="del-viewer@example.com", username="delviewer", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, viewer])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(viewer)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    viewer_headers = {"Authorization": f"Bearer {create_access_token(viewer.id, viewer.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
+    query = Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=viewer_headers,
+    )
+    assert resp.status_code == 403
+
+    # The query still exists.
+    get_resp = await client.get(f"/api/workspaces/{ws_id}/queries/{query.id}", headers=owner_headers)
+    assert get_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_query_viewer_can_delete_own_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6: a viewer can always delete a query they authored themselves."""
+    owner = User(email="del-owner2@example.com", username="delowner2", password_hash="x", role="user", is_active=True)
+    viewer = User(email="del-viewer2@example.com", username="delviewer2", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, viewer])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(viewer)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    viewer_headers = {"Authorization": f"Bearer {create_access_token(viewer.id, viewer.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS 2"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
+    query = Query(workspace_id=ws_id, user_id=viewer.id, query_text="Viewer's own question")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=viewer_headers,
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_query_editor_can_delete_others_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6: an editor member can delete another member's query."""
+    owner = User(email="del-owner3@example.com", username="delowner3", password_hash="x", role="user", is_active=True)
+    editor = User(email="del-editor3@example.com", username="deleditor3", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, editor])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(editor)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    editor_headers = {"Authorization": f"Bearer {create_access_token(editor.id, editor.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS 3"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=editor.id, role="editor"))
+    query = Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question 3")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=editor_headers,
+    )
+    assert resp.status_code == 204
+
+
 # ── Export ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
