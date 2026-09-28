@@ -66,7 +66,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Cache-Control"] = "no-cache"
-        if request.url.path.startswith("/api/auth"):
+        if request.url.path.startswith("/api/auth") or request.url.path.startswith("/api/receipts"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
