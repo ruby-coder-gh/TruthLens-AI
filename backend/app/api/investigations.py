@@ -15,9 +15,11 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.stream_registry import track_task
 from app.config import settings
 from app.core.deps import check_workspace_access, get_current_user, get_db, require_workspace_editor
 from app.core.exceptions import InvalidInputException, NotFoundException
+from app.graph import investigation_progress
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.document import Document
@@ -26,9 +28,12 @@ from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.common import PaginatedResponse
 from app.schemas.investigation import (
+    InvestigationProgressResponse,
     InvestigationRequest,
     InvestigationResponse,
     InvestigationReviewUpdate,
+    InvestigationStartResponse,
+    InvestigationSubQuestionProgress,
     InvestigationSummary,
 )
 from app.report_export import render_investigation_markdown
@@ -106,10 +111,104 @@ async def _require_reviewer(
     await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
 
 
+async def _run_investigation_background(
+    *,
+    investigation_id: str,
+    workspace_id: str,
+    user_id: str | None,
+    query: str,
+    top_k: int,
+    filters: dict[str, Any] | None,
+) -> None:
+    """Background task: run the graph, persist the case, close out its progress entry.
+
+    Runs after the API has already returned 202 — the request's DB session is
+    long gone by the time this finishes, so it owns its own (same pattern as
+    `documents.process_document_background` and radar's `start_scan_task`).
+    Any exception here (including one `run_investigation` itself didn't
+    catch) still finishes the progress entry as failed, or a client that
+    started polling would poll forever.
+    """
+    from app.database import async_session_factory
+    from app.graph.investigation import run_investigation
+
+    logger.info("investigation_background_started", investigation_id=investigation_id, workspace_id=workspace_id)
+
+    try:
+        result = await asyncio.to_thread(
+            run_investigation,
+            query=query,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            top_k=top_k,
+            filters=filters,
+            investigation_id=investigation_id,
+        )
+    except Exception as e:
+        logger.error("investigation_background_crashed", investigation_id=investigation_id, error=str(e))
+        async with async_session_factory() as session:
+            case = await session.get(Investigation, investigation_id)
+            if case:
+                case.error = str(e)
+                case.review_status = "needs_changes"
+                await session.commit()
+        investigation_progress.finish(investigation_id, status="failed", latency_ms=0, error=str(e))
+        return
+
+    async with async_session_factory() as session:
+        case = await session.get(Investigation, investigation_id)
+        if not case:
+            logger.warning("investigation_background_row_missing", investigation_id=investigation_id)
+            investigation_progress.finish(
+                investigation_id, status="failed", latency_ms=result.get("latency_ms", 0),
+                error="Investigation record missing",
+            )
+            return
+        case.final_report = result.get("final_report", "")
+        case.sub_questions = result.get("sub_questions", [])
+        case.reasoning_trace = result.get("reasoning_trace", [])
+        case.trust_components = result.get("trust_components", {})
+        case.trust_score = result.get("trust_score")
+        case.latency_ms = result.get("latency_ms", 0)
+        case.error = result.get("error")
+        case.review_status = "needs_changes" if result.get("error") else "draft"
+        session.add(
+            AuditLog(
+                user_id=user_id,
+                action="investigation.create",
+                resource_type="investigation",
+                resource_id=investigation_id,
+                details=json.dumps(
+                    {
+                        "workspace_id": workspace_id,
+                        "trust_score": case.trust_score,
+                        "latency_ms": case.latency_ms,
+                        "has_error": bool(case.error),
+                        "sub_question_count": len(case.sub_questions or []),
+                    }
+                ),
+            )
+        )
+        await session.commit()
+
+    investigation_progress.finish(
+        investigation_id,
+        status="failed" if result.get("error") else "done",
+        latency_ms=result.get("latency_ms", 0),
+        error=result.get("error"),
+    )
+    logger.info(
+        "investigation_background_complete",
+        investigation_id=investigation_id,
+        trust_score=result.get("trust_score"),
+        latency_ms=result.get("latency_ms", 0),
+    )
+
+
 @router.post(
     "/workspaces/{workspace_id}/investigate",
-    response_model=InvestigationResponse,
-    status_code=201,
+    response_model=InvestigationStartResponse,
+    status_code=202,
 )
 async def investigate(
     workspace_id: str,
@@ -118,65 +217,44 @@ async def investigate(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run a grounded investigation and persist its reproducible case snapshot."""
-    from app.graph.investigation import run_investigation
+    """Start a grounded investigation as a tracked background job; returns 202 at once (BUG-10).
 
-    logger.info(
-        "investigation_api_started",
-        query=body.query[:100],
-        workspace_id=workspace_id,
-        user_id=current_user.id,
-    )
-    result = await asyncio.to_thread(
-        run_investigation,
-        query=body.query,
-        workspace_id=workspace_id,
-        user_id=current_user.id,
-        top_k=body.top_k,
-        filters=body.filters,
-    )
-
+    Poll `GET .../investigations/{id}/progress` for step-by-step status; the
+    full report lands there (and on the plain GET) once `status` != `running`.
+    """
     case = Investigation(
         workspace_id=workspace_id,
         user_id=current_user.id,
         query_text=body.query,
-        final_report=result.get("final_report", ""),
-        sub_questions=result.get("sub_questions", []),
-        reasoning_trace=result.get("reasoning_trace", []),
-        trust_components=result.get("trust_components", {}),
-        trust_score=result.get("trust_score"),
-        latency_ms=result.get("latency_ms", 0),
-        error=result.get("error"),
-        review_status="needs_changes" if result.get("error") else "draft",
+        final_report="",
+        review_status="draft",
     )
     db.add(case)
     await db.flush()
     await db.refresh(case)
-    db.add(
-        AuditLog(
+
+    investigation_progress.start(case.id)
+
+    task = asyncio.create_task(
+        _run_investigation_background(
+            investigation_id=case.id,
+            workspace_id=workspace_id,
             user_id=current_user.id,
-            action="investigation.create",
-            resource_type="investigation",
-            resource_id=case.id,
-            details=json.dumps(
-                {
-                    "workspace_id": workspace_id,
-                    "trust_score": case.trust_score,
-                    "latency_ms": case.latency_ms,
-                    "has_error": bool(case.error),
-                    "sub_question_count": len(case.sub_questions or []),
-                }
-            ),
+            query=body.query,
+            top_k=body.top_k,
+            filters=body.filters,
         )
     )
+    track_task(task)
 
     logger.info(
-        "investigation_api_complete",
+        "investigation_api_started",
         investigation_id=case.id,
-        trust_score=case.trust_score,
-        latency_ms=case.latency_ms,
+        query=body.query[:100],
+        workspace_id=workspace_id,
+        user_id=current_user.id,
     )
-    return _to_response(case)
+    return InvestigationStartResponse(id=case.id, workspace_id=workspace_id, status="running")
 
 
 @router.get(
@@ -245,6 +323,76 @@ async def get_investigation(
     if not case:
         raise NotFoundException("Investigation", investigation_id)
     return _to_response(case)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/investigations/{investigation_id}/progress",
+    response_model=InvestigationProgressResponse,
+)
+async def get_investigation_progress(
+    workspace_id: str,
+    investigation_id: str,
+    workspace: Workspace = Depends(check_workspace_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Poll a background investigation run's step/sub-question progress (BUG-10)."""
+    case = (
+        await db.execute(
+            select(Investigation).where(
+                Investigation.id == investigation_id,
+                Investigation.workspace_id == workspace.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not case:
+        raise NotFoundException("Investigation", investigation_id)
+
+    snapshot = investigation_progress.get(investigation_id)
+    if snapshot is None:
+        # The registry is process-local and unbounded-but-volatile (see
+        # `investigation_progress`'s module docstring) — a restart loses
+        # in-flight progress. A finished row still reports correctly from
+        # the DB; a row that was still running when the process died has no
+        # honest "step" to report, so surface it as failed rather than
+        # leaving the client polling forever.
+        if case.final_report or case.error:
+            return InvestigationProgressResponse(
+                id=case.id,
+                query=case.query_text,
+                status="failed" if case.error else "done",
+                step="failed" if case.error else "done",
+                done_steps=1,
+                total_steps=1,
+                sub_questions=[],
+                elapsed_ms=case.latency_ms,
+                error=case.error,
+                report=_to_response(case),
+            )
+        return InvestigationProgressResponse(
+            id=case.id,
+            query=case.query_text,
+            status="failed",
+            step="failed",
+            done_steps=0,
+            total_steps=1,
+            sub_questions=[],
+            elapsed_ms=0,
+            error="Progress tracking was lost (the server restarted). Retry the investigation.",
+        )
+
+    report = _to_response(case) if snapshot["status"] != "running" else None
+    return InvestigationProgressResponse(
+        id=case.id,
+        query=case.query_text,
+        status=snapshot["status"],
+        step=snapshot["step"],
+        done_steps=snapshot["done_steps"],
+        total_steps=snapshot["total_steps"],
+        sub_questions=[InvestigationSubQuestionProgress(**sq) for sq in snapshot["sub_questions"]],
+        elapsed_ms=snapshot["elapsed_ms"],
+        error=snapshot["error"],
+        report=report,
+    )
 
 
 @router.patch(

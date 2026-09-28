@@ -103,6 +103,8 @@ function AppRoutes() {
         <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
         <Route path="/workspaces/:id/chat" element={<ChatPage />} />
         <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
+        {/* BUG-10: case id in the URL so a running/finished investigation survives a refresh or revisit. */}
+        <Route path="/workspaces/:id/investigate/:caseId" element={<InvestigationPage />} />
 
         {/* Admin pages */}
         <Route element={<AdminRoute />}>

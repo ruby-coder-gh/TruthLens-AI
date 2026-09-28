@@ -382,6 +382,32 @@ export interface InvestigationSummary {
   updated_at: string;
 }
 
+// BUG-10: `POST .../investigate` now starts a background job (202) instead
+// of blocking for minutes; poll `.../progress` for step-by-step status.
+export interface InvestigationStartResponse {
+  id: string;
+  workspace_id: string;
+  status: 'running';
+}
+
+export interface InvestigationProgressSubQuestion {
+  text: string;
+  status: 'pending' | 'running' | 'done';
+}
+
+export interface InvestigationProgressResponse {
+  id: string;
+  query: string;
+  status: 'running' | 'done' | 'failed';
+  step: string;
+  done_steps: number;
+  total_steps: number;
+  sub_questions: InvestigationProgressSubQuestion[];
+  elapsed_ms: number;
+  error?: string;
+  report?: InvestigationResponse | null;
+}
+
 export interface InvestigationReviewUpdate {
   review_status: InvestigationReviewStatus;
   review_note?: string;
