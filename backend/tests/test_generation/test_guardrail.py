@@ -33,6 +33,7 @@ def test_guardrail_result_defaults():
     assert result.passed is True
     assert result.score == 1.0
     assert result.unsupported_claims == []
+    assert result.unchecked_claims == 0
 
 
 @pytest.mark.asyncio

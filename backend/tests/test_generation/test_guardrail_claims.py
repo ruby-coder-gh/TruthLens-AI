@@ -302,6 +302,14 @@ class TestCheckClaims:
         }
         assert len(result.claims) == 12
 
+    async def test_caps_claims_reports_unchecked_count_and_details(self):
+        answer = " ".join(f"Claim number {i} states a distinct fact." for i in range(15))
+        contexts = [_ctx(i, f"Context paragraph number {i}.") for i in range(10)]
+        result, _ = await _run(answer, contexts, [])
+
+        assert result.unchecked_claims == 3  # 15 real claims, 12 checked
+        assert "checked 12 of 15 claims" in result.details.lower()
+
     async def test_evidence_prefers_the_sentence_sharing_the_claims_numbers(self):
         result, _ = await _run(
             "Northwind ended the year with 312 employees in total [source:1].",

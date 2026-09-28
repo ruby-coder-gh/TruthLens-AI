@@ -57,6 +57,7 @@ class GuardrailResult:
         unsupported_claims: list[str] | None = None,
         details: str = "",
         claims: list[dict[str, Any]] | None = None,
+        unchecked_claims: int = 0,
     ) -> None:
         self.passed = passed
         self.score = score
@@ -64,6 +65,8 @@ class GuardrailResult:
         self.details = details
         # Truth Lens claim objects (see `_claim_object`); [] when not verified.
         self.claims = claims or []
+        # How many claims the MAX_CLAIMS cap dropped from checking (0 when uncapped).
+        self.unchecked_claims = unchecked_claims
 
 
 @lru_cache(maxsize=1)
@@ -299,9 +302,11 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     spans = [s for s in _extract_claim_spans(answer) if not s[0].lower().startswith(REFUSAL_PREFIX.lower())]
     if not spans:
         return GuardrailResult(passed=True, score=1.0, details="No claims to check")
+    total_claims = len(spans)
     if len(spans) > MAX_CLAIMS or len(contexts) > MAX_CONTEXTS:
         logger.info("guardrail_claims_capped", claims=len(spans), contexts=len(contexts))
         spans = spans[:MAX_CLAIMS]
+    unchecked_claims = total_claims - len(spans)
 
     sentences = [_sentences(text) for _, _, text in scored]
     flat = [" ".join(text.split()) for _, _, text in scored]
@@ -394,6 +399,8 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
         f"{counts['unsupported']} unsupported, {counts['contradicted']} contradicted. "
         f"Min entailment: {overall_score:.3f} (threshold: {threshold})."
     )
+    if unchecked_claims:
+        details = f"Checked {len(claims)} of {total_claims} claims (MAX_CLAIMS cap). " + details
 
     logger.info(
         "guardrail_check_complete",
@@ -410,4 +417,5 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
         unsupported_claims=unsupported,
         details=details,
         claims=claims,
+        unchecked_claims=unchecked_claims,
     )
