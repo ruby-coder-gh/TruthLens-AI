@@ -418,7 +418,9 @@ function ReviewWorkflowSection({ workspaceId, caseId, result }: { workspaceId: s
 const RAW_CITATION_MARKER_RE = /^\[source:\d+\]$/i;
 
 function citationExcerpt(citation: { text: string; chunk_id: string }, subQuestion: InvestigationSubQuestion): string {
-  if (citation.text && !RAW_CITATION_MARKER_RE.test(citation.text.trim())) return citation.text;
+  // A semantic citation's `text` is the answer's own sentence, markdown and all —
+  // the register quotes it as plain text, so drop emphasis markers.
+  if (citation.text && !RAW_CITATION_MARKER_RE.test(citation.text.trim())) return citation.text.replace(/\*\*|__/g, '');
   const chunk = subQuestion.retrieved_chunks?.find((c) => c.chunk_id === citation.chunk_id);
   // The investigation API stores raw retrieval contexts (`content`), not the
   // chat `Source` shape (`excerpt`) — accept either.
