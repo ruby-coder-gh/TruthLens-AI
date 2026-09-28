@@ -26,6 +26,7 @@ from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
 from app.prompts.registry import get_active as get_active_prompt
+from app.radar import conflict_counts
 from app.query_cache import (
     cached_query_sources,
     get_workspace_document_version,
@@ -133,18 +134,28 @@ def _source_payload(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _source_conflicts(chunk_ids: list[str]) -> dict[str, int]:
+    """Open Contradiction Radar findings per source chunk; a radar hiccup must never break the stream."""
+    try:
+        async with async_session_factory() as db:
+            return await conflict_counts(db, chunk_ids)
+    except Exception as e:
+        logger.warning("radar_conflict_counts_failed", error=str(e))
+        return {}
+
+
 async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) -> None:
     """Return a persisted answer in the normal streaming protocol without running RAG again.
 
     Goes through the same sink as a live stream, so cached frames are `seq`-numbered
     and resumable exactly like generated ones.
     """
-    sources = cached_query_sources(query)
+    sources = [_source_payload(source) for source in cached_query_sources(query)]
     await sink.emit("ack", {"query_id": query.id, "status": "cached"})
-    await sink.emit(
-        "sources",
-        {"query_id": query.id, "sources": [_source_payload(source) for source in sources]},
-    )
+    conflicts = await _source_conflicts([source["chunk_id"] for source in sources])
+    for source in sources:
+        source["conflicts"] = conflicts.get(source["chunk_id"], 0)
+    await sink.emit("sources", {"query_id": query.id, "sources": sources})
     await sink.emit(
         "token",
         {"query_id": query.id, "content": query.response_text or "", "index": 0},
@@ -317,6 +328,7 @@ async def _run_query_pipeline(
         ]
 
         # 5. Send sources
+        conflicts = await _source_conflicts([ctx["chunk_id"] for ctx in contexts])
         await sink.emit(
             "sources",
             {
@@ -331,6 +343,7 @@ async def _run_query_pipeline(
                         "rerank_score": ctx.get("rerank_score"),
                         "matched_chunks": 1,
                         "confidence": min(1.0, ctx.get("score", 0) * 1.5 + 0.3),
+                        "conflicts": conflicts.get(ctx["chunk_id"], 0),
                     }
                     for ctx in contexts
                 ],
