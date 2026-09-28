@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, type FormEvent } from 'react';
 import { motion } from 'framer-motion';
-import { FolderOpen, Plus, FileText, Clock } from 'lucide-react';
+import { FolderOpen, Plus, FileText, Clock, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 import { Button, Card, Input, Modal, Select } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
@@ -44,6 +44,17 @@ export default function AdminCollectionsPage() {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
+
+  // BUG-18: edit/delete. There is no backend endpoint to attach a document to
+  // a collection after upload (documents carry no `collection_id` field the
+  // API lets a client set — see `POST /workspaces/{id}/documents` and
+  // `DocumentResponse`), so "add docs" isn't implemented — noted in the report.
+  const [editTarget, setEditTarget] = useState<CollectionItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CollectionItem | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadWorkspaces = useCallback(async () => {
     setWorkspacesLoading(true);
@@ -106,6 +117,46 @@ export default function AdminCollectionsPage() {
       addToast(err instanceof Error ? err.message : 'Failed to create collection', 'error');
     } finally {
       setCreateLoading(false);
+    }
+  }
+
+  function openEdit(col: CollectionItem) {
+    setEditTarget(col);
+    setEditName(col.name);
+    setEditDesc(col.description ?? '');
+  }
+
+  async function handleEditSave(e: FormEvent) {
+    e.preventDefault();
+    if (!editTarget || !editName.trim() || !workspaceId) return;
+    setEditLoading(true);
+    try {
+      const updated = await collectionApi.update(workspaceId, editTarget.id, {
+        name: editName.trim(),
+        description: editDesc.trim(),
+      }) as CollectionItem;
+      setCollections((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      setEditTarget(null);
+      addToast(`Collection "${updated.name}" updated`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to update collection', 'error');
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget || !workspaceId) return;
+    setDeleteLoading(true);
+    try {
+      await collectionApi.delete(workspaceId, deleteTarget.id);
+      setCollections((prev) => prev.filter((c) => c.id !== deleteTarget.id));
+      addToast(`Collection "${deleteTarget.name}" deleted`, 'success');
+      setDeleteTarget(null);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to delete collection', 'error');
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -185,7 +236,7 @@ export default function AdminCollectionsPage() {
         ) : (
           collections.map((col) => (
             <motion.div key={col.id} variants={staggerItem}>
-              <Card hover className="p-5">
+              <Card className="p-5">
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
                     <FolderOpen size={20} />
@@ -204,6 +255,16 @@ export default function AdminCollectionsPage() {
                         <Clock size={11} />
                         {formatDate(col.created_at)}
                       </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-3">
+                      <Button size="sm" variant="secondary" onClick={() => openEdit(col)}>
+                        <Pencil size={12} />
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => setDeleteTarget(col)}>
+                        <Trash2 size={12} />
+                        Delete
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -243,6 +304,61 @@ export default function AdminCollectionsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={editTarget !== null} onClose={() => setEditTarget(null)} title="Edit Collection">
+        <form onSubmit={handleEditSave} className="space-y-4">
+          <Input
+            label="Collection name"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            required
+          />
+          <div className="space-y-1.5">
+            <label htmlFor="col-edit-desc" className="block text-[12.5px] font-medium text-text-muted">Description (optional)</label>
+            <textarea
+              id="col-edit-desc"
+              value={editDesc}
+              onChange={(e) => setEditDesc(e.target.value)}
+              className="glass-input w-full rounded-control px-3 py-2.5 text-sm text-text placeholder:text-text-dim focus:outline-none resize-y min-h-[60px]"
+            />
+          </div>
+          <div className="flex gap-3">
+            <Button type="submit" loading={editLoading} size="sm">
+              Save
+            </Button>
+            <Button variant="secondary" size="sm" type="button" onClick={() => setEditTarget(null)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirmation */}
+      <Modal open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} title="Delete Collection">
+        {deleteTarget ? (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-card border border-red/30 bg-red/10 p-4">
+              <AlertTriangle size={20} className="text-red shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red">Delete this collection?</p>
+                <p className="text-xs text-text-muted mt-1">
+                  Documents in <strong className="text-text">{deleteTarget.name}</strong> are not deleted, only unlinked from the collection.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="danger" size="sm" loading={deleteLoading} onClick={() => void handleDelete()}>
+                <Trash2 size={14} />
+                Delete
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Modal>
       </PageShell>
     </motion.div>
