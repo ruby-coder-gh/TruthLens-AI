@@ -713,9 +713,16 @@ const AnswerTurn = memo(function AnswerTurn({
           running={isRunning}
           stopped={isCancelled}
           phase={message.phase}
-          foundCount={message.foundCount}
-          keptCount={message.keptCount}
-          wordsCount={message.wordsCount}
+          // BUG-50 residual: a cached replay's WS protocol only re-sends
+          // sources/token/guardrail, never progress, so found/kept/words stay
+          // null forever and every step in the (correctly 4/4 "done") trail
+          // showed an empty detail. Once the answer is settled, fall back to
+          // what the client already knows from the frames it did receive —
+          // the sources list and the answer's own word count — instead of
+          // leaving those steps blank.
+          foundCount={message.foundCount ?? (isComplete ? message.sources.length : null)}
+          keptCount={message.keptCount ?? (isComplete ? message.sources.length : null)}
+          wordsCount={message.wordsCount ?? (isComplete ? liveWordCount(message.content) : null)}
           liveWordCount={liveWordCount(message.content)}
           documentsSearched={documentCount}
           claimsTally={tally}

@@ -621,6 +621,33 @@ describe('ChatPage', () => {
     expect(screen.getByText('16 found', { exact: false })).toBeInTheDocument();
   });
 
+  it('falls back to the sources list + word count for a cached replay that never sent progress frames (BUG-50)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+    // A cached replay's WS protocol only re-sends sources/token/guardrail —
+    // onProgress never fires, so foundCount/keptCount/wordsCount stay null.
+    act(() => {
+      callbacks.onSource?.({ chunk_id: 'c1', document_id: 'd1', excerpt: '', relevance_score: 0.9, document_name: 'Annual Report' });
+      callbacks.onSource?.({ chunk_id: 'c2', document_id: 'd2', excerpt: '', relevance_score: 0.8, document_name: 'Press Release' });
+      callbacks.onToken?.('Revenue was strong across two documents.');
+      callbacks.onGuardrail?.(guardrailPayload([makeClaim({ text: 'Revenue was strong', end: 19 })]));
+      callbacks.onComplete?.({ query_id: 'q-cached', latency_ms: 32, model_used: 'qwen3:4b', token_count: 8, from_cache: true });
+    });
+
+    await user.click(screen.getByRole('button', { name: /how this answer was verified/i }));
+
+    // Search/rank read the sources count and write reads the answer's own
+    // word count, instead of every step staying blank.
+    expect(screen.getByText(/2 found/)).toBeInTheDocument();
+    expect(screen.getByText(/Kept the top 2 of 2/)).toBeInTheDocument();
+    expect(screen.getByText(/6 words/)).toBeInTheDocument();
+  });
+
   it('shows claim tally chips and a Claim Ledger row per claim once the guardrail frame lands', async () => {
     const user = userEvent.setup();
     renderChatPage();
