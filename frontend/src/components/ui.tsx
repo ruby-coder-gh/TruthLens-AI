@@ -21,13 +21,11 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { ToastContext, type ToastType } from './toast-context';
+import { buttonClassName, type ButtonVariant, type ButtonSize } from './button-classes';
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  BUTTON
 // ═════════════════════════════════════════════════════════════════════════════
-
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -35,28 +33,6 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
   children: ReactNode;
 }
-
-// `text-on-primary` is the theme-aware ink for text sitting ON the accent
-// fill — white on light's #4F46E5, near-black on dark's #8B85FF. A literal
-// `text-white` here would be 3.04:1 in dark mode.
-const variantStyles: Record<ButtonVariant, string> = {
-  primary:
-    'border border-transparent bg-primary text-on-primary shadow-e1 hover:bg-primary-dark hover:shadow-e2',
-  secondary:
-    'border border-border bg-card-hover text-text hover:border-primary/40 hover:bg-primary/10 hover:text-primary-soft',
-  ghost:
-    'border border-transparent bg-transparent text-text-muted hover:bg-card-2 hover:text-text',
-  danger:
-    'border border-red/30 bg-red/10 text-red hover:bg-red/20',
-};
-
-// Fixed control heights (36 / 28 / 44) rather than padding-derived ones, so a
-// Button always lines up with an Input or Select on the same row.
-const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'h-7 rounded-lg px-3 text-xs gap-1.5',
-  md: 'h-9 rounded-control px-4 text-[13px] gap-2',
-  lg: 'h-11 rounded-control px-6 text-[15px] gap-2',
-};
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', loading = false, disabled, className, children, ...props }, ref) => {
@@ -67,19 +43,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         whileHover={{ scale: isDisabled ? 1 : 1.02 }}
         whileTap={{ scale: isDisabled ? 1 : 0.98 }}
-        className={clsx(
-          'inline-flex items-center justify-center whitespace-nowrap font-semibold',
-          'transition-[background-color,border-color,color,box-shadow] duration-150',
-          // Two-tone ring: `ring-focus-halo` paints the outline-offset gap, so
-          // the outline stays legible on a filled primary button where the ring
-          // and the fill are otherwise the same indigo (QA S3-5).
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-          'focus-visible:ring-2 focus-visible:ring-focus-halo',
-          'disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
-          variantStyles[variant],
-          sizeStyles[size],
-          className,
-        )}
+        className={buttonClassName(variant, size, className)}
         {...(props as HTMLMotionProps<'button'>)}
       >
         {loading && <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />}
@@ -325,7 +289,9 @@ interface ModalProps {
   className?: string;
 }
 
-const FOCUSABLE_SELECTOR =
+// Exported so other roving-focus surfaces (e.g. Layout's mobile drawer) reuse
+// the same definition instead of drifting out of sync with Modal's.
+export const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function Modal({ open, onClose, title, children, className }: ModalProps) {
@@ -350,6 +316,12 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
     const panel = panelRef.current;
     const focusFirst = () => {
+      // BUG-13: an `autoFocus` child (e.g. a search input) already claims
+      // focus natively on mount, before this rAF runs. Stealing it back to
+      // "the first focusable element" always grabs the header's Close
+      // button instead, since it's earlier in the DOM than the content.
+      // Only fall back to that default when nothing in the panel has focus.
+      if (panel && document.activeElement && panel.contains(document.activeElement)) return;
       const focusable = panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       (focusable && focusable.length > 0 ? focusable[0] : panel)?.focus();
     };
@@ -401,7 +373,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         >
           {/* Overlay */}
           <motion.div
-            className="absolute inset-0 bg-black/45 backdrop-blur-[6px]"
+            className="absolute inset-0 bg-scrim"
             onClick={onClose}
             aria-hidden="true"
             initial={{ opacity: 0.99 }}
@@ -433,7 +405,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-text-muted transition-colors duration-150 hover:bg-card-2 hover:text-text"
+                  className="-mr-2 flex h-10 w-10 items-center justify-center rounded-control text-text-muted transition-colors duration-150 hover:bg-card-2 hover:text-text"
                   aria-label="Close modal"
                 >
                   <X size={18} />
@@ -635,7 +607,7 @@ export function ProgressBar({ value, className, size = 'md', label }: ProgressBa
         aria-valuemax={100}
       >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary to-accent-2 transition-[width] duration-700 ease-out"
+          className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out"
           style={{ width: `${clamped}%` }}
         />
       </div>
@@ -662,7 +634,13 @@ interface TabsProps {
 
 export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   return (
-    <div className={clsx('inline-flex gap-1 rounded-control glass p-1', className)} role="tablist">
+    // R3-9: with enough tabs (Documents/Members/Radar/Activity…), the bar's
+    // natural content width exceeds a 375px viewport — with no overflow
+    // boundary of its own, that overflow bubbled up into the *page*, making
+    // the whole route scroll sideways. `max-w-full` caps it to whatever
+    // width its container actually has and `overflow-x-auto` lets the tabs
+    // scroll inside that instead.
+    <div className={clsx('inline-flex max-w-full gap-1 overflow-x-auto rounded-control glass p-1', className)} role="tablist">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
@@ -673,7 +651,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             aria-selected={isActive}
             onClick={() => onChange(tab.id)}
             className={clsx(
-              'relative flex h-[30px] items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150',
+              'relative flex h-[30px] shrink-0 items-center gap-2 rounded-lg px-3.5 text-[13px] font-medium transition-colors duration-150',
               isActive ? 'font-semibold text-primary-soft' : 'text-text-muted hover:text-text',
             )}
           >

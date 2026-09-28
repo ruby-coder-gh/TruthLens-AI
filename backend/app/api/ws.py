@@ -20,12 +20,16 @@ from app.api.stream_registry import (
 )
 from app.core.auth import decode_token
 from app.database import async_session_factory
+from app.api.queries import stored_claims
 from app.models.query import Query
+from app.models.query_claims import QueryClaims
+from app.models.receipt import Receipt
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
 from app.prompts.registry import get_active as get_active_prompt
+from app.radar import append_missing_disagreement_figures, conflict_counts
 from app.query_cache import (
     cached_query_sources,
     get_workspace_document_version,
@@ -133,23 +137,34 @@ def _source_payload(context: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _source_conflicts(chunk_ids: list[str]) -> dict[str, int]:
+    """Open Contradiction Radar findings per source chunk; a radar hiccup must never break the stream."""
+    try:
+        async with async_session_factory() as db:
+            return await conflict_counts(db, chunk_ids)
+    except Exception as e:
+        logger.warning("radar_conflict_counts_failed", error=str(e))
+        return {}
+
+
 async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) -> None:
     """Return a persisted answer in the normal streaming protocol without running RAG again.
 
     Goes through the same sink as a live stream, so cached frames are `seq`-numbered
     and resumable exactly like generated ones.
     """
-    sources = cached_query_sources(query)
+    sources = [_source_payload(source) for source in cached_query_sources(query)]
     await sink.emit("ack", {"query_id": query.id, "status": "cached"})
-    await sink.emit(
-        "sources",
-        {"query_id": query.id, "sources": [_source_payload(source) for source in sources]},
-    )
+    conflicts = await _source_conflicts([source["chunk_id"] for source in sources])
+    for source in sources:
+        source["conflicts"] = conflicts.get(source["chunk_id"], 0)
+    await sink.emit("sources", {"query_id": query.id, "sources": sources})
     await sink.emit(
         "token",
         {"query_id": query.id, "content": query.response_text or "", "index": 0},
     )
     if query.guardrail_score is not None and query.guardrail_passed is not None:
+        claims = stored_claims(query) or []
         await sink.emit(
             "guardrail",
             {
@@ -157,12 +172,22 @@ async def _send_cached_query(query: Query, sink: StreamSink, elapsed_ms: int) ->
                 "passed": query.guardrail_passed,
                 "score": query.guardrail_score,
                 "details": "Served from cached result.",
+                "claims": claims,
+                "unsupported_claims": [
+                    c.get("text") for c in claims if c.get("verdict") in ("unsupported", "contradicted")
+                ],
             },
         )
     if query.trust_score is not None:
         await sink.emit(
             "trust_score",
-            {"query_id": query.id, "score": query.trust_score, "components": {}},
+            {
+                "query_id": query.id,
+                "score": query.trust_score,
+                # BUG-50: replay the persisted sub-scores instead of a stub
+                # empty dict — a cache hit is a real answer, not a lesser one.
+                "components": query.trust_components or {},
+            },
         )
     complete: dict[str, Any] = {
         "query_id": query.id,
@@ -198,8 +223,14 @@ async def _run_query_pipeline(
     filters: dict[str, Any] | None,
     sink: StreamSink,
     force_refresh: bool = False,
+    replaces_query_id: str | None = None,
 ) -> None:
     """Run the full query pipeline and stream results through `sink`.
+
+    K4: `replaces_query_id` (Regenerate) is threaded through to `_save_query`,
+    which deletes that older turn once the new answer is saved -- so
+    regenerating replaces the turn in place instead of growing history
+    (R2-21). Both the abstention save and the normal save honour it.
 
     Every frame is emitted with `await sink.emit(type, payload)`, which stamps a
     monotonic `seq` and buffers the frame for resume. Delivery failures detach
@@ -279,7 +310,14 @@ async def _run_query_pipeline(
             filters=filters,
         )
 
-        # 4. Rerank
+        # 4. Rerank — counts + timings feed the client's "how this was verified" trail.
+        await sink.emit(
+            "progress",
+            {
+                "query_id": query_id, "phase": "ranking", "progress": 0.4,
+                "found": len(results), "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
+        )
         reranked = await rerank(rewritten or sanitized_query, results, top_k=top_k)
 
         # 4.5 Evidence-sufficiency gate: abstain rather than generate on thin evidence.
@@ -299,6 +337,7 @@ async def _run_query_pipeline(
                 # exactly like a generated answer. No LLM ran, so there are no
                 # prompt tokens to account for.
                 prompt_version=resolved_prompt.hash, prompt_tokens=None,
+                replaces_query_id=replaces_query_id,
                 **abstention.save_fields,
             )
             return
@@ -317,21 +356,16 @@ async def _run_query_pipeline(
         ]
 
         # 5. Send sources
+        # K1: route through the shared `_source_payload` shaper (same one the
+        # cached-replay path uses) so the live frame also carries page_number
+        # from chunk metadata (BUG-8) instead of a hand-rolled dict missing it.
+        conflicts = await _source_conflicts([ctx["chunk_id"] for ctx in contexts])
         await sink.emit(
             "sources",
             {
                 "query_id": query_id,
                 "sources": [
-                    {
-                        "chunk_id": ctx["chunk_id"],
-                        "document_id": ctx["document_id"],
-                        "document_name": ctx.get("document_name", ""),
-                        "excerpt": ctx["content"][:300],
-                        "relevance_score": ctx.get("score", 0),
-                        "rerank_score": ctx.get("rerank_score"),
-                        "matched_chunks": 1,
-                        "confidence": min(1.0, ctx.get("score", 0) * 1.5 + 0.3),
-                    }
+                    {**_source_payload(ctx), "conflicts": conflicts.get(ctx["chunk_id"], 0)}
                     for ctx in contexts
                 ],
             },
@@ -340,7 +374,11 @@ async def _run_query_pipeline(
         # 6. Generate (stream)
         await sink.emit(
             "progress",
-            {"query_id": query_id, "phase": "generation", "progress": 0.6},
+            {
+                "query_id": query_id, "phase": "generation", "progress": 0.6,
+                "found": len(results), "kept": len(contexts),
+                "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
         )
 
         gen_input = GenerationInput(
@@ -356,13 +394,46 @@ async def _run_query_pipeline(
         )
         total_tokens = token_count
 
+        # An empty answer (e.g. a reasoning model spending its whole token budget
+        # thinking) has no claims to fail, so it would otherwise score as
+        # "verified". Fail it visibly and don't save it (nothing to cache).
+        if not full_text.strip():
+            logger.warning("empty_answer", query_id=query_id, token_count=token_count, model=model_used)
+            await sink.emit(
+                "error",
+                {
+                    "code": "EMPTY_ANSWER",
+                    "message": "The model returned no answer. Please try again.",
+                    "query_id": query_id,
+                },
+            )
+            return
+
+        # BUG-24 cheap post-check: the disagreement instruction can still slip
+        # (a live answer named only one side's figure despite it). If the
+        # answer cites both sides of an open Radar pair but states only one
+        # side's number, append the other with its own citation before this
+        # answer is scored and saved. A Radar hiccup must never block a
+        # finished answer from being saved.
+        try:
+            async with async_session_factory() as db:
+                full_text = await append_missing_disagreement_figures(db, workspace_id, full_text, contexts)
+        except Exception as e:
+            logger.warning("disagreement_postcheck_failed", query_id=query_id, error=str(e))
+
         # 7. Guardrail check
         await sink.emit(
             "progress",
-            {"query_id": query_id, "phase": "guardrail", "progress": 0.8},
+            {
+                "query_id": query_id, "phase": "guardrail", "progress": 0.8,
+                "words": len(full_text.split()),
+                "elapsed_ms": int((time.time() - start_time) * 1000),
+            },
         )
 
         guardrail_result = await guardrail_check(full_text, contexts)
+        # getattr: test doubles (and any older guardrail) may not carry claims.
+        claims = getattr(guardrail_result, "claims", None) or []
 
         await sink.emit(
             "guardrail",
@@ -371,6 +442,8 @@ async def _run_query_pipeline(
                 "passed": guardrail_result.passed,
                 "score": guardrail_result.score,
                 "details": guardrail_result.details,
+                "claims": claims,
+                "unsupported_claims": list(getattr(guardrail_result, "unsupported_claims", None) or []),
             },
         )
 
@@ -435,6 +508,8 @@ async def _run_query_pipeline(
             document_version=document_version,
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
+            claims=claims,
+            replaces_query_id=replaces_query_id,
         )
 
     except asyncio.CancelledError:
@@ -477,8 +552,16 @@ async def _save_query(
     sufficiency: dict[str, Any] | None = None,
     prompt_tokens: int | None = None,
     prompt_version: str | None = None,
+    claims: list[dict[str, Any]] | None = None,
+    replaces_query_id: str | None = None,
 ) -> None:
-    """Save query result to database."""
+    """Save query result (and its Truth Lens claims, if any) in one transaction.
+
+    K4: `replaces_query_id` (Regenerate) deletes that older query row in the
+    same transaction — but only if it belongs to this caller and carries no
+    sealed receipt (a receipt must keep pointing at real history). Otherwise
+    it's left alone; the new answer is still saved either way.
+    """
     import json as json_mod
 
     async with async_session_factory() as db:
@@ -503,8 +586,21 @@ async def _save_query(
             sufficiency=sufficiency,
             prompt_tokens=prompt_tokens,
             prompt_version=prompt_version,
+            query_claims=QueryClaims(claims=json_mod.dumps(claims)) if claims else None,
         )
         db.add(query)
+
+        if replaces_query_id and replaces_query_id != query_id:
+            old = (await db.execute(
+                select(Query).where(Query.id == replaces_query_id, Query.user_id == user_id)
+            )).scalar_one_or_none()
+            if old is not None:
+                has_receipt = (await db.execute(
+                    select(Receipt.id).where(Receipt.query_id == replaces_query_id).limit(1)
+                )).scalar_one_or_none()
+                if has_receipt is None:
+                    await db.delete(old)
+
         await db.commit()
 
 
@@ -676,6 +772,9 @@ async def websocket_query(websocket: WebSocket):
                 top_k = msg_payload.get("top_k", 5)
                 filters = msg_payload.get("filters")
                 force_refresh = bool(msg_payload.get("force_refresh", False))
+                # K4: Regenerate passes the turn it's replacing so the saved
+                # answer takes its place instead of piling up a duplicate.
+                replaces_query_id = msg_payload.get("replaces_query_id")
 
                 if not workspace_id or not query_text:
                     await send_json({
@@ -713,6 +812,7 @@ async def websocket_query(websocket: WebSocket):
                         filters=filters,
                         sink=current_sink,
                         force_refresh=force_refresh,
+                        replaces_query_id=replaces_query_id,
                     )
                 )
                 # The buffer keeps the task reachable (and alive) across a

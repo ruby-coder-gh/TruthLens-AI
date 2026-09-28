@@ -1,5 +1,6 @@
-import { useState, useRef, type FormEvent, type DragEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect, type FormEvent, type DragEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -26,6 +27,7 @@ import {
   MessageSquare,
   Loader2,
   ClipboardCheck,
+  Radar as RadarIcon,
 } from 'lucide-react';
 import { Button, Input, TextArea, Select, Card, Badge, Modal, EmptyState, Tabs, Skeleton, ProgressBar } from '../components/ui';
 import { staggerContainer, staggerItem, fadeIn, pageTransition, slideInRight } from '../components/motion';
@@ -34,8 +36,11 @@ import { PageShell } from '../components/PageWrappers';
 import {
   workspaceApi,
   documentApi,
+  queryApi,
+  radarApi,
 } from '../api/client';
 import { useAuth } from '../context/auth-context';
+import RadarPanel from '../components/radar/RadarPanel';
 import type {
   ActivityEntry,
   Workspace,
@@ -47,6 +52,7 @@ import type {
 const TABS = [
   { id: 'documents', label: 'Documents', icon: <FileText size={15} /> },
   { id: 'activity', label: 'Activity', icon: <Clock size={15} /> },
+  { id: 'radar', label: 'Radar', icon: <RadarIcon size={15} /> },
   { id: 'members', label: 'Members', icon: <Users size={15} /> },
   { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
 ];
@@ -173,15 +179,9 @@ function UploadProgressArea({
 // ─── Workspace Avatar Fallback ───────────────────────────────────────────────
 function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const sizes = { sm: 'h-9 w-9 text-sm', md: 'h-12 w-12 text-lg', lg: 'h-16 w-16 text-2xl' };
-  const gradientPairs = [
-    'from-primary to-accent',
-    'from-accent to-accent-2',
-    'from-primary to-gold',
-    'from-accent-2 to-primary',
-  ];
-  const idx = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % gradientPairs.length;
+  // Same ink-on-ground tile as the workspace mark in the top bar.
   return (
-    <div className={`${sizes[size]} rounded-xl bg-gradient-to-br ${gradientPairs[idx]} flex items-center justify-center font-bold text-on-primary shadow-e1 shrink-0`}>
+    <div className={`${sizes[size]} rounded-control bg-text font-cond font-semibold text-bg flex items-center justify-center shrink-0`}>
       {name.charAt(0).toUpperCase()}
     </div>
   );
@@ -191,40 +191,26 @@ function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
 //  DASHBOARD STATS CARDS
 // ═════════════════════════════════════════════════════════════════════════════
 
-function DashboardStats({ workspace }: { workspace: Workspace }) {
+function DashboardStats({
+  documentCount,
+  memberCount,
+  queryCount,
+  storageBytes,
+}: {
+  documentCount: number;
+  memberCount: number;
+  queryCount: number;
+  storageBytes: number;
+}) {
+  // Figures in ink on flat surfaces — status hues are reserved for status.
+  // BUG-30: all four now come from live, invalidatable queries instead of
+  // the workspace object's snapshot fields (stale after upload/member add)
+  // or a hard-coded "—".
   const stats = [
-    {
-      label: 'Documents',
-      value: workspace.document_count ?? 0,
-      icon: <FileText size={18} />,
-      gradient: 'from-primary/20 to-primary/5',
-      border: 'border-primary/20',
-      textColor: 'text-primary-soft',
-    },
-    {
-      label: 'Members',
-      value: workspace.member_count ?? 1,
-      icon: <Users size={18} />,
-      gradient: 'from-accent/20 to-accent/5',
-      border: 'border-accent/20',
-      textColor: 'text-accent',
-    },
-    {
-      label: 'AI Queries',
-      value: '—',
-      icon: <Brain size={18} />,
-      gradient: 'from-gold/20 to-gold/5',
-      border: 'border-gold/20',
-      textColor: 'text-gold',
-    },
-    {
-      label: 'Storage Used',
-      value: '—',
-      icon: <HardDrive size={18} />,
-      gradient: 'from-accent-2/20 to-accent-2/5',
-      border: 'border-accent-2/20',
-      textColor: 'text-accent-2',
-    },
+    { label: 'Documents', value: documentCount, icon: <FileText size={18} /> },
+    { label: 'Members', value: memberCount, icon: <Users size={18} /> },
+    { label: 'AI Queries', value: queryCount, icon: <Brain size={18} /> },
+    { label: 'Storage Used', value: formatFileSize(storageBytes), icon: <HardDrive size={18} /> },
   ];
 
   return (
@@ -235,24 +221,19 @@ function DashboardStats({ workspace }: { workspace: Workspace }) {
           initial={{ opacity: 0.99, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
-          className={`relative overflow-hidden rounded-xl border ${stat.border} bg-gradient-to-br ${stat.gradient} p-4 backdrop-blur-sm`}
+          className="relative overflow-hidden rounded-xl border border-border bg-solid p-4"
         >
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              {/* `text-text-muted`, not `text-text-dim`: these labels sit on a
-                  tinted gradient card, not the plain ground, where dim ink
-                  measured 3.76–3.89:1 (QA S3-1). */}
               <p className="text-xs font-medium text-text-muted tracking-wide">{stat.label}</p>
-              <p className={`text-2xl font-bold ${stat.textColor}`}>
+              <p className="text-2xl font-semibold text-text">
                 {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
               </p>
             </div>
-            <div className={`p-2 rounded-lg bg-card-2 ${stat.textColor}`}>
+            <div className="p-2 rounded-lg bg-card-2 text-text-muted">
               {stat.icon}
             </div>
           </div>
-          {/* Subtle shimmer line */}
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
         </motion.div>
       ))}
     </div>
@@ -270,6 +251,10 @@ function WorkspaceHeader({
   activeTab,
   setActiveTab,
   memberCount,
+  radarOpenCount,
+  documentCount,
+  queryCount,
+  storageBytes,
 }: {
   workspace: Workspace;
   isOwner: boolean;
@@ -277,7 +262,18 @@ function WorkspaceHeader({
   activeTab: string;
   setActiveTab: (tab: string) => void;
   memberCount: number;
+  radarOpenCount: number;
+  documentCount: number;
+  queryCount: number;
+  storageBytes: number;
 }) {
+  // Tab labels are plain strings (Tab.label: string), so the open-conflict
+  // badge is rendered as "Radar (N)" text rather than a separate pill —
+  // matches the count-in-label convention this file already has none of, but
+  // keeps Tabs a dumb, reusable primitive instead of special-casing one tab.
+  const tabs = radarOpenCount > 0
+    ? TABS.map((tab) => (tab.id === 'radar' ? { ...tab, label: `Radar (${radarOpenCount})` } : tab))
+    : TABS;
   return (
     <motion.div variants={staggerItem} className="space-y-5">
       {/* Back + breadcrumb */}
@@ -341,7 +337,7 @@ function WorkspaceHeader({
               </span>
               <span className="flex items-center gap-1.5">
                 <FileText size={12} />
-                {workspace.document_count ?? 0} documents
+                {documentCount} {documentCount === 1 ? 'document' : 'documents'}
               </span>
               <span className="flex items-center gap-1.5">
                 <Calendar size={12} />
@@ -359,7 +355,12 @@ function WorkspaceHeader({
       </div>
 
       {/* Dashboard Stats */}
-      <DashboardStats workspace={workspace} />
+      <DashboardStats
+        documentCount={documentCount}
+        memberCount={memberCount}
+        queryCount={queryCount}
+        storageBytes={storageBytes}
+      />
 
       {/* Tabs — Segmented control style */}
       <motion.div
@@ -367,7 +368,7 @@ function WorkspaceHeader({
         className="sticky top-0 z-20 -mx-1 px-1 pt-2 pb-1"
       >
         <Tabs
-          tabs={TABS}
+          tabs={tabs}
           activeTab={activeTab}
           onChange={setActiveTab}
           className="w-fit border border-border bg-card-2"
@@ -386,7 +387,20 @@ export default function WorkspaceDetailPage() {
   const workspaceId = id!;
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('documents');
+  // BUG-54: every tab deep-links via `?tab=`, not just Radar — the active
+  // tab lives in the URL itself (replace, not push, so switching tabs
+  // doesn't spam the back button) rather than local state the URL never saw.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const VALID_TABS = ['documents', 'activity', 'radar', 'members', 'settings'];
+  const tabParam = searchParams.get('tab');
+  const activeTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'documents';
+  const setActiveTab = (tab: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  };
 
   // ─── Fetch workspace ──────────────────────────────────────────────────────
   const {
@@ -410,6 +424,39 @@ export default function WorkspaceDetailPage() {
 
   const members = memberList?.data ?? [];
   const isOwner = workspace?.owner_id === user?.id;
+  const myRole = members.find((m) => m.user_id === user?.id)?.role;
+  const canModerateRadar = isOwner || myRole === 'editor';
+  // BUG-14: the server already rejects a viewer's upload (403), but the tab
+  // still offered the control — only owners/editors may add documents.
+  const canUpload = isOwner || myRole === 'editor';
+
+  // Light, unfiltered fetch just for the tab badge — the panel itself fetches
+  // its own (filtered, polling) copy under the same query-key prefix so a
+  // dismiss/resolve mutation invalidates both in one call.
+  const { data: radarSummary } = useQuery({
+    queryKey: ['radar', workspaceId, 'summary'],
+    queryFn: () => radarApi.get(workspaceId),
+    enabled: !!workspaceId,
+  });
+  const radarOpenCount = radarSummary?.counts.open ?? 0;
+
+  // BUG-30: "AI Queries" and "Storage Used" were hard-coded "—". Both are
+  // cheap to derive from data the API already exposes — the same
+  // `['documents', workspaceId]` key DocumentsTab uses, so this doesn't add
+  // a second in-flight request once that tab has fetched it.
+  const { data: docsForStats } = useQuery({
+    queryKey: ['documents', workspaceId],
+    queryFn: () => documentApi.list(workspaceId),
+    enabled: !!workspaceId,
+  });
+  const storageBytes = (docsForStats?.data ?? []).reduce((sum, doc) => sum + (doc.file_size ?? 0), 0);
+
+  const { data: queryStats } = useQuery({
+    queryKey: ['workspace', workspaceId, 'query-count'],
+    queryFn: () => queryApi.list(workspaceId, { page_size: 1 }),
+    enabled: !!workspaceId,
+  });
+  const queryCount = queryStats?.meta.total ?? 0;
 
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (wsLoading) {
@@ -526,6 +573,10 @@ export default function WorkspaceDetailPage() {
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             memberCount={members.length}
+            radarOpenCount={radarOpenCount}
+            documentCount={docsForStats?.data.length ?? workspace.document_count ?? 0}
+            queryCount={queryCount}
+            storageBytes={storageBytes}
           />
 
           {/* Tab content */}
@@ -539,10 +590,13 @@ export default function WorkspaceDetailPage() {
                 exit="exit"
               >
                 {activeTab === 'documents' && (
-                  <DocumentsTab workspaceId={workspaceId} />
+                  <DocumentsTab workspaceId={workspaceId} canUpload={canUpload} />
                 )}
                 {activeTab === 'activity' && (
                   <ActivityTab workspaceId={workspaceId} />
+                )}
+                {activeTab === 'radar' && (
+                  <RadarPanel workspaceId={workspaceId} canModerate={canModerateRadar} />
                 )}
                 {activeTab === 'members' && (
                   <MembersTab workspaceId={workspaceId} isOwner={isOwner} members={members} />
@@ -641,7 +695,7 @@ function ActivityTab({ workspaceId }: { workspaceId: string }) {
 //  DOCUMENTS TAB (Redesigned)
 // ═════════════════════════════════════════════════════════════════════════════
 
-function DocumentsTab({ workspaceId }: { workspaceId: string }) {
+function DocumentsTab({ workspaceId, canUpload }: { workspaceId: string; canUpload: boolean }) {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -798,56 +852,65 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
   if (documents.length === 0 && !uploading) {
     return (
       <motion.div variants={fadeIn} initial="initial" animate="animate">
-        {/* Drop zone */}
-        <motion.div
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
-            dragOver
-              ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
-              : 'border-border hover:border-primary/40 hover:bg-card-2'
-          }`}
-          whileHover={{ scale: 1.003 }}
-          animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
-          onClick={() => fileInputRef.current?.click()}
-        >
+        {/* Drop zone — viewers can't upload (server rejects with 403 anyway),
+            so the control isn't offered at all rather than failing on click. */}
+        {canUpload && (
           <motion.div
-            animate={dragOver ? { y: -6, scale: 1.1 } : { y: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glass text-primary"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
+              dragOver
+                ? 'border-primary bg-primary/10'
+                : 'border-border hover:border-primary/40 hover:bg-card-2'
+            }`}
+            whileHover={{ scale: 1.003 }}
+            animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <UploadCloud size={28} />
+            <motion.div
+              animate={dragOver ? { y: -6, scale: 1.1 } : { y: 0, scale: 1 }}
+              transition={{ type: 'spring', damping: 15 }}
+              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glass text-primary"
+            >
+              <UploadCloud size={28} />
+            </motion.div>
+            <p className="text-sm font-medium text-text">
+              {/* Singular: this dropzone uploads one file at a time (the input
+                  has no `multiple` and `handleDrop` reads `files[0]`), so the
+                  plural copy promised a multi-select that fails (QA S3-6).
+                  /admin/documents/upload is the multi-file queue. */}
+              {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              PDF, DOCX, TXT, MD, CSV up to 50MB
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+              className="hidden"
+              onChange={handleFileChange}
+              aria-label="Upload document"
+            />
           </motion.div>
-          <p className="text-sm font-medium text-text">
-            {/* Singular: this dropzone uploads one file at a time (the input
-                has no `multiple` and `handleDrop` reads `files[0]`), so the
-                plural copy promised a multi-select that fails (QA S3-6).
-                /admin/documents/upload is the multi-file queue. */}
-            {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
-          </p>
-          <p className="mt-1 text-xs text-text-muted">
-            PDF, DOCX, TXT, MD, CSV up to 50MB
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
-            className="hidden"
-            onChange={handleFileChange}
-            aria-label="Upload document"
-          />
-        </motion.div>
+        )}
 
         <EmptyState
           icon={<FileText size={28} />}
           title="No documents yet"
-          description="Upload PDF, DOCX, TXT, MD, or CSV files to start querying your data."
+          description={
+            canUpload
+              ? 'Upload PDF, DOCX, TXT, MD, or CSV files to start querying your data.'
+              : 'Ask a workspace editor or the owner to upload documents.'
+          }
           action={
-            <Button onClick={() => fileInputRef.current?.click()}>
-              <Upload size={16} />
-              Upload document
-            </Button>
+            canUpload ? (
+              <Button onClick={() => fileInputRef.current?.click()}>
+                <Upload size={16} />
+                Upload document
+              </Button>
+            ) : undefined
           }
         />
       </motion.div>
@@ -857,40 +920,42 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
   // Documents list
   return (
     <motion.div variants={fadeIn} initial="initial" animate="animate">
-      {/* Drop zone compact */}
-      <motion.div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
-          dragOver
-            ? 'border-primary bg-primary/10 shadow-lg shadow-primary/20'
-            : 'border-border hover:border-primary/30 hover:bg-card-2'
-        }`}
-        whileHover={{ scale: 1.003 }}
-        animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <div className="flex items-center justify-center gap-3">
-          <motion.div
-            animate={dragOver ? { y: -3, scale: 1.1 } : { y: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-          >
-            <UploadCloud size={20} className="text-primary" />
-          </motion.div>
-          <p className="text-sm text-text-muted">
-            {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
-          </p>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
-          className="hidden"
-          onChange={handleFileChange}
-          aria-label="Upload document"
-        />
-      </motion.div>
+      {/* Drop zone compact — viewers can't upload, so it's not offered. */}
+      {canUpload && (
+        <motion.div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
+            dragOver
+              ? 'border-primary bg-primary/10'
+              : 'border-border hover:border-primary/30 hover:bg-card-2'
+          }`}
+          whileHover={{ scale: 1.003 }}
+          animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <div className="flex items-center justify-center gap-3">
+            <motion.div
+              animate={dragOver ? { y: -3, scale: 1.1 } : { y: 0, scale: 1 }}
+              transition={{ type: 'spring', damping: 15 }}
+            >
+              <UploadCloud size={20} className="text-primary" />
+            </motion.div>
+            <p className="text-sm text-text-muted">
+              {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
+            </p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+            className="hidden"
+            onChange={handleFileChange}
+            aria-label="Upload document"
+          />
+        </motion.div>
+      )}
 
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
@@ -898,10 +963,12 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
           <span className="text-text font-medium">{documents.length}</span>{' '}
           {documents.length === 1 ? 'document' : 'documents'}
         </p>
-        <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          <Upload size={14} />
-          Upload
-        </Button>
+        {canUpload && (
+          <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Upload size={14} />
+            Upload
+          </Button>
+        )}
       </div>
 
       <AnimatePresence>
@@ -986,7 +1053,7 @@ function DocumentRow({ doc, onDelete }: { doc: Document; onDelete: () => void })
       transition={{ duration: 0.2 }}
     >
       {/* Icon */}
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/10 to-accent/10 text-text-dim">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-card-2 text-text-dim">
         {isProcessing ? (
           <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}>
             <FileText size={18} />
@@ -1050,6 +1117,15 @@ function DocumentRow({ doc, onDelete }: { doc: Document; onDelete: () => void })
 //  MEMBERS TAB (Redesigned — Professional Cards)
 // ═════════════════════════════════════════════════════════════════════════════
 
+// R3-3: `AnimatePresence` decides what's present via `isValidElement`, and a
+// bare `createPortal(...)` return value isn't a `ReactElement` — passed
+// directly as an `AnimatePresence` child it gets silently filtered out and
+// never mounts. A real component (this one) is what `AnimatePresence` needs
+// to see; it just forwards its children into the portal itself.
+function MenuPortal({ children }: { children: React.ReactNode }) {
+  return createPortal(children, document.body);
+}
+
 function MembersTab({
   workspaceId,
   isOwner,
@@ -1063,17 +1139,60 @@ function MembersTab({
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
-  const [newUserId, setNewUserId] = useState('');
+  const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('editor');
   const [addError, setAddError] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
+  // R3-3: the menu used to be an `absolute` child of the member card, which
+  // has `overflow-hidden` — the role picker and "Remove member" routinely
+  // got clipped. Rendered through a portal instead, positioned from the
+  // trigger button's own viewport rect, so it's never bounded by any
+  // ancestor's overflow/stacking context.
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // R4-2: removing a member is destructive — the first click arms it, the second removes.
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
-  // Close action menu on outside click
+  // R2-9: the menu panel itself — used to scope the outside-click check
+  // below. Only one member's menu is ever mounted at a time (`actionMenuOpen`
+  // holds a single id), so one shared ref is enough.
   const menuRef = useRef<HTMLDivElement>(null);
 
+  function closeActionMenu() {
+    setActionMenuOpen(null);
+    setMenuPosition(null);
+    setConfirmRemoveId(null);
+  }
+
+  function openActionMenu(memberId: string, trigger: HTMLButtonElement) {
+    const rect = trigger.getBoundingClientRect();
+    setMenuPosition({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setActionMenuOpen(memberId);
+  }
+
+  // R2-9: Esc closes the menu, and a click anywhere outside it closes it too
+  // — no full-screen blocking backdrop, so the rest of the tab stays
+  // clickable while the menu is open. Only attached while something is open.
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        closeActionMenu();
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeActionMenu();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [actionMenuOpen]);
+
   const addMemberMutation = useMutation({
-    mutationFn: (data: { user_id: string; role?: string }) =>
+    mutationFn: (data: { email: string; role?: string }) =>
       workspaceApi.addMember(workspaceId, data),
     onSuccess: () => {
       addToast('Member added', 'success');
@@ -1097,9 +1216,22 @@ function MembersTab({
     },
   });
 
+  // BUG-15: there was no role-change control on a member card at all.
+  const roleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      workspaceApi.updateMemberRole(workspaceId, userId, role),
+    onSuccess: (_data, variables) => {
+      addToast(`Role changed to ${variables.role}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['workspace-members', workspaceId] });
+    },
+    onError: (err: unknown) => {
+      addToast(err instanceof Error ? err.message : 'Failed to update role', 'error');
+    },
+  });
+
   function handleAddClose() {
     setAddOpen(false);
-    setNewUserId('');
+    setNewEmail('');
     setNewRole('editor');
     setAddError('');
   }
@@ -1107,11 +1239,16 @@ function MembersTab({
   function handleAddSubmit(e: FormEvent) {
     e.preventDefault();
     setAddError('');
-    if (!newUserId.trim()) {
-      setAddError('User ID is required');
+    const email = newEmail.trim();
+    if (!email) {
+      setAddError('Email is required');
       return;
     }
-    addMemberMutation.mutate({ user_id: newUserId.trim(), role: newRole });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAddError('Enter a valid email address');
+      return;
+    }
+    addMemberMutation.mutate({ email, role: newRole });
   }
 
   function handleCopyUserId(userId: string) {
@@ -1119,18 +1256,6 @@ function MembersTab({
     setCopiedId(userId);
     setTimeout(() => setCopiedId(null), 2000);
   }
-
-  const memberGradient = (username: string) => {
-    const pairs = [
-      'from-primary to-accent',
-      'from-accent to-accent-2',
-      'from-primary to-gold',
-      'from-gold to-accent-2',
-      'from-accent-2 to-primary',
-    ];
-    const idx = username.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % pairs.length;
-    return pairs[idx];
-  };
 
   // Loading skeleton
   if (members.length === 0 && !addOpen) {
@@ -1167,8 +1292,8 @@ function MembersTab({
         <AddMemberModal
           addOpen={addOpen}
           addError={addError}
-          newUserId={newUserId}
-          setNewUserId={setNewUserId}
+          newEmail={newEmail}
+          setNewEmail={setNewEmail}
           newRole={newRole}
           setNewRole={setNewRole}
           addMemberMutation={addMemberMutation}
@@ -1212,13 +1337,10 @@ function MembersTab({
                 exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
                 transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
               >
-                <div className="group relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-card-2 to-transparent p-4 transition-all duration-200 hover:border-border hover:shadow-e2">
-                  {/* Subtle gradient accent line */}
-                  <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-primary/20 to-transparent" />
-
+                <div className="group relative overflow-hidden rounded-xl border border-border bg-solid p-4 transition-all duration-200 hover:shadow-e2">
                   <div className="flex items-start gap-3.5">
-                    {/* Avatar */}
-                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${memberGradient(member.username)} text-on-primary text-sm font-bold shadow-e1`}>
+                    {/* Avatar — the sidebar's account avatar */}
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-tint text-sm font-semibold text-primary">
                       {member.username.charAt(0).toUpperCase()}
                     </div>
 
@@ -1247,7 +1369,7 @@ function MembersTab({
                       <div className="relative shrink-0">
                         <motion.button
                           type="button"
-                          onClick={() => setActionMenuOpen(isMenuOpen ? null : member.id)}
+                          onClick={(e) => (isMenuOpen ? closeActionMenu() : openActionMenu(member.id, e.currentTarget))}
                           className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-card-hover hover:text-text"
                           whileHover={{ scale: 1.1 }}
                           whileTap={{ scale: 0.9 }}
@@ -1256,52 +1378,91 @@ function MembersTab({
                           <MoreHorizontal size={15} />
                         </motion.button>
 
+                        {/* R3-3: portalled to <body> and positioned from the
+                            trigger's own viewport rect (`openActionMenu`) —
+                            the card this button lives in has `overflow-hidden`
+                            for its own rounded corners, which clipped the
+                            role picker and "Remove member" when the menu was
+                            a plain absolutely-positioned descendant.
+                            `AnimatePresence` tracks presence via `isValidElement`
+                            (`onlyElements` in its source), which a bare
+                            `createPortal(...)` return value fails — it isn't a
+                            `ReactElement`, so `AnimatePresence` silently drops
+                            it and the menu never mounts at all. `MenuPortal`
+                            (a real component) is what `AnimatePresence` sees;
+                            it just forwards its children into the portal. */}
                         <AnimatePresence>
-                          {isMenuOpen && (
-                            <>
-                              <motion.div
-                                className="fixed inset-0 z-30"
-                                onClick={() => setActionMenuOpen(null)}
-                              />
-                              <motion.div
-                                ref={menuRef}
-                                initial={{ opacity: 0.99, scale: 0.95, y: -4 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                                transition={{ duration: 0.15 }}
-                                className="absolute right-0 top-10 z-40 min-w-[160px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
-                              >
-                                <div className="py-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleCopyUserId(member.user_id);
-                                      setActionMenuOpen(null);
-                                    }}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
-                                  >
-                                    {copiedId === member.user_id ? (
-                                      <Check size={13} className="text-green" />
-                                    ) : (
-                                      <Copy size={13} />
-                                    )}
-                                    {copiedId === member.user_id ? 'Copied!' : 'Copy User ID'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      removeMemberMutation.mutate(member.user_id);
-                                      setActionMenuOpen(null);
-                                    }}
-                                    disabled={removeMemberMutation.isPending}
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
-                                  >
-                                    <X size={13} />
-                                    Remove member
-                                  </button>
-                                </div>
-                              </motion.div>
-                            </>
+                          {isMenuOpen && menuPosition && (
+                            <MenuPortal>
+                            <motion.div
+                              ref={menuRef}
+                              initial={{ opacity: 0.99, scale: 0.95, y: -4 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                              transition={{ duration: 0.15 }}
+                              style={{ top: menuPosition.top, right: menuPosition.right }}
+                              className="fixed z-40 min-w-[170px] overflow-hidden rounded-xl border border-border bg-solid shadow-e3"
+                            >
+                              {/* BUG-15: role-change control, using the
+                                  existing owner-only PUT endpoint. */}
+                              <div className="border-b border-border-light px-3 py-2">
+                                <label
+                                  htmlFor={`member-role-${member.id}`}
+                                  className="block text-[10px] font-semibold uppercase tracking-wider text-text-dim mb-1"
+                                >
+                                  Role
+                                </label>
+                                <select
+                                  id={`member-role-${member.id}`}
+                                  value={member.role}
+                                  disabled={roleMutation.isPending}
+                                  onChange={(e) => {
+                                    const role = e.target.value;
+                                    if (role !== member.role) roleMutation.mutate({ userId: member.user_id, role });
+                                    closeActionMenu();
+                                  }}
+                                  aria-label={`Change ${member.username}'s role`}
+                                  className="w-full appearance-none rounded-chip border border-border bg-solid px-2 py-1 text-xs text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                >
+                                  <option value="editor">Editor</option>
+                                  <option value="viewer">Viewer</option>
+                                </select>
+                              </div>
+                              <div className="py-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleCopyUserId(member.user_id);
+                                    closeActionMenu();
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-text-muted hover:bg-card-2 hover:text-text transition-colors"
+                                >
+                                  {copiedId === member.user_id ? (
+                                    <Check size={13} className="text-green" />
+                                  ) : (
+                                    <Copy size={13} />
+                                  )}
+                                  {copiedId === member.user_id ? 'Copied!' : 'Copy User ID'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirmRemoveId !== member.user_id) {
+                                      setConfirmRemoveId(member.user_id);
+                                      return;
+                                    }
+                                    removeMemberMutation.mutate(member.user_id);
+                                    closeActionMenu();
+                                  }}
+                                  disabled={removeMemberMutation.isPending}
+                                  className={`flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors ${confirmRemoveId === member.user_id ? "font-semibold bg-red/10" : ""}`}
+                                >
+                                  <X size={13} />
+                                  {confirmRemoveId === member.user_id ? "Confirm remove" : "Remove member"}
+                                </button>
+                              </div>
+                            </motion.div>
+                            </MenuPortal>
                           )}
                         </AnimatePresence>
                       </div>
@@ -1318,8 +1479,8 @@ function MembersTab({
       <AddMemberModal
         addOpen={addOpen}
         addError={addError}
-        newUserId={newUserId}
-        setNewUserId={setNewUserId}
+        newEmail={newEmail}
+        setNewEmail={setNewEmail}
         newRole={newRole}
         setNewRole={setNewRole}
         addMemberMutation={addMemberMutation}
@@ -1334,8 +1495,8 @@ function MembersTab({
 function AddMemberModal({
   addOpen,
   addError,
-  newUserId,
-  setNewUserId,
+  newEmail,
+  setNewEmail,
   newRole,
   setNewRole,
   addMemberMutation,
@@ -1344,8 +1505,8 @@ function AddMemberModal({
 }: {
   addOpen: boolean;
   addError: string;
-  newUserId: string;
-  setNewUserId: (v: string) => void;
+  newEmail: string;
+  setNewEmail: (v: string) => void;
   newRole: string;
   setNewRole: (v: string) => void;
   addMemberMutation: { isPending: boolean };
@@ -1377,10 +1538,11 @@ function AddMemberModal({
                 )}
               </AnimatePresence>
               <Input
-                label="User ID"
-                placeholder="Enter the user's ID"
-                value={newUserId}
-                onChange={(e) => setNewUserId(e.target.value)}
+                label="Email"
+                type="email"
+                placeholder="Enter the member's email address"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
                 autoFocus
               />
               <Select

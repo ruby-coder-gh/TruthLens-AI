@@ -1,0 +1,1587 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TruthLens chat, direction B: Focused Reading</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+<style>
+/* ==========================================================================
+   TruthLens chat, direction B: "Focused Reading"
+   One centred reading column. The answer is typeset like a research note,
+   sources sit in the margin as sidenotes, and Truth Lens is a highlighter
+   on paper.
+
+   TOKENS  Same names as frontend/src/index.css wherever a token exists
+           (--color-bg, --color-solid, --color-text, --color-primary-soft,
+           --color-green/orange/red, --color-focus-ring…) so this maps onto the
+           current @theme block. New tokens: --color-border-strong (3:1 input
+           outline), --hl-* (highlighter fills), --page-* (document viewer,
+           paper in both themes), --font-prose, --measure, --note-w/--note-gap.
+   TYPE    Newsreader = everything you READ (question, answer, quoted
+           evidence, document pages). Inter = everything you OPERATE.
+           display 44/1.08 · question 32/1.2 · prose 19.5/1.62 ·
+           ui 14–15 · meta 12.5–13.5 · nothing below 11.5 (page running head).
+   SPACE   4/8 grid: 4 8 12 16 20 24 28 32 40 56.
+   RADIUS  6 chip · 10 control · 14 card · 999 pill. Document sheet 4.
+   MOTION  150ms state · 220–240ms drawer · 460ms highlighter sweep (the one
+           orchestrated moment). Everything collapses under reduced motion.
+   VERDICTS never colour alone: icon + word + stroke SHAPE
+           supported = full highlight · partial = half-height highlight ·
+           unsupported = wavy underline · contradicted = pink fill + wavy.
+   ========================================================================== */
+
+:root {
+  --font-sans: 'Inter', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+  --font-prose: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --measure: 40rem;
+  --note-w: 216px;
+  --note-gap: 36px;
+  --r-chip: 6px;
+  --r-control: 10px;
+  --r-card: 14px;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  /* Document viewer: a PDF page stays paper in both themes. */
+  --page-bg: #FFFEFA;
+  --page-ink: #22201B;
+  --page-dim: #57534A;
+  --page-rule: rgba(34, 32, 27, .14);
+  --page-pen: #4338CA;
+  --page-hl-sup: #CFEBC2;
+  --page-hl-par: #FBE39A;
+  --page-hl-ref: #F8CDC8;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #F7F4ED;            /* paper */
+  --color-bg-soft: #EFEBE2;       /* sunk: rail, hovers */
+  --color-solid: #FFFDF8;         /* sheet: composer, drawer, active note */
+  --color-text: #22201B;          /* ink         15.2:1 on paper */
+  --color-text-muted: #57534A;    /* graphite     6.9:1 */
+  --color-text-dim: #6B675E;      /* pencil       5.1:1 */
+  --color-border: rgba(34, 32, 27, .15);
+  --color-border-light: rgba(34, 32, 27, .09);
+  --color-border-strong: #8D887E; /* input outline 3.2:1 */
+  --color-primary: #4F46E5;       /* pen fill, white on it 6.3:1 */
+  --color-primary-soft: #4338CA;  /* pen ink      7.2:1 */
+  --color-on-primary: #FFFFFF;
+  --color-primary-tint: rgba(79, 70, 229, .09);
+  --color-green: #166534;         /* 6.5:1 */
+  --color-orange: #9A4508;        /* 5.9:1 */
+  --color-red: #B91C1C;           /* 5.9:1 */
+  --color-trust-high: #15803D;
+  --color-trust-mid: #B45309;
+  --hl-supported: #CFEBC2;
+  --hl-partial: #FBE39A;
+  --hl-refuted: #F8CDC8;
+  --conflict-bg: #FAEEDB;
+  --color-focus-ring: #4F46E5;    /* 5.7:1 on paper */
+  --e1: 0 1px 2px rgba(60, 48, 20, .06), 0 6px 20px -12px rgba(60, 48, 20, .24);
+  --e2: 0 2px 4px rgba(60, 48, 20, .06), 0 16px 36px -18px rgba(60, 48, 20, .32);
+  --e3: 0 10px 14px -8px rgba(40, 32, 14, .14), 0 32px 64px -24px rgba(40, 32, 14, .38);
+  --scrim: rgba(34, 32, 27, .28);
+  --stage: #E4DFD4;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #15181F;            /* ink */
+  --color-bg-soft: #10131A;
+  --color-solid: #1C2029;
+  --color-text: #ECE7DC;          /* 14.3:1 */
+  --color-text-muted: #C2BCAF;    /* 10.0:1 */
+  --color-text-dim: #A6A194;      /*  7.0:1 */
+  --color-border: rgba(236, 231, 220, .15);
+  --color-border-light: rgba(236, 231, 220, .08);
+  --color-border-strong: #6B707C; /* 3.6:1 */
+  --color-primary: #8B85FF;
+  --color-primary-soft: #ABA7FF;  /* 8.2:1 */
+  --color-on-primary: #0F1115;    /* 6.2:1 on #8B85FF */
+  --color-primary-tint: rgba(139, 133, 255, .14);
+  --color-green: #7EE0A8;
+  --color-orange: #F5C451;
+  --color-red: #FCA5A5;
+  --color-trust-high: #34D399;
+  --color-trust-mid: #F5C451;
+  --hl-supported: rgba(110, 231, 150, .22);
+  --hl-partial: rgba(250, 204, 21, .26);
+  --hl-refuted: rgba(248, 113, 113, .28);
+  --conflict-bg: rgba(245, 196, 81, .10);
+  --color-focus-ring: #ABA7FF;
+  --e1: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -14px rgba(0, 0, 0, .6);
+  --e2: 0 2px 4px rgba(0, 0, 0, .42), 0 16px 40px -18px rgba(0, 0, 0, .66);
+  --e3: 0 10px 14px -8px rgba(0, 0, 0, .5), 0 32px 64px -24px rgba(0, 0, 0, .74);
+  --scrim: rgba(5, 7, 12, .56);
+  --stage: #0B0D12;
+  --page-bg: #E9E4D8;             /* the page dims slightly at night */
+}
+
+/* Verdict variables: any element carrying data-verdict gets its ink + stroke. */
+[data-verdict="supported"]    { --vink: var(--color-green);  --hl: var(--hl-supported); --hl-h: 80%; --hl-y: 58%; }
+[data-verdict="partial"]      { --vink: var(--color-orange); --hl: var(--hl-partial);   --hl-h: 46%; --hl-y: 94%; }
+[data-verdict="unsupported"]  { --vink: var(--color-red);    --hl: transparent;         --hl-h: 80%; --hl-y: 58%; }
+[data-verdict="contradicted"] { --vink: var(--color-red);    --hl: var(--hl-refuted);   --hl-h: 80%; --hl-y: 58%; }
+
+/* ─── Base ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 400 15px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; color: inherit; }
+a { color: inherit; }
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.i {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+/* ─── Stage + mobile frame ─────────────────────────────────────────────── */
+.stage { min-height: 100dvh; display: flex; justify-content: center; align-items: center; background: var(--color-bg); }
+.stage.is-mobile { background: var(--stage); padding: 24px; }
+.app {
+  position: relative; isolation: isolate; overflow: hidden;
+  width: 100%; height: 100dvh;
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  background: var(--color-bg);
+  container: app / inline-size;
+}
+.stage.is-mobile .app {
+  width: 375px; height: min(812px, calc(100dvh - 48px));
+  border-radius: 32px; border: 1px solid var(--color-border); box-shadow: var(--e3);
+}
+.skip {
+  position: absolute; left: 12px; top: -64px; z-index: 100;
+  background: var(--color-solid); color: var(--color-text); padding: 10px 14px;
+  border-radius: var(--r-control); box-shadow: var(--e2); text-decoration: none; font-weight: 500;
+}
+.skip:focus { top: 12px; }
+
+/* ─── Rail: slim by default, expands to labels + recents ───────────────── */
+.rail {
+  position: relative; z-index: 30;
+  width: 64px; display: flex; flex-direction: column; gap: 2px;
+  padding: 10px;
+  background: var(--color-bg-soft);
+  border-right: 1px solid var(--color-border-light);
+}
+.app[data-rail="open"] .rail { width: 248px; padding-inline: 12px; }
+.rail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.rail-item {
+  position: relative; display: flex; align-items: center; gap: 12px;
+  width: 100%; min-height: 44px; padding: 0 12px;
+  border: 0; border-radius: var(--r-control); background: none; cursor: pointer;
+  color: var(--color-text-muted); text-decoration: none; text-align: left;
+  font: 500 14px/1.25 var(--font-sans);
+  transition: background-color .15s, color .15s;
+}
+.rail-item .i { width: 20px; height: 20px; }
+.rail-item:hover { background: var(--color-border-light); color: var(--color-text); }
+.rail-item[aria-current="page"] { background: var(--color-solid); color: var(--color-text); box-shadow: var(--e1); }
+.rail-item[aria-current="page"] .i { color: var(--color-primary-soft); }
+.rail-new { border: 1px solid var(--color-border); color: var(--color-text); margin-bottom: 8px; padding-inline: 11px; }
+.app:not([data-rail="open"]) .rail-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+/* Collapsed: a real tooltip on hover AND keyboard focus. */
+.app:not([data-rail="open"]) .rail-item[data-tip]:hover::after,
+.app:not([data-rail="open"]) .rail-item[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+  white-space: nowrap; pointer-events: none;
+  background: var(--color-text); color: var(--color-bg);
+  font: 500 12.5px/1 var(--font-sans); padding: 8px 10px; border-radius: 6px; box-shadow: var(--e2);
+}
+.rail-recents { display: none; margin-top: 16px; min-height: 0; overflow: auto; }
+.app[data-rail="open"] .rail-recents { display: block; }
+.rail-h { font: 600 12.5px/1.2 var(--font-sans); color: var(--color-text-dim); margin: 0 12px 6px; }
+.recent {
+  display: block; width: 100%; padding: 10px 12px; min-height: 44px;
+  border: 0; border-radius: var(--r-control); background: none; cursor: pointer; text-align: left;
+  font: 400 13.5px/1.35 var(--font-sans); color: var(--color-text-muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.recent:hover { background: var(--color-border-light); color: var(--color-text); }
+.recent[aria-current="true"] { color: var(--color-text); background: var(--color-border-light); }
+.rail-foot { margin-top: auto; position: relative; }
+.user { padding: 0 8px; }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  background: var(--color-primary-tint); color: var(--color-primary-soft);
+  font: 600 11.5px/1 var(--font-sans);
+}
+.menu {
+  position: absolute; left: calc(100% + 8px); bottom: 0; z-index: 50; min-width: 232px;
+  background: var(--color-solid); border: 1px solid var(--color-border);
+  border-radius: var(--r-card); box-shadow: var(--e3); padding: 6px;
+}
+.app[data-rail="open"] .menu { left: 0; bottom: calc(100% + 8px); }
+.menu-who { padding: 10px 12px 8px; font-size: 13px; color: var(--color-text-dim); border-bottom: 1px solid var(--color-border-light); margin-bottom: 4px; }
+.menu-who strong { display: block; color: var(--color-text); font-weight: 600; font-size: 14px; }
+.menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px;
+  border: 0; border-radius: 8px; background: none; cursor: pointer; text-align: left; font-size: 14px;
+}
+.menu button:hover { background: var(--color-bg-soft); }
+.nav-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); opacity: 0; visibility: hidden; transition: opacity .2s, visibility 0s linear .2s; }
+
+/* ─── Main + single top bar ────────────────────────────────────────────── */
+.main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
+.topbar {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  height: 56px; padding: 0 12px 0 8px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.brand {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px; border-radius: 8px;
+  font: 600 15px/1 var(--font-sans); letter-spacing: -.01em; text-decoration: none; color: var(--color-text);
+}
+.brand-mark { width: 22px; height: 22px; flex: none; }
+.crumb-sep { color: var(--color-text-dim); padding: 0 2px; }
+.ws {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 0 10px;
+  border: 0; border-radius: var(--r-control); background: none; cursor: pointer; text-align: left;
+}
+.ws:hover { background: var(--color-bg-soft); }
+.ws-name { font: 500 14.5px/1.2 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ws-short { display: none; }
+.ws-count { font-size: 13px; color: var(--color-text-dim); white-space: nowrap; }
+.ws .i { color: var(--color-text-dim); }
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: none; }
+.rt-menu { display: none; }
+
+.icon-btn {
+  position: relative; display: inline-grid; place-items: center; flex: none;
+  width: 40px; height: 40px; border: 0; border-radius: var(--r-control); background: none;
+  color: var(--color-text-muted); cursor: pointer; transition: background-color .15s, color .15s;
+}
+.icon-btn::after { content: ""; position: absolute; inset: -2px; }  /* 44px hit area */
+.icon-btn .i { width: 18px; height: 18px; }
+.icon-btn:hover { background: var(--color-bg-soft); color: var(--color-text); }
+.icon-btn:active { background: var(--color-border-light); }
+.icon-btn[aria-pressed="true"] { color: var(--color-primary-soft); background: var(--color-primary-tint); }
+
+/* Truth Lens: ONE control, global, lives in the top bar. */
+.lens-toggle {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px 0 12px;
+  border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-solid);
+  cursor: pointer; font: 500 14px/1 var(--font-sans); color: var(--color-text-muted);
+  transition: border-color .15s, color .15s;
+}
+.lens-toggle:hover { color: var(--color-text); border-color: var(--color-border-strong); }
+.lens-track { position: relative; width: 30px; height: 18px; border-radius: 999px; background: var(--color-border-strong); transition: background-color .15s; }
+.lens-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--color-solid); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .18s var(--ease-out);
+}
+.lens-toggle[aria-checked="true"] { color: var(--color-text); border-color: var(--color-primary); }
+.lens-toggle[aria-checked="true"] .i { color: var(--color-primary-soft); }
+.lens-toggle[aria-checked="true"] .lens-track { background: var(--color-primary); }
+.lens-toggle[aria-checked="true"] .lens-track::after { transform: translateX(12px); background: var(--color-on-primary); }
+
+/* ─── Scroll area = the container that decides margin vs. strip ───────── */
+.scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column;
+  container: main / inline-size;
+  scrollbar-gutter: stable; scrollbar-width: thin;
+}
+.page {
+  flex: 1 0 auto; display: flex; flex-direction: column;
+  width: min(var(--measure), calc(100% - 40px)); margin: 0 auto; padding: 56px 0 40px;
+}
+.app[data-view="empty"] .thread, .app[data-view="thread"] .empty { display: none; }
+
+/* ─── 1 · Empty state ──────────────────────────────────────────────────── */
+.empty { margin-block: auto; padding-bottom: 16px; }
+.empty-title { font: 400 44px/1.08 var(--font-prose); letter-spacing: -.02em; margin: 0 0 16px; text-wrap: balance; }
+.empty-lede { font: 400 19px/1.55 var(--font-prose); color: var(--color-text-muted); margin: 0; max-width: 32em; text-wrap: pretty; }
+.docs { display: flex; flex-wrap: wrap; gap: 6px 8px; list-style: none; margin: 16px 0 36px; padding: 0; }
+.doc-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px 0 8px;
+  border-radius: 999px; background: var(--color-bg-soft); border: 1px solid var(--color-border-light);
+  font: 500 13px/1 var(--font-sans); color: var(--color-text-muted);
+}
+.doc-chip .i { width: 14px; height: 14px; color: var(--color-text-dim); }
+.doc-kind { color: var(--color-text-dim); font-weight: 400; }
+.suggest { list-style: none; margin: 0; padding: 0; border-bottom: 1px solid var(--color-border-light); }
+.suggest li { border-top: 1px solid var(--color-border-light); }
+.suggest-q {
+  display: flex; align-items: center; gap: 16px; width: 100%; min-height: 56px; padding: 12px 4px;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  font: 400 19px/1.4 var(--font-prose); color: var(--color-text);
+}
+.q-text { text-decoration: underline 1.5px transparent; text-underline-offset: .22em; transition: text-decoration-color .15s; }
+.suggest-q:hover .q-text, .suggest-q:focus-visible .q-text { text-decoration-color: var(--color-primary-soft); }
+.suggest-q .i { margin-left: auto; color: var(--color-primary-soft); opacity: 0; transition: opacity .15s; }
+.suggest-q:hover .i, .suggest-q:focus-visible .i { opacity: 1; }
+@media (hover: none) { .suggest-q .i { opacity: .7; } }
+
+/* ─── Thread ───────────────────────────────────────────────────────────── */
+.question { font: 500 32px/1.2 var(--font-prose); letter-spacing: -.015em; margin: 0 0 20px; text-wrap: balance; }
+
+/* Status line: the pipeline, which resolves into the claim summary. */
+.status { position: relative; display: grid; min-height: 46px; padding-bottom: 10px; margin-bottom: 28px; }
+.status > .pipe, .status > .summary { grid-area: 1 / 1; align-self: center; }
+.status-rule { position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--color-border-light); overflow: hidden; }
+.status-fill {
+  position: absolute; inset: 0; background: var(--color-text);
+  transform-origin: left; transform: scaleX(var(--p, 0));
+  transition: transform .5s var(--ease-out), background-color .6s ease;
+}
+.app[data-phase="done"] .status-fill { background: var(--color-border); }  /* the ink dries into a hairline */
+.pipe, .summary { transition: opacity .22s ease, visibility 0s linear .22s; }
+.summary { opacity: 0; visibility: hidden; }
+.app[data-phase="done"] .pipe { opacity: 0; visibility: hidden; }
+.app[data-phase="done"] .summary { opacity: 1; visibility: visible; transition: opacity .3s ease .12s, visibility 0s; }
+
+.pipe { display: flex; align-items: center; min-width: 0; font: 500 13.5px/1.3 var(--font-sans); color: var(--color-text-dim); }
+.steps { display: flex; align-items: center; list-style: none; margin: 0; padding: 0; min-width: 0; }
+.step { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.step + .step::before { content: ""; width: 14px; height: 1px; background: var(--color-border-strong); margin: 0 10px; }
+.step-mark {
+  position: relative; display: grid; place-items: center; flex: none;
+  width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--color-border-strong);
+}
+.step-mark .i { width: 10px; height: 10px; stroke-width: 3; opacity: 0; color: var(--color-bg); }
+.step[data-s="active"] { color: var(--color-text); }
+.step[data-s="active"] .step-mark { border-color: var(--color-primary); border-right-color: transparent; animation: spin .9s linear infinite; }
+.step[data-s="done"] { color: var(--color-text-muted); }
+.step[data-s="done"] .step-mark { background: var(--color-text-muted); border-color: var(--color-text-muted); }
+.step[data-s="done"] .step-mark .i { opacity: 1; }
+.pipe-time { margin-left: auto; padding-left: 16px; font-weight: 400; font-variant-numeric: tabular-nums; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; }
+.sum-lead { font: 500 13.5px/1.3 var(--font-sans); color: var(--color-text-dim); margin-right: 6px; }
+.chip {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px;
+  border: 0; border-radius: 999px; background: none; cursor: pointer;
+  font: 500 14px/1 var(--font-sans); color: var(--color-text); transition: background-color .15s;
+}
+.chip::after { content: ""; position: absolute; inset: -4px -1px; }
+.chip:hover { background: var(--color-bg-soft); }
+.chip .i { color: var(--vink); }
+.chip--conf .i { color: var(--color-orange); }
+.trust {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 8px 0 12px;
+  border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-solid); cursor: pointer;
+  font: 500 13.5px/1 var(--font-sans); color: var(--color-text-muted); transition: border-color .15s;
+}
+.trust:hover { border-color: var(--color-border-strong); color: var(--color-text); }
+.trust strong { font-size: 15px; font-weight: 600; color: var(--color-text); font-variant-numeric: tabular-nums; }
+.trust-meter { width: 28px; height: 4px; border-radius: 2px; background: var(--color-border); overflow: hidden; }
+.trust-meter i { display: block; height: 100%; width: calc(var(--v) * 1%); background: var(--color-trust-high); }
+.trust .i { transition: transform .2s var(--ease-out); }
+.trust[aria-expanded="true"] .i { transform: rotate(180deg); }
+
+/* Highlighter samples (summary chips + legend) = the legend IS the style. */
+.hl-sample {
+  background-image: linear-gradient(var(--hl), var(--hl)); background-repeat: no-repeat;
+  background-size: 100% var(--hl-h); background-position: 0 var(--hl-y);
+  border-radius: .2em .34em .24em .38em; padding: 0 .22em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.hl-sample[data-verdict="unsupported"], .hl-sample[data-verdict="contradicted"] {
+  text-decoration: underline wavy var(--vink) 1.5px; text-underline-offset: .26em; text-decoration-skip-ink: none;
+}
+
+/* Trust detail (on demand) */
+.tp {
+  margin: -12px 0 28px; padding: 20px 20px 16px;
+  background: var(--color-solid); border: 1px solid var(--color-border-light); border-radius: var(--r-card); box-shadow: var(--e1);
+}
+.tp-top { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: start; }
+.tp-num { display: block; font: 500 48px/1 var(--font-prose); font-variant-numeric: lining-nums tabular-nums; }
+.tp-of { display: block; margin: 6px 0 0; font: 500 12.5px/1.35 var(--font-sans); color: var(--color-text-dim); max-width: 9em; }
+.tp-meters { margin: 0; display: grid; gap: 10px; }
+.tp-row { display: grid; grid-template-columns: 136px 1fr 34px; align-items: center; gap: 12px; font-size: 13.5px; }
+.tp-row dt { color: var(--color-text-muted); }
+.tp-row dd { margin: 0; }
+.tp-row .tp-v { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.tp-low { display: block; font-size: 12px; color: var(--color-orange); font-weight: 600; margin-top: 2px; }
+.meter { display: block; height: 6px; border-radius: 3px; background: var(--color-border-light); overflow: hidden; }
+.meter b { display: block; height: 100%; width: calc(var(--v) * 1%); background: var(--color-text-muted); border-radius: 3px; }
+.meter.is-low b { background: var(--color-trust-mid); }
+.tp-steps { list-style: none; margin: 18px 0 0; padding: 14px 0 0; border-top: 1px solid var(--color-border-light); display: grid; gap: 6px; counter-reset: s; }
+.tp-steps li { display: flex; gap: 10px; font-size: 13.5px; color: var(--color-text-muted); counter-increment: s; }
+.tp-steps li::before { content: counter(s); width: 18px; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.tp-steps span { margin-left: auto; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.tp-foot { margin: 12px 0 0; font-size: 13px; color: var(--color-text-dim); }
+.tp-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--color-border-light); font: 400 15px/1.5 var(--font-prose); }
+
+/* ─── Prose + Truth Lens ───────────────────────────────────────────────── */
+.prose { font: 400 19.5px/1.62 var(--font-prose); color: var(--color-text); text-wrap: pretty; }
+.prose p { margin: 0; }
+.prose strong { font-weight: 600; }
+.caret { display: inline-block; width: 0; height: 1.05em; vertical-align: -.16em; margin-left: 2px; border-left: 2px solid var(--color-primary); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.cite {
+  position: relative; display: inline; padding: 0 .14em; margin-left: .04em; border: 0; background: none;
+  font: 600 .6em/1 var(--font-sans); vertical-align: .72em; color: var(--color-primary-soft);
+  border-radius: 3px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+button.cite::after { content: ""; position: absolute; inset: -8px -5px; }
+button.cite:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* Lens on: the claim is the control, so its citation becomes plain text (no nested buttons). */
+.cite-static { display: none; }
+.app[data-lens="on"] .cite-btn { display: none; }
+.app[data-lens="on"] .cite-static { display: inline; }
+
+/* The claim span is plain text until the lens is on; then the highlighter sweeps in. */
+.claim {
+  background-image: linear-gradient(var(--hl), var(--hl)); background-repeat: no-repeat;
+  background-size: 0% var(--hl-h); background-position: 0 var(--hl-y);
+  border-radius: .2em .34em .24em .38em; padding: 0 .08em; margin: 0 -.08em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  transition: background-size .2s ease-in, box-shadow .15s ease;
+}
+.app[data-lens="on"] .claim {
+  background-size: 100% var(--hl-h); cursor: pointer;
+  transition: background-size .46s cubic-bezier(.3, .7, .2, 1) calc(var(--i, 0) * 110ms), box-shadow .15s ease;
+}
+.app[data-lens="on"] .claim[data-verdict="unsupported"],
+.app[data-lens="on"] .claim[data-verdict="contradicted"] {
+  text-decoration: underline wavy var(--vink) 1.5px; text-underline-offset: .24em; text-decoration-skip-ink: none;
+}
+.app[data-lens="on"] .claim:hover, .app[data-lens="on"] .claim.is-hover { box-shadow: inset 0 -1.5px 0 var(--vink); }
+.app[data-lens="on"] .claim.is-active { box-shadow: inset 0 -2px 0 var(--vink); }
+.claim:focus-visible { outline-offset: 3px; }
+.vg { display: none; }
+.app[data-lens="on"] .vg { display: inline; color: var(--vink); margin-left: .14em; }
+.vg .i { width: .7em; height: .7em; stroke-width: 2.4; vertical-align: -.04em; }
+.app:not([data-lens="on"]) .lens-sr { display: none; }
+
+/* ─── Margin notes (Tufte sidenotes), only when the gutter can hold them ─ */
+.sn { display: none; }
+@keyframes noteIn { from { opacity: 0; transform: translateX(-6px); } }
+@container main (width >= 1144px) {
+  .sn {
+    display: block; float: right; clear: right; position: relative;
+    width: var(--note-w);
+    margin: .3em calc(-1 * (var(--note-w) + var(--note-gap))) 12px 0;
+    font: 400 13px/1.45 var(--font-sans); color: var(--color-text-muted); text-align: left;
+  }
+  .app[data-lens="on"] .sn-src { display: none; }
+  .app:not([data-lens="on"]) .sn-claim { display: none; }
+}
+@container main (width >= 1320px) {
+  .page { --note-w: 248px; --note-gap: 44px; }
+}
+.sn.is-new { animation: noteIn .3s var(--ease-out); }
+.sn-src { border: 0; background: none; padding: 6px 10px 8px; border-radius: var(--r-control); cursor: pointer; transition: background-color .15s; }
+.sn-src:hover, .sn-src.is-hover { background: var(--color-bg-soft); }
+.sn-head { display: flex; align-items: baseline; gap: 7px; }
+.sn-n { font: 600 12px/1 var(--font-sans); color: var(--color-primary-soft); font-variant-numeric: tabular-nums; }
+.sn-title { font: 600 13.5px/1.3 var(--font-sans); color: var(--color-text); }
+.sn-meta { display: block; margin-top: 2px; font-size: 12.5px; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.sn-quote {
+  margin-top: 6px; font: italic 400 14.5px/1.45 var(--font-prose); color: var(--color-text-muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sn-flag { display: flex; align-items: center; gap: 6px; margin-top: 6px; font: 600 12.5px/1.3 var(--font-sans); color: var(--color-orange); }
+.sn-flag .i { width: 14px; height: 14px; }
+.sn-claim {
+  padding: 6px 10px 8px 12px; border-left: 2px solid var(--vink); border-radius: 0 var(--r-control) var(--r-control) 0;
+  cursor: pointer; transition: background-color .15s, box-shadow .15s;
+}
+.sn-claim:hover, .sn-claim.is-hover { background: var(--color-bg-soft); }
+.sn-claim.is-active { background: var(--color-solid); box-shadow: var(--e1); cursor: default; }
+.sn-verdict { display: flex; align-items: center; gap: 6px; font: 600 13px/1.3 var(--font-sans); color: var(--vink); }
+.sn-verdict .i { width: 14px; height: 14px; }
+.sn-conf { margin-left: auto; font-weight: 500; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.sn-srcline { display: block; margin-top: 2px; font-size: 12.5px; color: var(--color-text-dim); }
+.sn-more { display: none; }
+.sn-claim.is-active .sn-more { display: block; }
+.sn-claim.is-active .sn-quote { -webkit-line-clamp: 6; color: var(--color-text); }
+.link-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin-top: 8px; padding: 0 10px; margin-left: -10px;
+  border: 0; border-radius: 8px; background: none; cursor: pointer;
+  font: 600 13px/1 var(--font-sans); color: var(--color-primary-soft);
+}
+.link-btn:hover { background: var(--color-primary-tint); }
+.link-btn .i { width: 14px; height: 14px; }
+
+/* Narrow: the selected claim's evidence opens inline under the paragraph. */
+.mcard {
+  display: none; margin-top: 20px; padding: 14px 16px 12px;
+  background: var(--color-solid); border: 1px solid var(--color-border-light); border-left: 3px solid var(--vink);
+  border-radius: 4px var(--r-card) var(--r-card) 4px; box-shadow: var(--e1);
+}
+@container main (width < 1144px) {
+  .app[data-lens="on"] .mcard.has-claim { display: block; animation: noteIn .22s var(--ease-out); }
+}
+.mc-head { display: flex; align-items: center; gap: 8px; margin: -6px -8px 4px 0; }
+.mc-verdict { display: flex; align-items: center; gap: 6px; font: 600 14px/1.3 var(--font-sans); color: var(--vink); }
+.mc-head .icon-btn { margin-left: auto; }
+.mc-k { margin: 10px 0 2px; font: 500 12.5px/1.3 var(--font-sans); color: var(--color-text-dim); }
+.mc-claim { margin: 0; font: 400 16px/1.5 var(--font-prose); }
+.mc-ev { margin: 0; font: italic 400 16px/1.5 var(--font-prose); color: var(--color-text); }
+.mcard .sn-flag { margin-top: 10px; }
+
+/* ─── Actions ──────────────────────────────────────────────────────────── */
+.actions { display: none; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 28px; }
+.app[data-phase="done"] .actions { display: flex; }
+.btn {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px;
+  border: 1px solid transparent; border-radius: var(--r-control); background: none; cursor: pointer;
+  font: 500 14px/1 var(--font-sans); color: var(--color-text); transition: background-color .15s, border-color .15s, color .15s;
+}
+.btn::after { content: ""; position: absolute; inset: -2px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-pen { color: var(--color-primary-soft); border-color: color-mix(in srgb, var(--color-primary-soft) 45%, transparent); }
+.btn-pen:hover { background: var(--color-primary-tint); border-color: var(--color-primary-soft); }
+.btn-pen:active { background: color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.btn-quiet { color: var(--color-text-muted); }
+.btn-quiet:hover { background: var(--color-bg-soft); color: var(--color-text); }
+.act-div { width: 1px; height: 20px; background: var(--color-border); margin: 0 6px; }
+.made { margin-left: auto; font-size: 12.5px; color: var(--color-text-dim); }
+
+/* ─── References (the source strip) ───────────────────────────────────── */
+.refs { display: none; margin-top: 40px; }
+.app[data-phase="rank"] .refs, .app[data-phase="write"] .refs, .app[data-phase="verify"] .refs, .app[data-phase="done"] .refs { display: block; }
+.refs-h { margin: 0 0 8px; font: 600 13.5px/1.3 var(--font-sans); color: var(--color-text-muted); }
+.ref-list, .ref-skel { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--color-border-light); }
+.ref-skel { display: none; }
+.app[data-phase="rank"] .ref-skel { display: block; }
+.app[data-phase="rank"] .ref-list { display: none; }
+.ref-skel li { height: 49px; border-bottom: 1px solid var(--color-border-light); display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+.ref-skel span { height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--color-border-light) 25%, var(--color-border) 50%, var(--color-border-light) 75%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.ref {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; align-items: center; gap: 12px;
+  width: 100%; min-height: 48px; padding: 8px; border: 0; border-bottom: 1px solid var(--color-border-light);
+  background: none; cursor: pointer; text-align: left; font: 400 14px/1.35 var(--font-sans); color: var(--color-text);
+  transition: background-color .15s;
+}
+.ref:hover, .ref.is-hover { background: var(--color-bg-soft); }
+.ref-n { font: 600 12.5px/1 var(--font-sans); color: var(--color-primary-soft); font-variant-numeric: tabular-nums; }
+.ref.is-uncited .ref-n { color: var(--color-text-dim); }
+.ref-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.ref-title { font-weight: 500; }
+.ref-page, .ref-uncited { font-size: 13px; color: var(--color-text-dim); }
+.app:not([data-phase="done"]) .ref-uncited { display: none; }
+.ref-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--color-orange); }
+.ref-flag .i { width: 13px; height: 13px; }
+.ref-rel { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.ref-rel .meter { width: 40px; height: 4px; }
+.ref-rel .meter b { background: var(--color-primary-soft); opacity: .8; }
+.ref > .i { color: var(--color-text-dim); }
+
+/* ─── Composer ─────────────────────────────────────────────────────────── */
+.dock { position: sticky; bottom: 0; z-index: 5; padding: 20px 0 12px; background: linear-gradient(to top, var(--color-bg) 70%, transparent); }
+.dock-in { width: min(var(--measure), calc(100% - 40px)); margin: 0 auto; }
+.composer {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 10px 10px 16px;
+  background: var(--color-solid); border: 1px solid var(--color-border-strong); border-radius: 16px; box-shadow: var(--e1);
+  transition: border-color .15s, box-shadow .15s;
+}
+.composer:focus-within { border-color: var(--color-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent), var(--e1); }
+.composer textarea {
+  border: 0; background: none; resize: none; outline: none; padding: 2px 6px 0 0;
+  font: 400 16px/1.5 var(--font-sans); color: var(--color-text); min-height: 26px; max-height: 9em;
+}
+.composer textarea::placeholder { color: var(--color-text-dim); }
+.comp-row { display: flex; align-items: center; gap: 8px; }
+.scope {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; margin-left: -8px;
+  border: 0; border-radius: 8px; background: none; cursor: pointer; font: 500 13px/1 var(--font-sans); color: var(--color-text-muted);
+}
+.scope:hover { background: var(--color-bg-soft); color: var(--color-text); }
+.scope .i { width: 15px; height: 15px; }
+.send {
+  position: relative; margin-left: auto; display: grid; place-items: center; width: 40px; height: 40px;
+  border: 0; border-radius: 12px; background: var(--color-primary); color: var(--color-on-primary); cursor: pointer;
+  transition: background-color .15s, transform .1s;
+}
+.send::after { content: ""; position: absolute; inset: -2px; }
+.send .i { width: 18px; height: 18px; stroke-width: 2.2; }
+.send:hover { background: var(--color-primary-soft); }
+[data-theme="dark"] .send:hover { background: #9D98FF; }
+.send:active { transform: scale(.96); }
+.send:disabled { background: var(--color-bg-soft); color: var(--color-text-dim); cursor: not-allowed; transform: none; }
+.send:focus-visible { outline-offset: 3px; }
+.dock-note { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--color-text-dim); }
+
+/* ─── Evidence drawer (on demand) ──────────────────────────────────────── */
+.dr-scrim { position: absolute; inset: 0; z-index: 55; background: var(--scrim); opacity: 0; visibility: hidden; transition: opacity .16s ease, visibility 0s linear .16s; }
+.app[data-drawer="open"] .dr-scrim { opacity: 1; visibility: visible; transition: opacity .22s ease; }
+.drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 60; width: min(520px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--color-solid); border-left: 1px solid var(--color-border); box-shadow: var(--e3);
+  transform: translateX(32px); opacity: 0; visibility: hidden;
+  transition: transform .16s ease-in, opacity .16s ease-in, visibility 0s linear .16s;
+}
+.app[data-drawer="open"] .drawer { transform: none; opacity: 1; visibility: visible; transition: transform .24s var(--ease-out), opacity .2s ease; }
+.dr-head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 16px 12px 24px; }
+.dr-headtext { min-width: 0; flex: 1; }
+.dr-title { margin: 0; font: 500 26px/1.15 var(--font-prose); letter-spacing: -.01em; }
+.dr-full { margin: 6px 0 0; font-size: 13px; color: var(--color-text-muted); }
+.dr-meta { margin: 2px 0 0; font-size: 13px; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.dr-tabs { display: flex; gap: 6px; padding: 0 24px 14px; border-bottom: 1px solid var(--color-border-light); }
+.dr-tab {
+  min-width: 40px; height: 40px; border: 1px solid var(--color-border); border-radius: var(--r-control); background: none; cursor: pointer;
+  font: 600 13.5px/1 var(--font-sans); color: var(--color-text-muted); font-variant-numeric: tabular-nums; transition: background-color .15s, color .15s;
+}
+.dr-tab:hover { background: var(--color-bg-soft); color: var(--color-text); }
+.dr-tab[aria-current="true"] { background: var(--color-text); border-color: var(--color-text); color: var(--color-bg); }
+.dr-body { flex: 1; overflow: auto; padding: 18px 24px 32px; scrollbar-width: thin; }
+.dr-conflict {
+  display: flex; gap: 10px; margin-bottom: 18px; padding: 12px 14px;
+  background: var(--conflict-bg); border-left: 3px solid var(--color-orange); border-radius: 4px var(--r-control) var(--r-control) 4px;
+  font-size: 14px; line-height: 1.5;
+}
+.dr-conflict > .i { color: var(--color-orange); margin-top: 2px; }
+.dr-conflict p { margin: 0; }
+.dr-conflict .link-btn { margin-top: 4px; }
+.pagebar { display: flex; align-items: center; gap: 2px; margin-bottom: 10px; font-size: 13px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.pagebar .btn { margin-left: auto; }
+.sheet {
+  background: var(--page-bg); color: var(--page-ink);
+  border-radius: 4px; box-shadow: var(--e2), 0 0 0 1px var(--page-rule);
+  padding: 26px 30px 30px 42px; font: 400 14.5px/1.6 var(--font-prose);
+}
+.sheet p { margin: 0 0 .9em; }
+.sheet ul { margin: 0 0 .9em; padding-left: 1.1em; }
+.pg-run { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding-bottom: 10px; border-bottom: 1px solid var(--page-rule); font: 500 11.5px/1.3 var(--font-sans); color: var(--page-dim); }
+.pg-title { margin: 0 0 .6em; font: 600 19px/1.25 var(--font-prose); }
+.sheet h4 { margin: 1.3em 0 .45em; font: 600 13.5px/1.3 var(--font-sans); }
+.sheet table { width: 100%; border-collapse: collapse; margin: 0 0 1em; font: 400 12.5px/1.3 var(--font-sans); font-variant-numeric: tabular-nums; }
+.sheet th, .sheet td { padding: 6px 4px; border-bottom: 1px solid var(--page-rule); text-align: right; }
+.sheet th:first-child { text-align: left; font-weight: 500; }
+.sheet thead th { font-weight: 600; color: var(--page-dim); }
+.pg-sign { color: var(--page-dim); }
+.chunk { position: relative; }
+.chunk::before { content: ""; position: absolute; left: -24px; top: .3em; bottom: .3em; width: 3px; border-radius: 2px; background: var(--page-pen); }
+.sheet [data-verdict="supported"] { --hl: var(--page-hl-sup); }
+.sheet [data-verdict="partial"] { --hl: var(--page-hl-par); }
+.sheet [data-verdict="contradicted"] { --hl: var(--page-hl-ref); }
+.ev {
+  color: inherit; background-color: transparent;
+  background-image: linear-gradient(var(--hl), var(--hl)); background-repeat: no-repeat;
+  background-size: 100% var(--hl-h); background-position: 0 var(--hl-y);
+  border-radius: .2em .34em .24em .38em; padding: 0 .06em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.ev.is-focus { animation: evFocus 1.8s ease-out; }
+@keyframes evFocus { 0%, 45% { box-shadow: 0 0 0 3px var(--page-pen); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.sheet-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 12px 0 0; font-size: 12.5px; color: var(--color-text-dim); }
+.lg-bar { display: inline-block; width: 3px; height: 14px; border-radius: 2px; background: var(--color-primary-soft); }
+.sheet-legend .hl-sample { color: var(--color-text); }
+.lg-gap { width: 10px; }
+.dr-h { margin: 28px 0 8px; font: 600 13.5px/1.3 var(--font-sans); color: var(--color-text-muted); }
+.dr-claims { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dr-claim {
+  display: grid; grid-template-columns: 18px 1fr; gap: 10px; width: 100%; padding: 10px 12px;
+  border: 1px solid var(--color-border-light); border-radius: var(--r-control); background: none; cursor: pointer; text-align: left;
+  font: 400 15.5px/1.45 var(--font-prose); color: var(--color-text); transition: background-color .15s, border-color .15s;
+}
+.dr-claim:hover { background: var(--color-bg-soft); border-color: var(--color-border); }
+.dr-claim .i { color: var(--vink); margin-top: 4px; }
+.dr-claim small { display: block; margin-top: 4px; font: 600 12.5px/1.3 var(--font-sans); color: var(--vink); }
+.dr-empty { margin: 0; font-size: 14px; color: var(--color-text-muted); }
+
+/* ─── Toast ────────────────────────────────────────────────────────────── */
+.toast {
+  position: absolute; left: 50%; bottom: 116px; z-index: 80; max-width: calc(100% - 32px);
+  transform: translate(-50%, 8px); opacity: 0; visibility: hidden; pointer-events: none;
+  background: var(--color-text); color: var(--color-bg); padding: 10px 14px; border-radius: var(--r-control);
+  font: 500 13.5px/1.35 var(--font-sans); box-shadow: var(--e2);
+  transition: opacity .16s, transform .16s, visibility 0s linear .16s;
+}
+.toast.is-on { transform: translate(-50%, 0); opacity: 1; visibility: visible; transition: opacity .2s, transform .2s var(--ease-out); }
+
+/* ─── Narrow app (phone, or the 375 frame) ─────────────────────────────── */
+@container app (width < 768px) {
+  .rail {
+    position: absolute; inset: 0 auto 0 0; z-index: 50; width: min(288px, 86%);
+    transform: translateX(-102%); visibility: hidden; box-shadow: var(--e3);
+    transition: transform .2s var(--ease-out), visibility 0s linear .2s;
+  }
+  .app[data-rail="open"] .rail { width: min(288px, 86%); transform: none; visibility: visible; transition: transform .24s var(--ease-out); }
+  .app[data-rail="open"] .nav-scrim { opacity: 1; visibility: visible; transition: opacity .2s; }
+  .topbar { padding: 0 6px; gap: 2px; }
+  .rt-panel { display: none; }
+  .rt-menu { display: block; }
+  .brand-name, .crumb-sep, .ws-count, .ws-long, #themeToggle { display: none; }
+  .ws-short { display: inline; }
+  .ws { padding: 0 6px; }
+  .lens-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .lens-toggle { padding: 0 10px; gap: 8px; }
+  .toast { bottom: 128px; }
+}
+@container main (width < 640px) {
+  .page { padding-top: 28px; }
+  .empty-title { font-size: 32px; }
+  .empty-lede { font-size: 17px; }
+  .docs { margin-bottom: 24px; }
+  .suggest-q { font-size: 17.5px; min-height: 52px; }
+  .question { font-size: 25px; margin-bottom: 14px; }
+  .prose { font-size: 18px; line-height: 1.6; }
+  .step + .step::before { width: 6px; margin: 0 6px; }
+  .step:not([data-s="active"]) .step-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sum-lead { flex-basis: 100%; }
+  .chip { padding: 0 8px; }
+  .made { flex-basis: 100%; margin: 6px 0 0 4px; }
+  .act-div { display: none; }
+  .ref { grid-template-columns: 20px minmax(0, 1fr) auto 16px; gap: 10px; }
+  .ref-rel .meter { display: none; }
+  .tp-top { grid-template-columns: 1fr; gap: 16px; }
+  .tp-row { grid-template-columns: 1fr 34px; }
+  .tp-row dd.tp-bar { grid-column: 1 / -1; order: 3; }
+  .dock { padding: 12px 0 8px; }
+  .dock-in { width: calc(100% - 24px); }
+}
+@container app (width < 560px) {
+  .dr-head { padding: 16px 8px 10px 20px; }
+  .dr-tabs { padding: 0 20px 12px; }
+  .dr-body { padding: 16px 16px 28px; }
+  .sheet { padding: 20px 18px 22px 30px; }
+  .chunk::before { left: -18px; }
+}
+
+/* ─── Prototype controls (not product UI) ──────────────────────────────── */
+.proto {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px;
+  max-width: calc(100vw - 32px); padding: 8px; border-radius: 14px;
+  background: #2A2C33; color: #EDEAE3; box-shadow: 0 14px 36px -12px rgba(0, 0, 0, .5);
+  font: 500 12.5px/1 var(--font-sans);
+}
+.proto-top { display: flex; align-items: center; gap: 8px; padding-left: 6px; }
+.proto-name { color: #B9B5AC; }
+.proto button {
+  min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #EDEAE3; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--font-sans);
+}
+.proto button:hover { background: rgba(255, 255, 255, .09); }
+.proto button[aria-pressed="true"] { background: #EDEAE3; color: #2A2C33; }
+.proto button:focus-visible { outline-color: #ABA7FF; }
+.proto-min { margin-left: auto; }
+.proto-row { display: flex; flex-wrap: wrap; gap: 2px; }
+.proto kbd { font: 600 11px/1 var(--font-sans); padding: 3px 5px; border-radius: 4px; background: rgba(255, 255, 255, .12); }
+.proto button[aria-pressed="true"] kbd { background: rgba(0, 0, 0, .1); }
+.proto.is-min .proto-body { display: none; }
+@media (max-width: 720px) { .proto { top: 64px; bottom: auto; right: 8px; } }
+
+/* ─── Reduced motion: state still changes, nothing moves ───────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M20 7h-9M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-highlighter" viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M5 22h14"/><path d="M19.27 13.73A2.5 2.5 0 0 0 17.5 13h-11A2.5 2.5 0 0 0 4 15.5V17a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-1.5c0-.66-.26-1.3-.73-1.77Z"/><path d="M14 13V8.5C14 7 15 7 15 5a3 3 0 0 0-3-3c-1.69 0-3 1-3 3s1 2 1 3.5V13"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8M10 9H8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-v-sup" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m8.5 12.2 2.5 2.5 4.6-5.1"/></symbol>
+  <symbol id="i-v-par" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 0 20Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-v-uns" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+  <symbol id="i-v-con" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+</svg>
+
+<div class="stage" id="stage">
+<div class="app" id="app" data-view="empty" data-phase="idle" data-lens="off" data-rail="closed" data-drawer="closed">
+  <a class="skip" href="#composerInput">Skip to the question box</a>
+
+  <!-- ── Left rail: the app shell, slim by default ── -->
+  <nav class="rail" id="rail" aria-label="Main">
+    <button type="button" class="rail-item rail-new" data-tip="New chat" data-act="new">
+      <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg><span class="rail-label">New chat</span>
+    </button>
+    <ul>
+      <li><a href="#" class="rail-item" data-tip="Dashboard" data-nav><svg class="i" aria-hidden="true"><use href="#i-dashboard"/></svg><span class="rail-label">Dashboard</span></a></li>
+      <li><a href="#" class="rail-item" data-tip="Chat History" aria-current="page" data-nav><svg class="i" aria-hidden="true"><use href="#i-history"/></svg><span class="rail-label">Chat History</span></a></li>
+      <li><a href="#" class="rail-item" data-tip="My Documents" data-nav><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg><span class="rail-label">My Documents</span></a></li>
+      <li><a href="#" class="rail-item" data-tip="Workspaces" data-nav><svg class="i" aria-hidden="true"><use href="#i-layers"/></svg><span class="rail-label">Workspaces</span></a></li>
+      <li><a href="#" class="rail-item" data-tip="Review Queue" data-nav><svg class="i" aria-hidden="true"><use href="#i-inbox"/></svg><span class="rail-label">Review Queue</span></a></li>
+      <li><a href="#" class="rail-item" data-tip="Settings" data-nav><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg><span class="rail-label">Settings</span></a></li>
+    </ul>
+    <div class="rail-recents">
+      <h2 class="rail-h">Recent</h2>
+      <ul>
+        <li><button type="button" class="recent" id="recentCurrent" data-act="current">What was Northwind Renewables’ revenue in 2025?</button></li>
+        <li><button type="button" class="recent" data-toast="Saved chats open from Chat History. This prototype scripts one conversation.">When will Aurora be commissioned?</button></li>
+        <li><button type="button" class="recent" data-toast="Saved chats open from Chat History. This prototype scripts one conversation.">Emissions intensity vs 2020</button></li>
+      </ul>
+    </div>
+    <div class="rail-foot">
+      <button type="button" class="rail-item user" id="userBtn" data-tip="demo_analyst" aria-haspopup="true" aria-expanded="false" aria-controls="userMenu">
+        <span class="avatar" aria-hidden="true">DA</span><span class="rail-label">demo_analyst</span>
+      </button>
+      <div class="menu" id="userMenu" hidden>
+        <div class="menu-who"><strong>demo_analyst</strong>Analyst, Northwind Renewables workspace</div>
+        <button type="button" data-toast="Profile is not part of this prototype."><svg class="i" aria-hidden="true"><use href="#i-user"/></svg>Profile</button>
+        <button type="button" data-act="theme"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg><span id="menuThemeLabel">Dark theme</span></button>
+        <button type="button" data-toast="Signed out (prototype)."><svg class="i" aria-hidden="true"><use href="#i-logout"/></svg>Sign out</button>
+      </div>
+    </div>
+  </nav>
+  <div class="nav-scrim" id="navScrim"></div>
+
+  <div class="main">
+    <!-- ── One top bar: product, workspace, the lens, theme. Nothing else. ── -->
+    <header class="topbar">
+      <button type="button" class="icon-btn" id="railToggle" aria-controls="rail" aria-expanded="false" aria-label="Expand navigation">
+        <svg class="i rt-panel" aria-hidden="true"><use href="#i-panel"/></svg>
+        <svg class="i rt-menu" aria-hidden="true"><use href="#i-menu"/></svg>
+      </button>
+      <a href="#" class="brand" data-act="new" aria-label="TruthLens, new chat">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="4.2" y="8.7" width="11.6" height="4.4" rx="1.3" style="fill:var(--hl-supported)"/>
+          <circle cx="10" cy="10.8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="m15 15.8 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">TruthLens</span>
+      </a>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <button type="button" class="ws" title="Northwind Renewables — Due Diligence (6 documents)" data-toast="Workspace switcher is not part of this prototype.">
+        <span class="ws-name"><span class="ws-long">Northwind Renewables — Due Diligence</span><span class="ws-short">Northwind — Due Diligence</span></span>
+        <span class="ws-count">6 documents</span>
+        <svg class="i" aria-hidden="true"><use href="#i-chev-down"/></svg>
+      </button>
+      <div class="top-actions">
+        <button type="button" class="lens-toggle" id="lensToggle" role="switch" aria-checked="false" title="Truth Lens: highlight every claim by how well the sources support it">
+          <svg class="i" aria-hidden="true"><use href="#i-highlighter"/></svg>
+          <span class="lens-label">Truth Lens</span>
+          <span class="lens-track" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="icon-btn" id="themeToggle" aria-label="Switch to dark theme"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg></button>
+      </div>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <main class="page" id="main">
+
+        <!-- ── 1 · Empty ── -->
+        <section class="empty" aria-labelledby="emptyTitle">
+          <h1 class="empty-title" id="emptyTitle">Ask the Northwind documents</h1>
+          <p class="empty-lede">Answers come only from these six documents, and every sentence is checked against its source before you read it.</p>
+          <ul class="docs">
+            <li class="doc-chip" title="Northwind Renewables — Annual Report 2025"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Annual Report 2025 <span class="doc-kind">PDF</span></li>
+            <li class="doc-chip" title="Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Q4 &amp; FY2025 Results <span class="doc-kind">PDF</span></li>
+            <li class="doc-chip" title="Northwind Renewables — 2025 Sustainability Report"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>2025 Sustainability Report <span class="doc-kind">PDF</span></li>
+            <li class="doc-chip"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Board memo: Aurora update <span class="doc-kind">DOCX</span></li>
+            <li class="doc-chip"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Leadership Team <span class="doc-kind">MD</span></li>
+            <li class="doc-chip"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>Project Pipeline <span class="doc-kind">CSV</span></li>
+          </ul>
+          <ul class="suggest" aria-label="Suggested questions">
+            <li><button type="button" class="suggest-q" data-q="0"><span class="q-text">What was Northwind Renewables’ revenue in 2025?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+            <li><button type="button" class="suggest-q" data-q="1"><span class="q-text">When is the Aurora offshore wind project expected to be commissioned?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+            <li><button type="button" class="suggest-q" data-q="2"><span class="q-text">How much has Northwind reduced its emissions intensity versus 2020?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+            <li><button type="button" class="suggest-q" data-q="3"><span class="q-text">Who is the CEO and when did they start?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+            <li><button type="button" class="suggest-q" data-q="4"><span class="q-text">Which projects in the pipeline are under construction?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+            <li><button type="button" class="suggest-q" data-q="5"><span class="q-text">What are the key risks facing the Aurora project?</span><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></li>
+          </ul>
+        </section>
+
+        <!-- ── 2–5 · The answer, typeset like a research note ── -->
+        <article class="thread" aria-labelledby="q1">
+          <h1 class="question" id="q1">What was Northwind Renewables’ revenue in 2025?</h1>
+
+          <div class="status">
+            <div class="pipe" id="pipe">
+              <ol class="steps" aria-label="Answer progress">
+                <li class="step" data-s="pending"><span class="step-mark"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-label">Search</span></li>
+                <li class="step" data-s="pending"><span class="step-mark"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-label">Rank</span></li>
+                <li class="step" data-s="pending"><span class="step-mark"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-label">Write</span></li>
+                <li class="step" data-s="pending"><span class="step-mark"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-label">Verify</span></li>
+              </ol>
+              <span class="pipe-time" id="pipeTime" aria-hidden="true">0.0 s</span>
+            </div>
+            <div class="summary" id="summary">
+              <span class="sum-lead">4 claims checked</span>
+              <button type="button" class="chip" data-jump="0" data-verdict="supported"><svg class="i" aria-hidden="true"><use href="#i-v-sup"/></svg><span class="hl-sample" data-verdict="supported">3 supported</span><span class="sr-only"> claims. Highlight them in the answer.</span></button>
+              <button type="button" class="chip" data-jump="2" data-verdict="partial"><svg class="i" aria-hidden="true"><use href="#i-v-par"/></svg><span class="hl-sample" data-verdict="partial">1 partial</span><span class="sr-only"> claim. Show its evidence.</span></button>
+              <button type="button" class="chip chip--conf" data-open="1"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg>1 conflict<span class="sr-only"> between sources. Open the conflicting source.</span></button>
+              <button type="button" class="trust" id="trustBtn" aria-expanded="false" aria-controls="tp">Trust <strong>86</strong><span class="trust-meter" aria-hidden="true"><i style="--v:86"></i></span><svg class="i" aria-hidden="true"><use href="#i-chev-down"/></svg></button>
+            </div>
+            <span class="status-rule" aria-hidden="true"><span class="status-fill" id="statusFill"></span></span>
+          </div>
+
+          <section class="tp" id="tp" aria-labelledby="tpTitle" hidden>
+            <div class="tp-top">
+              <div><span class="tp-num" aria-hidden="true">86</span><h2 class="tp-of" id="tpTitle">Trust score, out of 100</h2></div>
+              <dl class="tp-meters">
+                <div class="tp-row"><dt>Retrieval quality</dt><dd class="tp-bar"><span class="meter"><b style="--v:86"></b></span></dd><dd class="tp-v">86</dd></div>
+                <div class="tp-row"><dt>Faithfulness</dt><dd class="tp-bar"><span class="meter"><b style="--v:100"></b></span></dd><dd class="tp-v">100</dd></div>
+                <div class="tp-row"><dt>Answer relevance<span class="tp-low">Lowest</span></dt><dd class="tp-bar"><span class="meter is-low"><b style="--v:50"></b></span></dd><dd class="tp-v">50</dd></div>
+                <div class="tp-row"><dt>Source authority</dt><dd class="tp-bar"><span class="meter"><b style="--v:100"></b></span></dd><dd class="tp-v">100</dd></div>
+              </dl>
+            </div>
+            <ol class="tp-steps" aria-label="How this answer was made">
+              <li>Searched 6 documents, found 16 passages <span>0.4 s</span></li>
+              <li>Ranked them and kept the top 5 <span>1.9 s</span></li>
+              <li>Wrote the answer with qwen3:4b <span>4.1 s</span></li>
+              <li>Checked 4 claims against the sources <span>1.4 s</span></li>
+            </ol>
+            <p class="tp-foot">Ran on this device in 7.8 s. Nothing left your machine.</p>
+            <p class="tp-legend">
+              <span class="sr-only">How to read the highlights:</span>
+              <span class="hl-sample" data-verdict="supported">Supported</span>
+              <span class="hl-sample" data-verdict="partial">Partial</span>
+              <span class="hl-sample" data-verdict="unsupported">Unsupported</span>
+              <span class="hl-sample" data-verdict="contradicted">Contradicted</span>
+            </p>
+          </section>
+
+          <div class="prose" id="prose"><p id="answer"></p></div>
+          <div class="mcard" id="mcard" role="region" aria-label="Evidence for the selected claim"></div>
+
+          <div class="actions">
+            <button type="button" class="btn btn-pen" data-toast="Receipt sealed. Link copied."><svg class="i" aria-hidden="true"><use href="#i-stamp"/></svg>Seal receipt</button>
+            <button type="button" class="btn btn-quiet" data-toast="Answer copied with its citations."><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+            <button type="button" class="btn btn-quiet" data-toast="Answer exported as PDF."><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>Export</button>
+            <span class="act-div" aria-hidden="true"></span>
+            <button type="button" class="icon-btn" data-fb="up" aria-pressed="false" aria-label="Good answer"><svg class="i" aria-hidden="true"><use href="#i-up"/></svg></button>
+            <button type="button" class="icon-btn" data-fb="down" aria-pressed="false" aria-label="Bad answer"><svg class="i" aria-hidden="true"><use href="#i-down"/></svg></button>
+            <button type="button" class="icon-btn" data-act="regen" aria-label="Regenerate answer"><svg class="i" aria-hidden="true"><use href="#i-rotate"/></svg></button>
+            <span class="made">qwen3:4b on this device, 7.8 s</span>
+          </div>
+
+          <section class="refs" aria-labelledby="refsH">
+            <h2 class="refs-h" id="refsH">5 passages retrieved</h2>
+            <ul class="ref-skel" aria-hidden="true">
+              <li><span style="width:14px"></span><span style="width:38%"></span><span style="width:12%;margin-left:auto"></span></li>
+              <li><span style="width:14px"></span><span style="width:46%"></span><span style="width:12%;margin-left:auto"></span></li>
+              <li><span style="width:14px"></span><span style="width:32%"></span><span style="width:12%;margin-left:auto"></span></li>
+              <li><span style="width:14px"></span><span style="width:40%"></span><span style="width:12%;margin-left:auto"></span></li>
+              <li><span style="width:14px"></span><span style="width:28%"></span><span style="width:12%;margin-left:auto"></span></li>
+            </ul>
+            <ol class="ref-list" id="refList"></ol>
+          </section>
+        </article>
+      </main>
+
+      <div class="dock">
+        <div class="dock-in">
+          <form class="composer" id="composer" autocomplete="off">
+            <label class="sr-only" for="composerInput">Ask a question about this workspace</label>
+            <textarea id="composerInput" rows="1" placeholder="Ask about Northwind Renewables…"></textarea>
+            <div class="comp-row">
+              <button type="button" class="scope" data-toast="Scope picker is not part of this prototype."><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg>All 6 documents</button>
+              <button type="submit" class="send" id="send" aria-label="Send question" disabled><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button>
+            </div>
+          </form>
+          <p class="dock-note">Answers use only this workspace’s documents and run on this device.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Evidence drawer: only on demand ── -->
+  <div class="dr-scrim" id="drScrim"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drTitle" inert>
+    <div class="dr-head">
+      <div class="dr-headtext">
+        <h2 class="dr-title" id="drTitle">Annual Report 2025</h2>
+        <p class="dr-full" id="drFull"></p>
+        <p class="dr-meta" id="drMeta"></p>
+      </div>
+      <button type="button" class="icon-btn" id="drClose" aria-label="Close source"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dr-tabs" role="group" aria-label="Retrieved passages" id="drTabs"></div>
+    <div class="dr-body" id="drBody">
+      <div class="dr-conflict" id="drConflict" role="note"></div>
+      <div class="pagebar">
+        <button type="button" class="icon-btn" aria-label="Previous page" data-toast="This preview shows the retrieved page only."><svg class="i" aria-hidden="true"><use href="#i-chev-left"/></svg></button>
+        <span id="drPage">Page 3 of 6</span>
+        <button type="button" class="icon-btn" aria-label="Next page" data-toast="This preview shows the retrieved page only."><svg class="i" aria-hidden="true"><use href="#i-chev-right"/></svg></button>
+        <button type="button" class="btn btn-quiet" data-toast="Opens the full PDF at this page."><svg class="i" aria-hidden="true"><use href="#i-ext"/></svg>Open PDF</button>
+      </div>
+      <article class="sheet" id="drSheet" aria-label="Document page"></article>
+      <p class="sheet-legend"><span class="lg-bar" aria-hidden="true"></span>Retrieved passage<span class="lg-gap"></span><span class="hl-sample" data-verdict="supported">Highlight</span>Evidence for a claim in this answer</p>
+      <h3 class="dr-h">Used in this answer</h3>
+      <ul class="dr-claims" id="drClaims"></ul>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" aria-hidden="true"></div>
+  <div class="sr-only" id="live" role="status" aria-live="polite"></div>
+</div>
+</div>
+
+<!-- Prototype controls: not product UI -->
+<div class="proto" id="proto" role="region" aria-label="Prototype controls">
+  <div class="proto-top">
+    <span class="proto-name">Prototype B, Focused Reading</span>
+    <button type="button" class="proto-min" id="protoMin" aria-expanded="true" aria-controls="protoBody">Hide</button>
+  </div>
+  <div class="proto-body" id="protoBody">
+    <div class="proto-row" role="group" aria-label="Screen state">
+      <button type="button" data-state="1" aria-pressed="true"><kbd>1</kbd>Empty</button>
+      <button type="button" data-state="2" aria-pressed="false"><kbd>2</kbd>Working</button>
+      <button type="button" data-state="3" aria-pressed="false"><kbd>3</kbd>Answer</button>
+      <button type="button" data-state="4" aria-pressed="false"><kbd>4</kbd>Lens on</button>
+      <button type="button" data-state="5" aria-pressed="false"><kbd>5</kbd>Source</button>
+    </div>
+    <div class="proto-row" role="group" aria-label="View">
+      <button type="button" id="pDark" aria-pressed="false"><kbd>D</kbd>Dark</button>
+      <button type="button" id="pMobile" aria-pressed="false"><kbd>M</kbd>375 px</button>
+      <button type="button" id="pLens" aria-pressed="false"><kbd>L</kbd>Lens</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const root = document.documentElement;
+  const app = $('#app');
+  const stage = $('#stage');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const icon = (n, c = '') => `<svg class="i ${c}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+
+  // ─── Demo content (brief + seeded corpus, verbatim) ──────────────────────
+  const VERDICT = {
+    supported: { label: 'Supported', icon: 'v-sup' },
+    partial: { label: 'Partial', icon: 'v-par' },
+    unsupported: { label: 'Unsupported', icon: 'v-uns' },
+    contradicted: { label: 'Contradicted', icon: 'v-con' },
+  };
+  const SOURCES = {
+    1: { short: 'Annual Report 2025', full: 'Northwind Renewables — Annual Report 2025', kind: 'PDF, 6 pages', page: 3, pages: 6, rel: 94, conflict: 2,
+         excerpt: 'Revenue in 2025 was €412 million. This was up from €356 million in 2024.' },
+    2: { short: 'Q4 & FY2025 Results', full: 'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results', kind: 'PDF, 2 pages', page: 1, pages: 2, rel: 91, conflict: 1,
+         excerpt: 'Revenue in 2025 was €398 million.' },
+    3: { short: 'Sustainability Report', full: 'Northwind Renewables — 2025 Sustainability Report', kind: 'PDF, 4 pages', page: 1, pages: 4, rel: 76,
+         excerpt: 'It is intended to be read alongside the Company’s Annual Report…' },
+    4: { short: 'Sustainability Report', full: 'Northwind Renewables — 2025 Sustainability Report', kind: 'PDF, 4 pages', page: 2, pages: 4, rel: 57,
+         excerpt: 'The full-year contribution of the Kestrel Ridge onshore expansion displaced generation…' },
+    5: { short: 'Q4 & FY2025 Results', full: 'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results', kind: 'PDF, 2 pages', page: 2, pages: 2, rel: 52,
+         excerpt: 'Fourth-quarter revenue of €108 million reflected typical seasonal wind resource patterns…' },
+  };
+  const CLAIMS = [
+    { v: 'supported', conf: 97, src: 1, page: 3, text: 'Northwind Renewables reported revenue of €412 million for 2025.', ev: 'Revenue in 2025 was €412 million.' },
+    { v: 'supported', conf: 94, src: 1, page: 3, text: 'Up from €356 million in 2024.', ev: 'This was up from €356 million in 2024.' },
+    { v: 'partial', conf: 62, src: 1, page: 3, text: 'Growth came mainly from a full year of the Kestrel Ridge onshore expansion.', ev: 'Revenue growth was driven by a full year of contribution from the Kestrel Ridge onshore expansion…' },
+    { v: 'supported', conf: 95, src: 2, page: 1, text: 'The press release gives a different figure of €398 million.', ev: 'Revenue in 2025 was €398 million.', conflictWith: 1 },
+  ];
+  // The answer, verbatim, split into claim spans.
+  const SEG = [
+    { claim: 0, parts: ['Northwind Renewables reported revenue of ', { b: '€412 million' }, ' for 2025', { cite: 1 }] },
+    ', ',
+    { claim: 1, parts: ['up from €356 million in 2024', { cite: 1 }] },
+    '. ',
+    { claim: 2, parts: ['Growth came mainly from a full year of the Kestrel Ridge onshore expansion', { cite: 1 }] },
+    '. Note that ',
+    { claim: 3, parts: ['the Q4 & FY2025 results press release gives a different figure of ', { b: '€398 million' }, { cite: 2 }] },
+    ' — the two sources disagree.',
+  ];
+  const PAGES = {
+    1: `<div class="pg-run"><span>Northwind Renewables — Annual Report 2025</span><span>3</span></div>
+<p class="chunk"><mark class="ev" data-claim="0" data-verdict="supported">Revenue in 2025 was €412 million.</mark> <mark class="ev" data-claim="1" data-verdict="supported">This was up from €356 million in 2024.</mark> Total installed capacity across our onshore wind, offshore wind, and solar portfolios reached <strong>1.8 GW</strong> at year end, spread across nine countries in Northern and Western Europe. We closed the year with 1,240 employees, a net addition of 94 roles, almost all of them in project engineering and operations as we prepare to bring the Aurora offshore project into construction.</p>
+<p>Our largest single undertaking, the Aurora offshore wind farm, remains on schedule. Turbine foundation fabrication began in the fourth quarter. Aurora is expected to commission in the third quarter of 2027. Aurora will add 600 MW of firm, contracted offshore capacity off the coast of our largest operating market and is fully underwritten by a 20-year power purchase agreement signed in 2023.</p>
+<p class="pg-sign">Sincerely,<br>Dana Whitfield<br>Chief Executive Officer</p>
+<h4>Financial Highlights</h4>
+<table><thead><tr><th scope="col">Metric</th><th scope="col">2025</th><th scope="col">2024</th><th scope="col">Change</th></tr></thead><tbody>
+<tr><th scope="row">Revenue</th><td>€412M</td><td>€356M</td><td>+15.7%</td></tr>
+<tr><th scope="row">EBITDA</th><td>€187M</td><td>€159M</td><td>+17.6%</td></tr>
+<tr><th scope="row">Installed capacity</th><td>1.8 GW</td><td>1.5 GW</td><td>+0.3 GW</td></tr>
+<tr><th scope="row">Employees</th><td>1,240</td><td>1,146</td><td>+94</td></tr>
+</tbody></table>
+<p class="chunk"><mark class="ev" data-claim="2" data-verdict="partial">Revenue growth was driven by a full year of contribution from the Kestrel Ridge onshore expansion</mark> (commissioned March 2024) and higher merchant power prices in our Nordic solar assets during the second and third quarters. EBITDA margin held steady at 45%, consistent with the prior year, as higher revenue was partially offset by increased development spend ahead of Aurora’s construction phase.</p>`,
+    2: `<div class="pg-run"><span>Press release, 12 February 2026</span><span>1</span></div>
+<h3 class="pg-title">Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results</h3>
+<p><strong>AMSTERDAM — 12 February 2026</strong> — Northwind Renewables N.V. (the “Company”) today reported financial results for the fourth quarter and full year ended 31 December 2025.</p>
+<h4>Full-Year 2025 Highlights</h4>
+<ul><li>Full-year revenue of <strong>€398 million</strong>, compared with €356 million in 2024</li><li>Total installed generating capacity of <strong>1.8 GW</strong> across onshore wind, offshore wind, and solar assets in nine countries</li><li>Fourth-quarter revenue of €108 million, in line with internal guidance</li></ul>
+<h4>Segment Performance</h4>
+<p class="chunk"><mark class="ev" data-claim="3" data-verdict="supported">Revenue in 2025 was €398 million.</mark> Onshore wind generation was broadly flat year over year on a same-asset basis, with growth coming entirely from the Kestrel Ridge expansion, which contributed a full twelve months of output in 2025 versus roughly nine months in 2024.</p>`,
+    3: `<div class="pg-run"><span>Northwind Renewables — 2025 Sustainability Report</span><span>1</span></div>
+<h3 class="pg-title">2025 Sustainability Report</h3>
+<h4>Overview</h4>
+<p class="chunk">This report summarises Northwind Renewables’ environmental, social, and governance performance for the 2025 calendar year. It is intended to be read alongside the Company’s Annual Report and covers the same consolidated group of onshore wind, offshore wind, and solar assets across nine European countries.</p>
+<h4>Emissions Intensity</h4>
+<p>The single metric our board and investors track most closely is the carbon emissions intensity of the electricity we generate, measured in grams of CO2 equivalent per kilowatt-hour and indexed against our 2020 baseline year.</p>`,
+    4: `<div class="pg-run"><span>Northwind Renewables — 2025 Sustainability Report</span><span>2</span></div>
+<p class="chunk">This improvement was driven by three factors. First, the full-year contribution of the Kestrel Ridge onshore expansion displaced generation that had previously come from a gas-backed balancing arrangement. Second, we renegotiated two legacy biomass co-firing contracts at our Solheim site, reducing the associated emissions factor by roughly a third.</p>
+<p>Third, transmission losses across our internal grid connections improved following the completion of a substation upgrade programme at three sites.</p>`,
+    5: `<div class="pg-run"><span>Press release, 12 February 2026</span><span>2</span></div>
+<h4>Fourth-Quarter Detail</h4>
+<p class="chunk">Fourth-quarter revenue of €108 million reflected typical seasonal wind resource patterns in the Company’s core markets. The quarter included the start of turbine foundation fabrication for Aurora at the Company’s contracted supplier’s fabrication yard, and the substantial completion of onshore substation groundworks at the Aurora landfall site.</p>
+<h4>Aurora Project Update</h4>
+<p>Aurora is expected to commission in the third quarter of 2027. The project remains 600 MW of contracted capacity backed by a 20-year power purchase agreement.</p>`,
+  };
+  const STEPS = [
+    { pending: 'Search', active: 'Searching passages…', done: '16 passages' },
+    { pending: 'Rank', active: 'Ranking 16 passages…', done: 'Top 5 kept' },
+    { pending: 'Write', active: 'Writing the answer…', done: 'Written' },
+    { pending: 'Verify', active: 'Checking 4 claims…', done: '4 checked' },
+  ];
+
+  // ─── Small utilities ─────────────────────────────────────────────────────
+  let state = 1;
+  let lens = false;
+  let timers = [];
+  let drawerReturn = null;
+  let toastTimer;
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const clearTimers = () => { timers.forEach((t) => { clearTimeout(t); clearInterval(t); }); timers = []; };
+  const raf2 = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+  const announce = (m) => { const l = $('#live'); l.textContent = ''; setTimeout(() => { l.textContent = m; }, 40); };
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg; t.classList.add('is-on'); announce(msg);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('is-on'), 2800);
+  }
+
+  // ─── Markup builders ─────────────────────────────────────────────────────
+  const citeHTML = (n) => `<button type="button" class="cite cite-btn" data-cite="${n}" aria-label="Source ${n}: ${esc(SOURCES[n].short)}">${n}</button><sup class="cite cite-static">${n}</sup>`;
+  function srcNoteHTML(n, isNew = false) {
+    const s = SOURCES[n];
+    return `<button type="button" class="sn sn-src${isNew ? ' is-new' : ''}" data-src="${n}" data-open="${n}" title="${esc(s.full)}">`
+      + `<span class="sn-head"><span class="sn-n">${n}</span><span class="sn-title">${esc(s.short)}</span></span>`
+      + `<span class="sn-meta">Page ${s.page}, relevance ${s.rel}</span>`
+      + `<span class="sn-quote">“${esc(s.excerpt)}”</span>`
+      + (s.conflict ? `<span class="sn-flag">${icon('alert')}Conflicts with source ${s.conflict}</span>` : '')
+      + `</button>`;
+  }
+  function claimNoteHTML(i) {
+    const c = CLAIMS[i], v = VERDICT[c.v], s = SOURCES[c.src];
+    return `<span class="sn sn-claim" id="note-${i}" data-claim="${i}" data-verdict="${c.v}">`
+      + `<span class="sn-verdict">${icon(v.icon)}${v.label}<span class="sn-conf">${c.conf}%<span class="sr-only"> confidence</span></span></span>`
+      + `<span class="sn-srcline">${esc(s.short)}, page ${c.page}</span>`
+      + `<span class="sn-more"><span class="sn-quote">“${esc(c.ev)}”</span>`
+      + (c.conflictWith ? `<span class="sn-flag">${icon('alert')}Conflicts with source ${c.conflictWith}</span>` : '')
+      + `<button type="button" class="link-btn" data-open="${c.src}" data-focus="${i}">${icon('ext')}View in document</button></span>`
+      + `</span>`;
+  }
+  function answerHTML() {
+    const seen = new Set();
+    return SEG.map((seg) => {
+      if (typeof seg === 'string') return esc(seg);
+      const c = CLAIMS[seg.claim], v = VERDICT[c.v];
+      let inner = '', notes = '';
+      seg.parts.forEach((p) => {
+        if (typeof p === 'string') inner += esc(p);
+        else if (p.b) inner += `<strong>${esc(p.b)}</strong>`;
+        else {
+          inner += citeHTML(p.cite);
+          if (!seen.has(p.cite)) { seen.add(p.cite); notes += srcNoteHTML(p.cite); }
+        }
+      });
+      return `<span class="claim" id="claim-${seg.claim}" data-claim="${seg.claim}" data-verdict="${c.v}" style="--i:${seg.claim}">${inner}`
+        + `<span class="vg" aria-hidden="true">${icon(v.icon)}</span><span class="sr-only lens-sr"> (${v.label.toLowerCase()})</span></span>`
+        + notes + claimNoteHTML(seg.claim);
+    }).join('');
+  }
+  function streamTokens() {
+    const out = [];
+    const words = (s, b) => s.split(/(?<=\s)/).forEach((w) => w && out.push({ t: 'w', v: w, b }));
+    SEG.forEach((seg) => {
+      if (typeof seg === 'string') return words(seg, false);
+      seg.parts.forEach((p) => {
+        if (typeof p === 'string') words(p, false);
+        else if (p.b) words(p.b, true);
+        else out.push({ t: 'c', n: p.cite });
+      });
+    });
+    return out;
+  }
+  function renderRefs() {
+    $('#refList').innerHTML = Object.keys(SOURCES).map((k) => {
+      const n = +k, s = SOURCES[n], cited = n <= 2;
+      return `<li><button type="button" class="ref${cited ? '' : ' is-uncited'}" data-open="${n}" data-src="${n}" title="${esc(s.full)}">`
+        + `<span class="ref-n">${n}</span>`
+        + `<span class="ref-main"><span class="ref-title">${esc(s.short)}</span><span class="ref-page">page ${s.page}</span>`
+        + (s.conflict ? `<span class="ref-flag">${icon('alert')}Conflicts with ${s.conflict}</span>` : '')
+        + (cited ? '' : `<span class="ref-uncited">Not cited</span>`)
+        + `</span><span class="ref-rel"><span class="sr-only">Relevance </span>${s.rel}<span class="meter" aria-hidden="true"><b style="--v:${s.rel}"></b></span></span>`
+        + `${icon('chev-right')}</button></li>`;
+    }).join('');
+  }
+
+  // ─── Lens + active claim ─────────────────────────────────────────────────
+  function applyLensAttrs() {
+    $$('#answer .claim').forEach((c) => {
+      if (lens) {
+        c.setAttribute('role', 'button'); c.tabIndex = 0;
+        c.setAttribute('aria-expanded', String(c.classList.contains('is-active')));
+        c.setAttribute('aria-controls', 'note-' + c.dataset.claim);
+      } else {
+        ['role', 'tabindex', 'aria-expanded', 'aria-controls'].forEach((a) => c.removeAttribute(a));
+      }
+    });
+  }
+  function setLens(on) {
+    lens = on;
+    app.dataset.lens = on ? 'on' : 'off';
+    $('#lensToggle').setAttribute('aria-checked', String(on));
+    applyLensAttrs();
+    if (!on) setActive(null);
+    syncProto();
+  }
+  function setActive(i) {
+    $$('#answer .claim').forEach((c) => {
+      const on = String(i) === c.dataset.claim;
+      c.classList.toggle('is-active', on);
+      if (lens) c.setAttribute('aria-expanded', String(on));
+    });
+    $$('.sn-claim').forEach((n) => n.classList.toggle('is-active', String(i) === n.dataset.claim));
+    renderMobileCard(i);
+  }
+  function renderMobileCard(i) {
+    const m = $('#mcard');
+    if (i == null) { m.classList.remove('has-claim'); m.innerHTML = ''; return; }
+    const c = CLAIMS[i], v = VERDICT[c.v], s = SOURCES[c.src];
+    m.dataset.verdict = c.v;
+    m.classList.add('has-claim');
+    m.innerHTML = `<div class="mc-head"><span class="mc-verdict">${icon(v.icon)}${v.label}, ${c.conf}% confidence</span>`
+      + `<button type="button" class="icon-btn" data-act="unselect" aria-label="Close evidence">${icon('x')}</button></div>`
+      + `<p class="mc-k">The answer says</p><p class="mc-claim">${esc(c.text)}</p>`
+      + `<p class="mc-k">${esc(s.short)}, page ${c.page} says</p><p class="mc-ev">“${esc(c.ev)}”</p>`
+      + (c.conflictWith ? `<span class="sn-flag">${icon('alert')}Conflicts with source ${c.conflictWith}</span>` : '')
+      + `<button type="button" class="link-btn" data-open="${c.src}" data-focus="${i}">${icon('ext')}View in document</button>`;
+  }
+  function jumpToClaim(i) {
+    closeDrawer(false);
+    if (!lens) setLens(true);
+    setActive(i);
+    const el = $('#claim-' + i);
+    if (el) { el.scrollIntoView({ block: 'center', behavior: reduced.matches ? 'auto' : 'smooth' }); el.focus({ preventScroll: true }); }
+  }
+
+  // ─── Pipeline (state 2) → resolves into the summary (state 3) ────────────
+  function setStep(i, s) {
+    const li = $$('.step')[i];
+    li.dataset.s = s;
+    li.querySelector('.step-label').textContent = STEPS[i][s];
+  }
+  const setProgress = (p) => $('#statusFill').style.setProperty('--p', p);
+  function runPipeline() {
+    app.dataset.view = 'thread';
+    app.dataset.phase = 'search';
+    STEPS.forEach((_, i) => setStep(i, 'pending'));
+    setStep(0, 'active'); setProgress(.06);
+    const p = $('#answer');
+    p.innerHTML = '<span class="caret" aria-hidden="true"></span>';
+    const caret = p.lastChild;
+    $('#prose').setAttribute('aria-busy', 'true');
+    announce('Searching passages.');
+    const t0 = performance.now();
+    timers.push(setInterval(() => { $('#pipeTime').textContent = ((performance.now() - t0) / 1000).toFixed(1) + ' s'; }, 100));
+
+    at(500, () => { setStep(0, 'done'); setStep(1, 'active'); setProgress(.25); app.dataset.phase = 'rank'; announce('16 passages found. Ranking them.'); });
+    at(2100, () => { setStep(1, 'done'); setStep(2, 'active'); setProgress(.5); app.dataset.phase = 'write'; announce('Top 5 passages kept. Writing the answer.'); });
+    const toks = streamTokens(), seen = new Set(), step = 4300 / toks.length;
+    toks.forEach((tk, k) => at(2100 + (k + 1) * step, () => {
+      if (tk.t === 'w') {
+        const node = tk.b ? Object.assign(document.createElement('strong'), { textContent: tk.v }) : document.createTextNode(tk.v);
+        p.insertBefore(node, caret.isConnected ? caret : null);
+      } else {
+        const sup = document.createElement('sup');
+        sup.className = 'cite'; sup.textContent = tk.n;
+        p.insertBefore(sup, caret.isConnected ? caret : null);
+        // The source appears in the margin the moment it is cited.
+        if (!seen.has(tk.n)) { seen.add(tk.n); caret.insertAdjacentHTML('beforebegin', srcNoteHTML(tk.n, true)); }
+      }
+      setProgress(.5 + .25 * (k + 1) / toks.length);
+    }));
+    at(6480, () => { caret.remove(); setStep(2, 'done'); setStep(3, 'active'); setProgress(.8); app.dataset.phase = 'verify'; announce('Checking 4 claims against the sources.'); });
+    at(7100, () => setProgress(.92));
+    at(7800, () => { resolve(); state = 3; syncProto(); syncSend();
+      announce('Answer ready. 4 claims checked: 3 supported, 1 partial. Two sources conflict on 2025 revenue.'); });
+  }
+  function resolve() {
+    clearTimers();
+    app.dataset.view = 'thread';
+    app.dataset.phase = 'done';
+    STEPS.forEach((_, i) => setStep(i, 'done'));
+    setProgress(1);
+    $('#pipeTime').textContent = '7.8 s';
+    $('#answer').innerHTML = answerHTML();
+    $('#prose').removeAttribute('aria-busy');
+    applyLensAttrs();
+  }
+
+  // ─── Drawer ──────────────────────────────────────────────────────────────
+  function renderDrawer(n, focusClaim) {
+    const s = SOURCES[n];
+    $('#drTitle').textContent = s.short;
+    $('#drTitle').title = s.full;
+    $('#drFull').textContent = `${s.full} (${s.kind})`;
+    $('#drMeta').textContent = `Source ${n} of 5, page ${s.page}, relevance ${s.rel}`;
+    $('#drPage').textContent = `Page ${s.page} of ${s.pages}`;
+    $('#drTabs').innerHTML = Object.keys(SOURCES).map((k) =>
+      `<button type="button" class="dr-tab" data-open="${k}" aria-current="${+k === n}" aria-label="Source ${k}: ${esc(SOURCES[k].short)}, page ${SOURCES[k].page}">${k}</button>`).join('');
+    const cf = $('#drConflict');
+    if (s.conflict) {
+      const other = SOURCES[s.conflict];
+      const mine = n === 1 ? '€412 million' : '€398 million', theirs = n === 1 ? '€398 million' : '€412 million';
+      cf.hidden = false;
+      cf.innerHTML = `${icon('alert')}<div><p><strong>Sources disagree on 2025 revenue.</strong> This document says ${mine}; ${esc(other.short)} says ${theirs}.</p>`
+        + `<button type="button" class="link-btn" data-open="${s.conflict}">${icon('file')}Open ${esc(other.short)}</button></div>`;
+    } else { cf.hidden = true; cf.innerHTML = ''; }
+    $('#drSheet').innerHTML = PAGES[n];
+    const used = CLAIMS.map((c, i) => ({ c, i })).filter(({ c }) => c.src === n);
+    $('#drClaims').innerHTML = used.length
+      ? used.map(({ c, i }) => `<li><button type="button" class="dr-claim" data-verdict="${c.v}" data-jump="${i}">${icon(VERDICT[c.v].icon)}<span>${esc(c.text)}<small>${VERDICT[c.v].label}, ${c.conf}% confidence</small></span></button></li>`).join('')
+      : `<li><p class="dr-empty">Retrieved, but not cited in this answer.</p></li>`;
+    $('#drBody').scrollTop = 0;
+    if (focusClaim != null) {
+      setTimeout(() => {
+        const ev = $(`#drSheet .ev[data-claim="${focusClaim}"]`);
+        if (!ev) return;
+        ev.scrollIntoView({ block: 'center', behavior: reduced.matches ? 'auto' : 'smooth' });
+        ev.classList.remove('is-focus'); void ev.offsetWidth; ev.classList.add('is-focus');
+      }, 260);
+    }
+  }
+  function openDrawer(n, focusClaim = null, from = null) {
+    const wasOpen = app.dataset.drawer === 'open';
+    if (!wasOpen) drawerReturn = from || document.activeElement;
+    renderDrawer(n, focusClaim);
+    app.dataset.drawer = 'open';
+    $('#drawer').inert = false;
+    $('.main').inert = true; $('#rail').inert = true;
+    if (!wasOpen) setTimeout(() => $('#drClose').focus(), 30);
+    // Switching source re-renders the control that had focus: keep focus in the dialog.
+    else if (!$('#drawer').contains(document.activeElement)) $('.dr-tab[aria-current="true"]').focus();
+  }
+  function closeDrawer(restore = true) {
+    if (app.dataset.drawer !== 'open') return;
+    app.dataset.drawer = 'closed';
+    $('#drawer').inert = true;
+    $('.main').inert = false; $('#rail').inert = false;
+    if (restore && drawerReturn && document.contains(drawerReturn)) drawerReturn.focus();
+  }
+
+  // ─── Shell: rail, theme, frame, trust, composer ─────────────────────────
+  const isNarrow = () => app.clientWidth < 768;
+  function setRail(open) {
+    app.dataset.rail = open ? 'open' : 'closed';
+    const b = $('#railToggle');
+    b.setAttribute('aria-expanded', String(open));
+    b.setAttribute('aria-label', open ? 'Collapse navigation' : 'Expand navigation');
+    if (open && isNarrow()) setTimeout(() => $('#rail .rail-new').focus(), 60);
+  }
+  function setTheme(t) {
+    root.dataset.theme = t;
+    const b = $('#themeToggle');
+    b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+    b.innerHTML = icon(t === 'dark' ? 'sun' : 'moon');
+    $('#menuThemeLabel').textContent = t === 'dark' ? 'Light theme' : 'Dark theme';
+    syncProto();
+  }
+  function setMobile(on) {
+    stage.classList.toggle('is-mobile', on);
+    setRail(false);
+    syncProto();
+  }
+  function closeTrust() { $('#tp').hidden = true; $('#trustBtn').setAttribute('aria-expanded', 'false'); }
+  function closeUserMenu() { $('#userMenu').hidden = true; $('#userBtn').setAttribute('aria-expanded', 'false'); }
+  const generating = () => state === 2 && app.dataset.phase !== 'done';
+  function syncSend() {
+    const b = $('#send'), ta = $('#composerInput');
+    if (generating()) {
+      b.disabled = false; b.setAttribute('aria-label', 'Stop generating'); b.innerHTML = icon('stop');
+    } else {
+      b.disabled = ta.value.trim() === ''; b.setAttribute('aria-label', 'Send question'); b.innerHTML = icon('send');
+    }
+  }
+  function syncProto() {
+    $$('.proto [data-state]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.state === state)));
+    $('#pDark').setAttribute('aria-pressed', String(root.dataset.theme === 'dark'));
+    $('#pMobile').setAttribute('aria-pressed', String(stage.classList.contains('is-mobile')));
+    $('#pLens').setAttribute('aria-pressed', String(lens));
+    const cur = $('#recentCurrent');
+    if (app.dataset.view === 'thread') cur.setAttribute('aria-current', 'true'); else cur.removeAttribute('aria-current');
+  }
+
+  // ─── State machine ───────────────────────────────────────────────────────
+  function setState(n) {
+    clearTimers(); closeDrawer(false); closeTrust(); closeUserMenu();
+    state = n;
+    setLens(false);
+    if (n === 1) { app.dataset.view = 'empty'; app.dataset.phase = 'idle'; }
+    else if (n === 2) runPipeline();
+    else {
+      resolve();
+      if (n >= 4) raf2(() => { if (state !== n) return; setLens(true); setActive(2); if (n === 5) openDrawer(1, null, $('#answer .claim')); });
+    }
+    $('#scroll').scrollTop = 0;
+    syncSend(); syncProto();
+  }
+
+  // ─── Events ──────────────────────────────────────────────────────────────
+  app.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t.closest('#userMenu button')) closeUserMenu();
+    if (t.closest('[data-nav]')) { e.preventDefault(); toast('Other pages are not part of this prototype.'); return; }
+    // Lens on: a click anywhere in a claim (including its citation) selects it.
+    if (lens) { const cl = t.closest('#answer .claim'); if (cl) { setActive(+cl.dataset.claim); return; } }
+    const open = t.closest('[data-open]');
+    if (open) { openDrawer(+open.dataset.open, open.dataset.focus != null ? +open.dataset.focus : null, open); return; }
+    const cite = t.closest('button.cite');
+    if (cite) { openDrawer(+cite.dataset.cite, null, cite); return; }
+    const note = t.closest('.sn-claim');
+    if (note) { setActive(+note.dataset.claim); return; }
+    const jump = t.closest('[data-jump]');
+    if (jump) { jumpToClaim(+jump.dataset.jump); return; }
+    const q = t.closest('.suggest-q');
+    if (q) { if (q.dataset.q === '0') setState(2); else toast('This prototype scripts one answer. Try the revenue question.'); return; }
+    const fb = t.closest('[data-fb]');
+    if (fb) {
+      const was = fb.getAttribute('aria-pressed') === 'true';
+      $$('[data-fb]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+      fb.setAttribute('aria-pressed', String(!was));
+      if (!was) toast('Feedback saved.');
+      return;
+    }
+    const tb = t.closest('[data-toast]');
+    if (tb) { toast(tb.dataset.toast); return; }
+    const act = t.closest('[data-act]');
+    if (act) {
+      e.preventDefault();
+      const a = act.dataset.act;
+      if (a === 'new') { setState(1); $('#composerInput').focus(); }
+      else if (a === 'current') { setState(3); if (isNarrow()) setRail(false); }
+      else if (a === 'regen') setState(2);
+      else if (a === 'theme') { setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'); closeUserMenu(); }
+      else if (a === 'unselect') setActive(null);
+    }
+  });
+  $('#lensToggle').addEventListener('click', () => setLens(!lens));
+  $('#themeToggle').addEventListener('click', () => setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark'));
+  $('#railToggle').addEventListener('click', () => setRail(app.dataset.rail !== 'open'));
+  $('#navScrim').addEventListener('click', () => setRail(false));
+  $('#drScrim').addEventListener('click', () => closeDrawer());
+  $('#drClose').addEventListener('click', () => closeDrawer());
+  $('#trustBtn').addEventListener('click', () => {
+    const open = $('#tp').hidden;
+    $('#tp').hidden = !open;
+    $('#trustBtn').setAttribute('aria-expanded', String(open));
+  });
+  $('#userBtn').addEventListener('click', () => {
+    const open = $('#userMenu').hidden;
+    $('#userMenu').hidden = !open;
+    $('#userBtn').setAttribute('aria-expanded', String(open));
+    if (open) $('#userMenu button').focus();
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.rail-foot')) closeUserMenu(); });
+
+  // Hover links a claim/citation with its margin note (no layout change on hover).
+  app.addEventListener('mouseover', (e) => {
+    $$('.is-hover').forEach((x) => x.classList.remove('is-hover'));
+    const cl = lens && e.target.closest('#answer .claim');
+    const nt = e.target.closest('.sn-claim');
+    const ci = !lens && e.target.closest('button.cite');
+    if (cl) $('#note-' + cl.dataset.claim)?.classList.add('is-hover');
+    if (nt) $('#claim-' + nt.dataset.claim)?.classList.add('is-hover');
+    if (ci) $$(`.sn-src[data-src="${ci.dataset.cite}"], .ref[data-src="${ci.dataset.cite}"]`).forEach((x) => x.classList.add('is-hover'));
+  });
+
+  // Composer
+  const ta = $('#composerInput');
+  ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 216) + 'px'; syncSend(); });
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); } });
+  $('#composer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (generating()) { setState(1); toast('Stopped. Ask again whenever you’re ready.'); return; }
+    const text = ta.value.trim();
+    if (!text) return;
+    ta.value = ''; ta.style.height = 'auto';
+    setState(2);
+    if (!/revenue/i.test(text)) toast('This prototype scripts one answer, so it shows the revenue question.');
+  });
+
+  // Keyboard: claims + global shortcuts + Escape ladder
+  document.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t.classList && t.classList.contains('claim') && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault(); setActive(+t.dataset.claim); return;
+    }
+    if (e.key === 'Escape') {
+      if (!$('#userMenu').hidden) { closeUserMenu(); $('#userBtn').focus(); }
+      else if (app.dataset.drawer === 'open') closeDrawer();
+      else if (app.dataset.rail === 'open' && isNarrow()) { setRail(false); $('#railToggle').focus(); }
+      else if ($('.claim.is-active')) setActive(null);
+      else if (!$('#tp').hidden) { closeTrust(); $('#trustBtn').focus(); }
+      return;
+    }
+    if (t.closest && t.closest('input, textarea, select, [contenteditable]')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^[1-5]$/.test(e.key)) setState(+e.key);
+    else if (e.key === 'd' || e.key === 'D') setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
+    else if (e.key === 'm' || e.key === 'M') setMobile(!stage.classList.contains('is-mobile'));
+    else if (e.key === 'l' || e.key === 'L') setLens(!lens);
+  });
+
+  // Prototype controls
+  $('#proto').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.state) setState(+b.dataset.state);
+    else if (b.id === 'pDark') setTheme(root.dataset.theme === 'dark' ? 'light' : 'dark');
+    else if (b.id === 'pMobile') setMobile(!stage.classList.contains('is-mobile'));
+    else if (b.id === 'pLens') setLens(!lens);
+    else if (b.id === 'protoMin') {
+      const min = $('#proto').classList.toggle('is-min');
+      b.textContent = min ? 'Show' : 'Hide';
+      b.setAttribute('aria-expanded', String(!min));
+    }
+  });
+
+  // ─── Boot. Deep links for QA: #4, #4-dark, #4-mobile, #5-dark-mobile ─────
+  renderRefs();
+  const h = location.hash.slice(1).split('-');
+  setTheme(h.includes('dark') ? 'dark' : 'light');
+  if (h.includes('mobile')) stage.classList.add('is-mobile');
+  if (innerWidth < 720) { $('#proto').classList.add('is-min'); $('#protoMin').textContent = 'Show'; $('#protoMin').setAttribute('aria-expanded', 'false'); }
+  setRail(false);
+  setState(/^[1-5]$/.test(h[0]) ? +h[0] : 1);
+})();
+</script>
+</body>
+</html>

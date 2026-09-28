@@ -271,6 +271,211 @@ class TestSaveQueryProvenance:
         assert row.prompt_tokens is None
 
 
+class TestSaveQueryReplacesQueryId:
+    """K4: Regenerate replaces the previous turn in place instead of piling
+    up duplicate history rows (R2-21) -- `_save_query(replaces_query_id=...)`
+    deletes the old row only when it's the caller's own and unreceipted."""
+
+    @staticmethod
+    async def _save_new(ws_api, *, workspace_id, user_id, replaces_query_id, query_id="q-new"):
+        await ws_api._save_query(
+            query_id=query_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            query_text="new q",
+            rewritten_query=None,
+            response_text="new a",
+            response_sources=[],
+            trust_score=0.9,
+            trust_components={},
+            guardrail_score=0.9,
+            guardrail_passed=True,
+            model_used="m",
+            latency_ms=1,
+            token_count=1,
+            normalized_query="new q",
+            document_version=0,
+            replaces_query_id=replaces_query_id,
+        )
+
+    async def test_deletes_the_old_row_when_owned_and_unreceipted(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        workspace, user = ws_workspace
+        test_db.add(Query(id="q-old-1", workspace_id=workspace.id, user_id=user.id, query_text="old q"))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-1", query_id="q-new-1",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-1" not in ids
+        assert "q-new-1" in ids
+
+    async def test_keeps_the_old_row_when_it_belongs_to_someone_else(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.core.auth import hash_password
+        from app.models.query import Query
+        from app.models.user import User
+
+        workspace, user = ws_workspace
+        other = User(
+            email="ws-other@example.com", username="wsother",
+            password_hash=hash_password("TestPass1"), role="user", is_active=True,
+        )
+        test_db.add(other)
+        await test_db.commit()
+        await test_db.refresh(other)
+        test_db.add(Query(id="q-old-2", workspace_id=workspace.id, user_id=other.id, query_text="old q"))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-2", query_id="q-new-2",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-2" in ids
+
+    async def test_keeps_the_old_row_when_it_has_a_receipt(
+        self, test_db, ws_session_factory, ws_workspace
+    ):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+        from app.models.receipt import Receipt
+
+        workspace, user = ws_workspace
+        test_db.add(Query(id="q-old-3", workspace_id=workspace.id, user_id=user.id, query_text="old q"))
+        await test_db.commit()
+        test_db.add(Receipt(
+            token="tok-replace-test", query_id="q-old-3", workspace_id=workspace.id,
+            payload="{}", canonical="{}", seal="s" * 64, signature="g" * 64,
+        ))
+        await test_db.commit()
+
+        await self._save_new(
+            ws_api, workspace_id=workspace.id, user_id=user.id,
+            replaces_query_id="q-old-3", query_id="q-new-3",
+        )
+
+        ids = (await test_db.execute(select(Query.id))).scalars().all()
+        assert "q-old-3" in ids
+
+
+class TestDisagreementPostcheck:
+    """BUG-24: the WS pipeline runs append_missing_disagreement_figures on the
+    full generated answer before guardrail-checking and saving it, so an
+    answer that cites both sides of an open Radar pair but states only one
+    figure gets the other appended instead of silently picking a side."""
+
+    async def test_appends_the_missing_figure_before_saving(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        import sys
+        import types
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.contradiction import Contradiction
+        from app.models.document import Document
+
+        workspace, user = ws_workspace
+        doc_a = Document(
+            workspace_id=workspace.id, filename="srv-a.pdf", original_filename="annual-report.pdf",
+            mime_type="application/pdf", file_size=1, status="ready",
+        )
+        doc_b = Document(
+            workspace_id=workspace.id, filename="srv-b.pdf", original_filename="press-release.pdf",
+            mime_type="application/pdf", file_size=1, status="ready",
+        )
+        test_db.add_all([doc_a, doc_b])
+        await test_db.commit()
+        test_db.add(Contradiction(
+            workspace_id=workspace.id, pair_key="k1",
+            doc_a_id=doc_a.id, chunk_a_id="chunk-a", sentence_a="Revenue was €412 million.",
+            doc_b_id=doc_b.id, chunk_b_id="chunk-b", sentence_b="Revenue was €398 million.",
+            score=0.9, similarity=0.8, status="open",
+        ))
+        await test_db.commit()
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k, filters=None):
+            return [
+                SimpleNamespace(
+                    chunk_id="chunk-a", document_id=doc_a.id, content="c", score=0.9,
+                    final_score=0.9, rerank_score=0.9, metadata={"document_name": "annual-report.pdf"},
+                ),
+                SimpleNamespace(
+                    chunk_id="chunk-b", document_id=doc_b.id, content="c", score=0.9,
+                    final_score=0.9, rerank_score=0.9, metadata={"document_name": "press-release.pdf"},
+                ),
+            ]
+
+        async def fake_rerank(query, results, top_k):
+            return list(results)
+
+        async def fake_stream_tokens(gen_input, query_id, token_sender):
+            return "Revenue in 2025 was €412 million [source:1][source:2].", 1, "mock-model", None, "hash"
+
+        async def fake_guardrail_check(answer, contexts):
+            return SimpleNamespace(passed=True, score=0.9, details="ok", claims=[])
+
+        async def fake_compute_trust(*args, **kwargs):
+            return SimpleNamespace(
+                overall=0.9, retrieval_quality=0.9, faithfulness=0.9, relevance=0.9, source_authority=0.8,
+            )
+
+        captured: dict = {}
+
+        async def fake_save_query(**kwargs):
+            captured["save_kwargs"] = kwargs
+
+        async def fake_document_version(*args, **kwargs):
+            return 0
+
+        async def fake_cache_lookup(*args, **kwargs):
+            return None
+
+        for name, attr, fn in (
+            ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
+            ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
+            ("app.retrieval.reranker", "rerank", fake_rerank),
+            ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
+            ("app.generation.guardrail", "check", fake_guardrail_check),
+            ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
+        ):
+            module = types.ModuleType(name)
+            setattr(module, attr, fn)
+            monkeypatch.setitem(sys.modules, name, module)
+
+        monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
+        monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
+        monkeypatch.setattr(ws_api, "lookup_cached_query", fake_cache_lookup)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was 2025 revenue?",
+            workspace_id=workspace.id,
+            user_id=user.id,
+            query_id="query-postcheck",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(lambda msg: _noop(), query_id="query-postcheck"),
+        )
+
+        assert captured["save_kwargs"]["response_text"] == (
+            "Revenue in 2025 was €412 million [source:1][source:2]. Revenue was €398 million. [source:2]"
+        )
+
+
 class TestPipelineResolvesActivePrompt:
     """The WS pipeline threads the registry's active prompt through generation."""
 
@@ -369,6 +574,41 @@ class TestPipelineResolvesActivePrompt:
         assert captured["save_kwargs"]["prompt_version"] == DEFAULT_PROMPT_HASH
         assert captured["save_kwargs"]["prompt_tokens"] == 120
 
+    async def test_empty_answer_is_an_error_not_a_verified_answer(
+        self, monkeypatch, ws_session_factory
+    ):
+        """A model that spends its whole budget thinking returns "" — that must
+        surface as a retryable error, never reach the guardrail or be saved."""
+        from app.api import ws as ws_api
+        from app.prompts.registry import DEFAULT_PROMPT_HASH
+
+        captured: dict = {}
+        sent: list[dict] = []
+        self._patch_pipeline(
+            monkeypatch, captured, ("  \n", 2048, "qwen3:4b", 120, DEFAULT_PROMPT_HASH)
+        )
+
+        async def record(msg: dict) -> None:
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was revenue?",
+            workspace_id="ws-1",
+            user_id="user-1",
+            query_id="query-1",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(record),
+        )
+
+        types_sent = [m["type"] for m in sent]
+        assert types_sent[-1] == "error"
+        assert sent[-1]["payload"]["code"] == "EMPTY_ANSWER"
+        assert "guardrail" not in types_sent and "complete" not in types_sent
+        assert "save_kwargs" not in captured
+        ranking = next(m["payload"] for m in sent if m["type"] == "progress" and m["payload"]["phase"] == "ranking")
+        assert ranking["found"] == 1 and "elapsed_ms" in ranking
+
     async def test_active_row_supplies_prompt_text_and_pinned_model(
         self, monkeypatch, test_db, ws_session_factory
     ):
@@ -411,6 +651,95 @@ class TestPipelineResolvesActivePrompt:
         assert captured["model"] == "pinned:1b"
         assert captured["save_kwargs"]["prompt_version"] == registry.compute_hash(content)
 
+
+class TestSourcesFramePageNumber:
+    """K1/BUG-8: the live "sources" WS frame carries page_number from chunk
+    metadata. Stored `response_sources` already exposed it (`_source_response`
+    reads `metadata.get("page_number")`); the live frame built its own dict
+    without that field."""
+
+    async def test_sources_frame_includes_page_number_from_chunk_metadata(
+        self, monkeypatch, ws_session_factory
+    ):
+        import sys
+        import types
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k, filters=None):
+            return [
+                SimpleNamespace(
+                    chunk_id="chunk-1",
+                    document_id="doc-1",
+                    content="source content",
+                    score=0.9,
+                    final_score=0.9,
+                    rerank_score=0.9,
+                    metadata={"document_name": "Doc 1", "page_number": 3},
+                )
+            ]
+
+        async def fake_rerank(query, results, top_k):
+            return list(results)
+
+        async def fake_stream_tokens(gen_input, query_id, token_sender):
+            return "final answer", 1, "mock-model", None, "hash"
+
+        async def fake_guardrail_check(answer, contexts):
+            return SimpleNamespace(passed=True, score=0.95, details="ok")
+
+        async def fake_compute_trust(*args, **kwargs):
+            return SimpleNamespace(
+                overall=0.9, retrieval_quality=0.9, faithfulness=0.95,
+                relevance=0.9, source_authority=0.8,
+            )
+
+        async def fake_save_query(**kwargs):
+            return None
+
+        async def fake_document_version(*args, **kwargs):
+            return 0
+
+        async def fake_cache_lookup(*args, **kwargs):
+            return None
+
+        for name, attr, fn in (
+            ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
+            ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
+            ("app.retrieval.reranker", "rerank", fake_rerank),
+            ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
+            ("app.generation.guardrail", "check", fake_guardrail_check),
+            ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
+        ):
+            module = types.ModuleType(name)
+            setattr(module, attr, fn)
+            monkeypatch.setitem(sys.modules, name, module)
+
+        monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
+        monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
+        monkeypatch.setattr(ws_api, "lookup_cached_query", fake_cache_lookup)
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What is policy?",
+            workspace_id="ws-1",
+            user_id="user-1",
+            query_id="query-page",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(_send, query_id="query-page"),
+        )
+
+        sources_frame = next(m["payload"] for m in sent if m["type"] == "sources")
+        assert sources_frame["sources"][0]["page_number"] == 3
 
 
 class TestCacheRespectsPromotedPrompt:
@@ -610,4 +939,173 @@ class TestCompleteFramePayload:
         complete = [m for m in sent if m["type"] == "complete"][-1]["payload"]
         assert complete["model_used"] == "served:7b"
         assert complete["prompt_version"] == "promptv1hash"
+
+
+# ─── Truth Lens: per-claim verdicts on the guardrail frame ────────
+
+
+CLAIM = {
+    "text": "Revenue grew 12% in fiscal 2025.",
+    "start": 0,
+    "end": 43,
+    "verdict": "supported",
+    "entailment": 0.93,
+    "contradiction": 0.02,
+    "source_index": 1,
+    "chunk_id": "chunk-1",
+    "document_id": "doc-1",
+    "document_name": "Doc 1",
+    "page_number": 3,
+    "evidence": "Revenue grew 12% in fiscal 2025 to $48.2M.",
+}
+
+
+class TestGuardrailClaims:
+    @staticmethod
+    def _install_guardrail(monkeypatch, result):
+        import sys
+        import types
+
+        async def fake_guardrail_check(answer, contexts):
+            return result
+
+        module = types.ModuleType("app.generation.guardrail")
+        module.check = fake_guardrail_check
+        monkeypatch.setitem(sys.modules, "app.generation.guardrail", module)
+
+    @staticmethod
+    async def _run_pipeline(workspace, user, query_id, sent):
+        from app.api import ws as ws_api
+
+        async def _send(msg):
+            sent.append(msg)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was revenue?",
+            workspace_id=workspace.id,
+            user_id=user.id,
+            query_id=query_id,
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(_send, query_id=query_id),
+        )
+        return next(m["payload"] for m in sent if m["type"] == "guardrail")
+
+    async def test_frame_carries_claims_and_a_claims_row_is_saved(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        import json
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.query_claims import QueryClaims
+
+        workspace, user = ws_workspace
+        real_save_query = ws_api._save_query
+        TestPipelineResolvesActivePrompt._patch_pipeline(
+            monkeypatch, {}, ("Revenue grew 12% in fiscal 2025 [source:1].", 9, "served:7b", 50, "h")
+        )
+        monkeypatch.setattr(ws_api, "_save_query", real_save_query)
+        self._install_guardrail(monkeypatch, SimpleNamespace(
+            passed=False, score=0.4, details="1/2 supported",
+            claims=[CLAIM], unsupported_claims=["Costs fell."],
+        ))
+
+        frame = await self._run_pipeline(workspace, user, "q-claims-1", [])
+
+        assert frame["claims"] == [CLAIM]
+        assert frame["unsupported_claims"] == ["Costs fell."]
+        row = (
+            await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == "q-claims-1"))
+        ).scalar_one()
+        assert json.loads(row.claims) == [CLAIM]
+
+    async def test_guardrail_without_claims_sends_empty_lists_and_saves_no_row(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.query import Query
+        from app.models.query_claims import QueryClaims
+
+        workspace, user = ws_workspace
+        real_save_query = ws_api._save_query
+        TestPipelineResolvesActivePrompt._patch_pipeline(monkeypatch, {}, ("answer", 1, "m", 1, "h"))
+        monkeypatch.setattr(ws_api, "_save_query", real_save_query)
+        self._install_guardrail(monkeypatch, SimpleNamespace(passed=True, score=1.0, details="skipped"))
+
+        frame = await self._run_pipeline(workspace, user, "q-claims-2", [])
+
+        assert frame["claims"] == []
+        assert frame["unsupported_claims"] == []
+        assert (await test_db.execute(select(Query).where(Query.id == "q-claims-2"))).scalar_one()
+        assert (
+            await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == "q-claims-2"))
+        ).scalar_one_or_none() is None
+
+    async def test_cache_hit_replays_the_origin_claims(self, monkeypatch, test_db, ws_session_factory):
+        import json
+
+        from app.models.query import Query
+        from app.models.query_claims import QueryClaims
+        from app.prompts.registry import DEFAULT_PROMPT_HASH
+
+        await TestCacheRespectsPromotedPrompt._seed_cached_row(test_db, DEFAULT_PROMPT_HASH)
+        origin = (await test_db.execute(select(Query).where(Query.workspace_id == "ws-cache"))).scalar_one()
+        origin.guardrail_score = 0.9
+        origin.guardrail_passed = True
+        test_db.add(QueryClaims(query_id=origin.id, claims=json.dumps([CLAIM])))
+        await test_db.commit()
+        sent: list[dict] = []
+
+        await TestCacheRespectsPromotedPrompt._run(monkeypatch, sent, DEFAULT_PROMPT_HASH, test_db=test_db)
+
+        assert sent[-1]["payload"]["from_cache"] is True
+        frame = next(m["payload"] for m in sent if m["type"] == "guardrail")
+        assert frame["claims"] == [CLAIM]
+        assert frame["unsupported_claims"] == []
+
+    async def test_cached_replay_without_a_claims_row_sends_empty_claims(self):
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        cached = Query(
+            id="cached-no-claims", workspace_id="ws-1", query_text="q", response_text="a",
+            response_sources="[]", guardrail_score=0.9, guardrail_passed=True, trust_score=0.8,
+        )
+        await ws_api._send_cached_query(cached, _pipeline_sink(_send, "cached-no-claims"), 3)
+
+        frame = next(m["payload"] for m in sent if m["type"] == "guardrail")
+        assert frame["claims"] == []
+
+    async def test_cached_replay_carries_the_stored_trust_components(self):
+        """BUG-50: a cache hit must replay the origin's trust sub-scores, not `{}`."""
+        from app.api import ws as ws_api
+        from app.models.query import Query
+
+        sent: list[dict] = []
+
+        async def _send(msg):
+            sent.append(msg)
+
+        components = {
+            "retrieval_quality": 0.91,
+            "faithfulness": 0.82,
+            "relevance": 0.77,
+            "source_authority": 0.65,
+        }
+        cached = Query(
+            id="cached-trust", workspace_id="ws-1", query_text="q", response_text="a",
+            response_sources="[]", trust_score=0.8, trust_components=components,
+        )
+        await ws_api._send_cached_query(cached, _pipeline_sink(_send, "cached-trust"), 3)
+
+        frame = next(m["payload"] for m in sent if m["type"] == "trust_score")
+        assert frame["components"] == components
 

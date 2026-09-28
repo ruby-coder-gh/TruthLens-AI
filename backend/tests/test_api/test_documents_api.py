@@ -1,19 +1,25 @@
 """HTTP tests for document upload, list, get, delete — with real workspace."""
 
 from __future__ import annotations
+import json
 import sys
 import types
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.documents import MAX_DETAIL_CHUNKS, MAX_PAGE_SIZE, MIN_PAGE_SIZE, upload_document
 from app.core.exceptions import TooLargeException
 from app.core.auth import create_access_token
 from app.models.chunk import Chunk
+from app.models.query import Query
+from app.models.receipt import Receipt
 from app.models.user import User
+from app.models.workspace import Workspace
+from app.receipts import build_payload, canonicalize, seal_and_sign
 
 
 @pytest.fixture
@@ -42,6 +48,54 @@ async def test_upload_document(client: AsyncClient, auth_headers: dict[str, str]
     assert data["status"] == "pending"
     assert data["original_filename"] == "test.txt"
     assert "id" in data
+
+
+@pytest.mark.asyncio
+async def test_upload_document_duplicate_content_rejected(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """BUG-60: an identical duplicate file upload in the same workspace is
+    rejected with 409, not silently accepted twice."""
+    content = b"Hello world content here"
+    first = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("test.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert first.status_code == 202
+
+    second = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("test-copy.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert second.status_code == 409
+    assert "test.txt" in second.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_upload_document_same_content_different_workspace_allowed(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """Duplicate detection is scoped to a single workspace."""
+    content = b"Shared content across workspaces"
+    first = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("shared.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert first.status_code == 202
+
+    other_ws = await client.post(
+        "/api/workspaces", json={"name": "Other WS"}, headers=auth_headers
+    )
+    other_ws_id = other_ws.json()["id"]
+    second = await client.post(
+        f"/api/workspaces/{other_ws_id}/documents",
+        files={"file": ("shared.txt", content, "text/plain")},
+        headers=auth_headers,
+    )
+    assert second.status_code == 202
 
 
 @pytest.mark.asyncio
@@ -114,6 +168,88 @@ async def test_list_documents(client: AsyncClient, auth_headers: dict[str, str],
     assert "data" in body
     assert "meta" in body
     assert body["meta"]["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_documents_includes_uploaded_by_name(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """K3/BUG-38: the list carries the uploader's display name (username),
+    not just their opaque user id, so the admin UI can show a name instead
+    of a raw UUID."""
+    await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("uploader_name.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    assert resp.status_code == 200
+    row = next(d for d in resp.json()["data"] if d["original_filename"] == "uploader_name.txt")
+    assert row["uploaded_by_name"] == "authtest"
+
+
+@pytest.mark.asyncio
+async def test_list_documents_uploaded_by_name_falls_back_to_email(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str, test_db: AsyncSession
+):
+    """K3: when a user row has no username, uploaded_by_name falls back to email."""
+    from app.models.document import Document
+    from app.models.user import User
+
+    no_username = User(
+        email="no-username@example.com", username="", password_hash="x", role="user", is_active=True
+    )
+    test_db.add(no_username)
+    await test_db.commit()
+    await test_db.refresh(no_username)
+
+    test_db.add(Document(
+        workspace_id=workspace_id,
+        filename="no_username.txt",
+        original_filename="no_username.txt",
+        mime_type="text/plain",
+        file_size=4,
+        status="ready",
+        uploaded_by=no_username.id,
+    ))
+    await test_db.commit()
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    assert resp.status_code == 200
+    row = next(d for d in resp.json()["data"] if d["original_filename"] == "no_username.txt")
+    assert row["uploaded_by_name"] == "no-username@example.com"
+
+
+@pytest.mark.asyncio
+async def test_list_documents_reports_collection_id(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """BUG-18: the collection picker needs to know which documents are
+    already assigned, so the list response must carry `collection_id`."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("coll_test.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+    assert upload.json()["collection_id"] is None
+
+    coll = await client.post(
+        f"/api/workspaces/{workspace_id}/collections",
+        json={"name": "Reports"},
+        headers=auth_headers,
+    )
+    collection_id = coll.json()["id"]
+    await client.put(
+        f"/api/workspaces/{workspace_id}/collections/{collection_id}/documents",
+        json={"document_ids": [doc_id]},
+        headers=auth_headers,
+    )
+
+    resp = await client.get(f"/api/workspaces/{workspace_id}/documents", headers=auth_headers)
+    row = next(d for d in resp.json()["data"] if d["id"] == doc_id)
+    assert row["collection_id"] == collection_id
 
 
 @pytest.mark.asyncio
@@ -213,6 +349,26 @@ async def test_get_document(client: AsyncClient, auth_headers: dict[str, str], w
     )
     assert resp.status_code == 200
     assert resp.json()["id"] == doc_id
+
+
+@pytest.mark.asyncio
+async def test_get_document_includes_uploaded_by_name(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str
+):
+    """K3: the document detail view also carries uploaded_by_name (BUG-38)."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("detail_uploader.txt", b"content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["uploaded_by_name"] == "authtest"
 
 
 @pytest.mark.asyncio
@@ -395,6 +551,59 @@ async def test_delete_document_not_found(client: AsyncClient, auth_headers: dict
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_document_revokes_receipts_citing_it(
+    client: AsyncClient, auth_headers: dict[str, str], workspace_id: str, test_db: AsyncSession
+):
+    """A public receipt must not keep quoting a document that no longer exists."""
+    upload = await client.post(
+        f"/api/workspaces/{workspace_id}/documents",
+        files={"file": ("cited.txt", b"cited content", "text/plain")},
+        headers=auth_headers,
+    )
+    doc_id = upload.json()["id"]
+
+    query = Query(
+        workspace_id=workspace_id,
+        query_text="What does the cited document say?",
+        response_text="It says something [source:1].",
+        response_sources=json.dumps(
+            [{"chunk_id": "c1", "document_id": doc_id, "document_name": "cited.txt", "content": "It says something."}]
+        ),
+    )
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    workspace = (await test_db.execute(select(Workspace).where(Workspace.id == workspace_id))).scalar_one()
+    payload = build_payload(query, claims=[], workspace=workspace)
+    canonical = canonicalize(payload)
+    seal, signature = seal_and_sign(canonical)
+    receipt = Receipt(
+        token="tok-cited-doc",
+        query_id=query.id,
+        workspace_id=workspace_id,
+        payload=json.dumps(payload),
+        canonical=canonical,
+        seal=seal,
+        signature=signature,
+    )
+    test_db.add(receipt)
+    await test_db.commit()
+
+    fake_indexer = types.ModuleType("app.ingestion.indexer")
+    fake_indexer.delete_document = AsyncMock()
+    with patch.dict(sys.modules, {"app.ingestion.indexer": fake_indexer}):
+        del_resp = await client.delete(
+            f"/api/workspaces/{workspace_id}/documents/{doc_id}",
+            headers=auth_headers,
+        )
+    assert del_resp.status_code == 204
+
+    view_resp = await client.get(f"/api/receipts/{receipt.token}")
+    assert view_resp.status_code == 410
 
 
 @pytest.mark.asyncio

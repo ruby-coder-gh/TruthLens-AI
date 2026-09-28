@@ -159,6 +159,20 @@ describe('AdminAnalyticsPage — Usage tab', () => {
     expect(totals.getByText('5')).toBeInTheDocument();
   });
 
+  // BUG-43: the footnote used to quote gpt-4o-mini rates even when the
+  // deployed model is local (no pricing configured at all).
+  it('tells the admin local models have no API cost when pricing is empty', async () => {
+    mockedAdminApi.getUsage.mockResolvedValue({ ...USAGE_BY_MODEL, pricing_source: 'none' });
+    mockedAdminApi.getUsagePricing.mockResolvedValue({ pricing: {} });
+
+    renderWithProviders(<AdminAnalyticsPage />);
+    await openUsageTab();
+
+    await waitFor(() => expect(mockedAdminApi.getUsage).toHaveBeenCalled());
+
+    expect(await screen.findByText(/local models have no api cost/i)).toBeInTheDocument();
+  });
+
   it('refetches with the new group_by when the segmented control changes', async () => {
     mockedAdminApi.getUsage.mockImplementation((params) => {
       if (params?.group_by === 'user') return Promise.resolve(USAGE_BY_USER);
@@ -233,6 +247,23 @@ describe('AdminAnalyticsPage — Usage tab', () => {
         expect.objectContaining({ date_to: '2026-08-31T23:59:59.999' }),
       );
     });
+  });
+
+  // BUG-57: an inverted range used to reach the API and come back as an
+  // ordinary empty result, indistinguishable from "nothing happened".
+  it('flags an inverted date range instead of silently fetching it', async () => {
+    renderWithProviders(<AdminAnalyticsPage />);
+    await openUsageTab();
+
+    await waitFor(() => expect(mockedAdminApi.getUsage).toHaveBeenCalledTimes(1));
+    mockedAdminApi.getUsage.mockClear();
+
+    // Default "From" is 30 days ago — one change to "To" landing before it
+    // is enough to invert the range in a single update.
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-01' } });
+
+    expect(await screen.findByText(/after the .To. date/i)).toBeInTheDocument();
+    expect(mockedAdminApi.getUsage).not.toHaveBeenCalled();
   });
 
   it('ignores a stale response when a newer group-by fetch resolves out of order', async () => {

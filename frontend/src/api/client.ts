@@ -55,6 +55,16 @@ import type {
   PromptDiffResponse,
   PromptEvalQueued,
   ActivePrompt,
+  ReceiptCreated,
+  ReceiptSummary,
+  ReceiptView,
+  RadarState,
+  RadarScanStatus,
+  Contradiction,
+  ContradictionStatus,
+  ChunkLocation,
+  ReadyStatus,
+  DemoPersona,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -214,7 +224,30 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/auth/register',
   '/auth/forgot-password',
   '/auth/reset-password',
+  '/auth/demo-login',
+  '/health/ready',
 ]);
+
+// Prefix-matched public paths — `/receipts/{token}` carries a variable path
+// segment, so it can't live in the exact-match Set above; any token (valid,
+// revoked, or unknown) must skip the refresh-and-redirect dance.
+const PUBLIC_AUTH_PATH_PREFIXES = ['/receipts/'];
+
+function isPublicAuthPath(path: string): boolean {
+  return PUBLIC_AUTH_PATHS.has(path) || PUBLIC_AUTH_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+// BUG-56: authenticated endpoints where a 401 means "the credential you just
+// supplied is wrong", not "your session expired" — the access token/cookie
+// is fine, so attempting a refresh (which will succeed) and retrying (which
+// 401s again for the same reason) just doubles the round-trip before the
+// real error ever reaches the user. Unlike PUBLIC_AUTH_PATHS these DO carry
+// a session; only the refresh-and-retry dance is skipped.
+const CREDENTIAL_CHECK_PATHS = new Set(['/auth/change-password']);
+
+function isCredentialCheckPath(path: string): boolean {
+  return CREDENTIAL_CHECK_PATHS.has(path);
+}
 
 // ─── Core request function (JSON) ───────────────────────────────────────────
 async function request<T>(
@@ -230,8 +263,10 @@ async function request<T>(
   });
 
   // Auto-refresh on 401 for authenticated flows only.
-  // Keep the backend's real 401 message for public/unauthenticated auth endpoints.
-  if (res.status === 401 && !PUBLIC_AUTH_PATHS.has(path)) {
+  // Keep the backend's real 401 message for public/unauthenticated auth
+  // endpoints, and for authenticated ones where the 401 is a credential
+  // check, not an expired session (BUG-56).
+  if (res.status === 401 && !isPublicAuthPath(path) && !isCredentialCheckPath(path)) {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
       res = await fetch(`${API_BASE}${path}`, {
@@ -339,6 +374,11 @@ export const workspaceApi = {
   addMember: (id: string, data: AddMemberRequest): Promise<WorkspaceMember> =>
     request(`/workspaces/${id}/members`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // BUG-15: the member card had no role-change control at all — this is the
+  // existing owner-only `PUT /workspaces/{id}/members/{user_id}`.
+  updateMemberRole: (workspaceId: string, userId: string, role: string): Promise<WorkspaceMember> =>
+    request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+
   removeMember: (workspaceId: string, userId: string): Promise<void> =>
     request(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
 
@@ -377,6 +417,15 @@ export const documentApi = {
       method: 'POST',
       body: JSON.stringify({ action, document_ids: documentIds, ...(tags ? { tags } : {}) }),
     }),
+
+  // ─── Source viewer (L7/L8) ────────────────────────────────────────────────
+  // Not a `request()` call — PDF.js fetches this URL directly (with
+  // credentials) to load page bytes, so callers need the raw URL, not a parsed body.
+  fileUrl: (workspaceId: string, documentId: string): string =>
+    `${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/file`,
+
+  locate: (workspaceId: string, documentId: string, chunkId: string): Promise<ChunkLocation> =>
+    request(`/workspaces/${workspaceId}/documents/${documentId}/chunks/${chunkId}/locate`),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
@@ -405,7 +454,9 @@ export const queryApi = {
   compare: (workspaceId: string, queryId: string): Promise<QueryComparison> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}/compare`, { method: 'POST' }),
 
-  listAll: (params?: { pinned?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
+  // K6: `mine` restricts the list to the caller's own queries — /chats (R2-1:
+  // a viewer must not see, let alone delete, other members' chat history).
+  listAll: (params?: { pinned?: boolean; mine?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
     request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   // Bespoke fetch — response is raw markdown (Content-Disposition attachment),
@@ -530,6 +581,11 @@ const adminPromptsApi = {
 
   diff: (id: string, against = 'active'): Promise<PromptDiffResponse> =>
     request(`/admin/prompts/${id}/diff${buildQuery({ against })}`),
+
+  // BUG-39: the only way back to the built-in DEFAULT_SYSTEM_PROMPT once any
+  // version has been promoted — retires whatever is active for `name`.
+  restoreDefault: (name = 'answer'): Promise<ActivePrompt> =>
+    request(`/admin/prompts/${name}/restore-default`, { method: 'POST' }),
 };
 
 // ─── SEC-2 — golden-entry approval workflow ─────────────────────────────────
@@ -684,6 +740,19 @@ export const collectionApi = {
 
   listAccess: (workspaceId: string, collectionId: string): Promise<ListResponse<unknown>> =>
     request(`/workspaces/${workspaceId}/collections/${collectionId}/access`),
+
+  // BUG-18: assign documents to a collection. A document belongs to at most
+  // one collection, so this moves it out of any other it was already in.
+  addDocuments: (workspaceId: string, collectionId: string, documentIds: string[]): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/documents`, {
+      method: 'PUT',
+      body: JSON.stringify({ document_ids: documentIds }),
+    }),
+
+  removeDocument: (workspaceId: string, collectionId: string, documentId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/documents/${documentId}`, {
+      method: 'DELETE',
+    }),
 };
 
 // ─── Investigation API ──────────────────────────────────────────────────────
@@ -707,6 +776,52 @@ export const investigationApi = {
   },
 };
 
+// ─── Truth Receipt API (L3/L4) ──────────────────────────────────────────────
+export const receiptApi = {
+  create: (queryId: string): Promise<ReceiptCreated> =>
+    request(`/queries/${queryId}/receipts`, { method: 'POST' }),
+
+  // Backend returns a `{data: [...]}` envelope (ListResponse) — unwrap here so
+  // callers (SealReceiptButton) can keep treating this as a bare array.
+  listForQuery: (queryId: string): Promise<ReceiptSummary[]> =>
+    request<ListResponse<ReceiptSummary>>(`/queries/${queryId}/receipts`).then((res) => res.data),
+
+  // PUBLIC — no session required; served to anyone holding the token.
+  get: (token: string): Promise<ReceiptView> =>
+    request(`/receipts/${token}`),
+
+  revoke: (token: string): Promise<void> =>
+    request(`/receipts/${token}`, { method: 'DELETE' }),
+};
+
+// ─── Contradiction Radar API (L5/L6) ────────────────────────────────────────
+export const radarApi = {
+  get: (workspaceId: string, status?: ContradictionStatus): Promise<RadarState> =>
+    request(`/workspaces/${workspaceId}/radar${buildQuery(status ? { status } : undefined)}`),
+
+  scan: (workspaceId: string): Promise<{ scan_id: string; status: RadarScanStatus }> =>
+    request(`/workspaces/${workspaceId}/radar/scans`, { method: 'POST' }),
+
+  setStatus: (workspaceId: string, contradictionId: string, status: ContradictionStatus): Promise<Contradiction> =>
+    request(`/workspaces/${workspaceId}/radar/contradictions/${contradictionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+};
+
+// ─── Demo mode API (L9/L10) ─────────────────────────────────────────────────
+export const demoApi = {
+  // PUBLIC — polled before login to drive the header warm-up pill.
+  ready: (): Promise<ReadyStatus> =>
+    request('/health/ready'),
+
+  login: (persona: DemoPersona): Promise<AuthResponse> =>
+    request('/auth/demo-login', { method: 'POST', body: JSON.stringify({ persona }) }),
+
+  suggestions: (workspaceId: string): Promise<{ questions: string[] }> =>
+    request(`/workspaces/${workspaceId}/suggestions`),
+};
+
 // ─── Unified API object ─────────────────────────────────────────────────────
 export const api = {
   auth: authApi,
@@ -721,4 +836,7 @@ export const api = {
   search: searchApi,
   reviewQueue: reviewQueueApi,
   annotations: annotationApi,
+  receipts: receiptApi,
+  radar: radarApi,
+  demo: demoApi,
 };

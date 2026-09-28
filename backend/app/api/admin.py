@@ -29,6 +29,7 @@ from app.evaluation.golden_store import (
     list_promoted_entries,
 )
 from app.models.audit_log import AuditLog
+from app.models.chunk import Chunk
 from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.document import Document
 from app.models.eval_run import EvalRun
@@ -178,9 +179,9 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
 
     counts = await asyncio.gather(
         _count(User), _count(Workspace), _count(Document),
-        _count(Query), _count(Feedback),
+        _count(Query), _count(Feedback), _count(Chunk),
     )
-    total_users, total_workspaces, total_documents, total_queries, total_feedback = counts
+    total_users, total_workspaces, total_documents, total_queries, total_feedback, total_chunks = counts
 
     trust_r, rating_r, cache_hits_r = await asyncio.gather(
         db.execute(select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))),
@@ -197,7 +198,7 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
         total_workspaces=total_workspaces,
         total_documents=total_documents,
         total_queries=total_queries,
-        total_chunks=0,
+        total_chunks=total_chunks,
         avg_trust_score=round(float(avg_trust), 4) if avg_trust else None,
         avg_rating=round(float(avg_rating), 2) if avg_rating else None,
         total_feedback=total_feedback,
@@ -302,6 +303,7 @@ async def get_audit_logs(
             AuditLogResponse(
                 id=log.id,
                 user_id=log.user_id,
+                user_name=(log.user.username or log.user.email) if log.user else None,
                 action=log.action,
                 resource_type=log.resource_type,
                 resource_id=log.resource_id,
@@ -359,6 +361,7 @@ async def export_audit_logs(
             AuditLogResponse(
                 id=log.id,
                 user_id=log.user_id,
+                user_name=(log.user.username or log.user.email) if log.user else None,
                 action=log.action,
                 resource_type=log.resource_type,
                 resource_id=log.resource_id,
@@ -621,6 +624,7 @@ async def invite_user(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -683,6 +687,7 @@ async def update_user_role(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -723,6 +728,7 @@ async def update_user_status(
         username=user.username,
         role=user.role,
         is_active=user.is_active,
+        last_login_at=user.last_login_at,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
@@ -1024,6 +1030,12 @@ async def _usage_rollup(
             func.coalesce(func.sum(Query.cache_hit_count), 0).label("cache_hits"),
         )
 
+    # A sufficiency-gate abstention persists `model_used="abstain"` with no
+    # LLM call behind it (see `_ANSWERED_ONLY` above) — exclude it here the
+    # same way `get_flagged_answers` / `get_trust_score_distribution` do, or
+    # it shows up as a free "model" row and skews query/token totals.
+    stmt = stmt.where(_ANSWERED_ONLY)
+
     naive_from = _to_naive_utc(date_from)
     if naive_from:
         stmt = stmt.where(Query.created_at >= naive_from)
@@ -1221,8 +1233,12 @@ async def get_admin_settings():
     return AdminSettingsResponse(
         app_name=settings.APP_NAME,
         app_version=settings.APP_VERSION,
-        max_upload_size_mb=settings.SERVER_MAX_UPLOAD_SIZE // 1024 // 1024,
-        trust_score_high_threshold=settings.GUARDRAIL_THRESHOLD,
+        max_upload_size_mb=_settings_overrides.get(
+            "max_upload_size_mb", settings.SERVER_MAX_UPLOAD_SIZE // 1024 // 1024
+        ),
+        trust_score_high_threshold=_settings_overrides.get(
+            "trust_score_high_threshold", settings.GUARDRAIL_THRESHOLD
+        ),
         trust_score_low_threshold=_settings_overrides.get("trust_score_low_threshold", TRUST_SCORE_LOW_THRESHOLD),
         rate_limit_enabled=_settings_overrides.get("rate_limit_enabled", settings.RATE_LIMIT_ENABLED),
         rate_limit_requests=_settings_overrides.get("rate_limit_requests", settings.RATE_LIMIT_REQUESTS),
@@ -1300,9 +1316,15 @@ async def list_golden_entries(
     if source in ("builtin", "all") and status in (None, GOLDEN_STATUS_APPROVED):
         entries.extend(_builtin_golden_responses())
     if source in ("promoted", "all"):
+        promoted_rows = await list_promoted_entries(db, status=status)
+        ws_ids = {row.workspace_id for row in promoted_rows if row.workspace_id}
+        ws_names: dict[str, str] = {}
+        if ws_ids:
+            ws_result = await db.execute(select(Workspace.id, Workspace.name).where(Workspace.id.in_(ws_ids)))
+            ws_names = dict(ws_result.all())
         entries.extend(
-            GoldenEntryResponse.from_row(row)
-            for row in await list_promoted_entries(db, status=status)
+            GoldenEntryResponse.from_row(row, workspace_name=ws_names.get(row.workspace_id))
+            for row in promoted_rows
         )
     offset = (page - 1) * page_size
     counts = await golden_counts(db)

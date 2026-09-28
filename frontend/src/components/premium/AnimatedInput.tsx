@@ -23,10 +23,15 @@ export function InputActionButton({
   children,
   onClick,
   active,
+  'aria-label': ariaLabel,
 }: {
   children: ReactNode;
   onClick?: () => void;
   active?: boolean;
+  /** Required for an icon-only button (e.g. "Show password") — there is no
+   *  visible text this control's accessible name could otherwise come from
+   *  (BUG-56). */
+  'aria-label'?: string;
 }) {
   const [rippleKey, setRippleKey] = useState(0);
 
@@ -40,6 +45,7 @@ export function InputActionButton({
     <motion.button
       type="button"
       onClick={handleClick}
+      aria-label={ariaLabel}
       className={clsx(
         'relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-chip border',
         'transition-colors duration-200',

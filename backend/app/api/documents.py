@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi.responses import FileResponse
 
+from app.chroma_client import get_workspace_collection
 from app.config import settings
 from app.core.deps import (
     check_workspace_access,
@@ -20,18 +24,29 @@ from app.core.deps import (
     get_current_user,
     get_db,
 )
-from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
+from app.core.exceptions import (
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    TooLargeException,
+    UnsupportedTypeException,
+)
+from app.ingestion.locate import find_text_offsets, locate_in_pdf
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
+from app.models.contradiction import Contradiction
 from app.models.document import Document
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
+from app.receipts import revoke_receipts_for_document
 from app.schemas.common import PaginatedResponse
 from app.schemas.document import (
     ChunkInfo,
+    ChunkLocateResponse,
     DocumentDetailResponse,
     DocumentResponse,
     DocumentStatusResponse,
+    TextHighlight,
 )
 from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
@@ -47,6 +62,25 @@ SUPPORTED_MIME_TYPES = {
     "text/csv",
     "application/json",
 }
+
+# Served as `text/plain` on the file endpoint regardless of stored mime type —
+# never as `text/html` or a browser-sniffed type — so a malicious .md/.csv/.json
+# upload can't execute as HTML in the viewer's origin (stored XSS).
+TEXT_LIKE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv", "application/json"}
+CONTEXT_CHARS = 600
+
+
+async def _uploader_names(db: AsyncSession, user_ids: set[str]) -> dict[str, str]:
+    """K3: map `uploaded_by` user ids to a display name (username, else email).
+
+    `username` is `nullable=False` in practice, so the email fallback is a
+    belt-and-braces default for the (unenforced-at-the-DB-layer) empty case.
+    """
+    user_ids.discard(None)
+    if not user_ids:
+        return {}
+    result = await db.execute(select(User).where(User.id.in_(user_ids)))
+    return {u.id: (u.username or u.email) for u in result.scalars().all()}
 
 MAX_FILE_SIZE = 52_428_800  # 50 MB
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -112,6 +146,7 @@ async def upload_document(
     file_path = upload_dir / server_filename
 
     file_size = 0
+    hasher = hashlib.sha256()
     try:
         with open(file_path, "wb") as f:
             while True:
@@ -121,11 +156,41 @@ async def upload_document(
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     raise TooLargeException(f"File exceeds {MAX_FILE_SIZE // 1024 // 1024}MB limit")
+                hasher.update(chunk)
                 f.write(chunk)
     except TooLargeException:
         if file_path.exists():
             file_path.unlink()
         raise
+    content_hash = hasher.hexdigest()
+
+    # BUG-60: reject an exact-content duplicate already in this workspace.
+    # Pre-filter on the existing file_size/mime_type columns (no schema
+    # change — content_hash isn't persisted) before reading candidate files
+    # back off disk to confirm a true byte-for-byte match.
+    candidates = (await db.execute(
+        select(Document).where(
+            Document.workspace_id == workspace_id,
+            Document.file_size == file_size,
+            Document.mime_type == mime_type,
+        )
+    )).scalars().all()
+    for candidate in candidates:
+        candidate_path = upload_dir / candidate.filename
+        if not candidate_path.is_file():
+            continue
+        candidate_hasher = hashlib.sha256()
+        with open(candidate_path, "rb") as f:
+            while True:
+                chunk = f.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                candidate_hasher.update(chunk)
+        if candidate_hasher.hexdigest() == content_hash:
+            file_path.unlink(missing_ok=True)
+            raise ConflictException(
+                f"An identical file is already uploaded as '{candidate.original_filename}'"
+            )
 
     # Create document record
     doc = Document(
@@ -177,6 +242,7 @@ async def upload_document(
         uploaded_by=doc.uploaded_by,
         tags=doc.tags or [],
         quarantined_chunk_count=doc.quarantined_chunk_count,
+        collection_id=doc.collection_id,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -209,6 +275,7 @@ async def list_documents(
     offset = (page - 1) * page_size
     result = await db.execute(query.order_by(Document.created_at.desc()).offset(offset).limit(page_size))
     docs = result.scalars().all()
+    uploader_names = await _uploader_names(db, {d.uploaded_by for d in docs})
 
     return PaginatedResponse(
         data=[
@@ -224,8 +291,10 @@ async def list_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                uploaded_by_name=uploader_names.get(d.uploaded_by),
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
+                collection_id=d.collection_id,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -254,6 +323,7 @@ async def get_document(
         select(Chunk).where(Chunk.document_id == doc_id).order_by(Chunk.index).limit(MAX_DETAIL_CHUNKS)
     )
     chunks = chunk_result.scalars().all()
+    uploader_names = await _uploader_names(db, {doc.uploaded_by})
 
     return DocumentDetailResponse(
         id=doc.id,
@@ -265,6 +335,8 @@ async def get_document(
         chunk_count=doc.chunk_count,
         status=doc.status,
         quarantined_chunk_count=doc.quarantined_chunk_count,
+        uploaded_by=doc.uploaded_by,
+        uploaded_by_name=uploader_names.get(doc.uploaded_by),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         chunks=[
@@ -346,6 +418,12 @@ async def delete_document(
         resource_id=doc_id,
     ))
     await bump_workspace_document_version(db, workspace_id)
+    # SQLite runs without `PRAGMA foreign_keys=ON`, so the FK cascade is not enforced.
+    await db.execute(delete(Contradiction).where(or_(Contradiction.doc_a_id == doc_id, Contradiction.doc_b_id == doc_id)))
+    # A public receipt must not keep quoting evidence that no longer exists.
+    await revoke_receipts_for_document(
+        db, workspace_id=workspace_id, document_id=doc_id, document_name=doc.original_filename
+    )
     await db.delete(doc)
 
 
@@ -415,6 +493,7 @@ async def list_all_documents(
     offset = (page - 1) * page_size
     result = await db.execute(query.order_by(Document.created_at.desc()).offset(offset).limit(page_size))
     docs = result.scalars().all()
+    uploader_names = await _uploader_names(db, {d.uploaded_by for d in docs})
 
     return PaginatedResponse(
         data=[
@@ -430,14 +509,167 @@ async def list_all_documents(
                 status=d.status,
                 error_message=d.error_message,
                 uploaded_by=d.uploaded_by,
+                uploaded_by_name=uploader_names.get(d.uploaded_by),
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
+                collection_id=d.collection_id,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
             for d in docs
         ],
         meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+def _lookup_chroma_page_number(workspace_id: str, document_id: str, chunk_index: int) -> int | None:
+    """Best-effort page-number lookup from the chunk's Chroma metadata.
+
+    Chroma's client is synchronous but local/fast for a single-id `get`
+    (same as the unwrapped `collection.upsert` call in `indexer.store`), so
+    this isn't wrapped in `asyncio.to_thread`. Any failure degrades to the
+    PDF-wide fallback search in `locate_in_pdf` rather than a 500.
+    """
+    try:
+        collection = get_workspace_collection(workspace_id)
+        result = collection.get(ids=[f"{document_id}:{chunk_index}"], include=["metadatas"])
+    except Exception as e:
+        logger.warning("chroma_page_lookup_failed", error=str(e), document_id=document_id)
+        return None
+
+    metadatas = result.get("metadatas") or []
+    if not metadatas or not metadatas[0]:
+        return None
+    return metadatas[0].get("page_number")
+
+
+@router.get("/workspaces/{workspace_id}/documents/{doc_id}/file")
+async def get_document_file(
+    workspace_id: str,
+    doc_id: str,
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the original uploaded file inline, for the source viewer."""
+    result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", doc_id)
+
+    file_path = settings.upload_path / doc.filename
+    if not file_path.exists():
+        raise NotFoundException("File", doc_id)
+
+    if doc.mime_type in TEXT_LIKE_MIME_TYPES:
+        media_type = "text/plain; charset=utf-8"
+    elif doc.mime_type == "application/pdf":
+        media_type = "application/pdf"
+    else:
+        media_type = doc.mime_type
+
+    quoted_name = quote(doc.original_filename)
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quoted_name}",
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/documents/{doc_id}/chunks/{chunk_id}/locate",
+    response_model=ChunkLocateResponse,
+)
+async def locate_chunk(
+    workspace_id: str,
+    doc_id: str,
+    chunk_id: str,
+    text: str | None = None,
+    workspace: Workspace = Depends(check_workspace_access_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Locate a chunk's passage in its source document, for the source viewer.
+
+    C1: when `text` is given (a specific evidence sentence, e.g. from the
+    Truth Lens ledger or the Radar), search its fragments first so the
+    highlight sits on just that sentence rather than the whole (often
+    page-sized) chunk; falls back to the whole-chunk search if `text`
+    doesn't match anywhere.
+    """
+    doc_result = await db.execute(
+        select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
+    )
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", doc_id)
+
+    chunk_result = await db.execute(
+        select(Chunk).where(Chunk.id == chunk_id, Chunk.document_id == doc_id)
+    )
+    chunk = chunk_result.scalar_one_or_none()
+    if not chunk:
+        raise NotFoundException("Chunk", chunk_id)
+
+    file_path = settings.upload_path / doc.filename
+    if doc.mime_type == "application/pdf" and file_path.exists():
+        page_number_hint = _lookup_chroma_page_number(workspace_id, doc_id, chunk.index)
+        located = None
+        narrow_text = text.strip() if text else ""
+        if narrow_text:
+            located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, narrow_text)
+            if not located["rects"]:
+                located = None
+        if located is None:
+            located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, chunk.content)
+        return ChunkLocateResponse(
+            mode="pdf",
+            page_number=located["page_number"],
+            page_count=located["page_count"],
+            page_width=located["page_width"],
+            page_height=located["page_height"],
+            rects=located["rects"],
+            content=chunk.content,
+            context_before=None,
+            context_after=None,
+        )
+
+    # Non-PDF, or the PDF file is missing on disk: text mode with neighbour
+    # context, built from the chunk content already in SQLite — never 500s
+    # just because the original file was removed from storage.
+    prev_result = await db.execute(
+        select(Chunk).where(Chunk.document_id == doc_id, Chunk.index == chunk.index - 1)
+    )
+    prev_chunk = prev_result.scalar_one_or_none()
+    next_result = await db.execute(
+        select(Chunk).where(Chunk.document_id == doc_id, Chunk.index == chunk.index + 1)
+    )
+    next_chunk = next_result.scalar_one_or_none()
+
+    # K2: text mode + `?text=` — mark only that span inside `content`
+    # (whitespace-insensitive), instead of the whole chunk (BUG-17).
+    highlight = None
+    narrow_text = text.strip() if text else ""
+    if narrow_text:
+        offsets = find_text_offsets(chunk.content, narrow_text)
+        if offsets is not None:
+            highlight = TextHighlight(start=offsets[0], end=offsets[1])
+
+    return ChunkLocateResponse(
+        mode="text",
+        page_number=None,
+        page_count=None,
+        page_width=None,
+        page_height=None,
+        rects=[],
+        content=chunk.content,
+        context_before=prev_chunk.content[-CONTEXT_CHARS:] if prev_chunk else None,
+        context_after=next_chunk.content[:CONTEXT_CHARS] if next_chunk else None,
+        highlight=highlight,
     )
 
 
@@ -543,6 +775,7 @@ async def process_document_background(
     )
 
     # Update document status
+    auto_scan = False
     async with async_session_factory() as session:
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
@@ -593,6 +826,7 @@ async def process_document_background(
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+                auto_scan = settings.RADAR_AUTO_SCAN and doc.chunk_count > 0
                 if doc.chunk_count == 0 and quarantined_items:
                     # Every chunk was quarantined: not a pipeline failure
                     # (nothing crashed) but the document has zero
@@ -608,6 +842,15 @@ async def process_document_background(
                 doc.status = "failed"
                 doc.error_message = ingest_result.get("error", "Unknown error")
             await session.commit()
+
+    if auto_scan:
+        # Contradiction Radar: scan the new document against the workspace.
+        # Best effort — a radar failure must never surface as an ingestion one.
+        try:
+            from app.radar.scan import request_auto_scan
+            await request_auto_scan(workspace_id, [document_id])
+        except Exception as e:
+            logger.warning("radar_auto_scan_failed", document_id=document_id, error=str(e))
 
     logger.info(
         "background_ingestion_complete",

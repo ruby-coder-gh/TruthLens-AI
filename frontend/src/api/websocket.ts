@@ -1,4 +1,4 @@
-import type { QueryEdgeCase, Source, SufficiencyVerdict } from './types';
+import type { Claim, QueryEdgeCase, Source, SufficiencyVerdict } from './types';
 import { attemptTokenRefresh } from './client';
 
 /**
@@ -26,14 +26,36 @@ export interface QueryCompleteResult {
   sufficiency?: SufficiencyVerdict | null;
 }
 
+/** Counters attached to a `progress` frame — which fields are set depends on
+ *  the phase (see backend/app/api/ws.py's `sink.emit("progress", …)` calls). */
+export interface QueryProgressDetail {
+  found: number | null;
+  kept: number | null;
+  words: number | null;
+  elapsedMs: number | null;
+}
+
 export interface QueryWebSocketCallbacks {
   onToken?: (token: string) => void;
   onSource?: (source: Source) => void;
-  onGuardrail?: (result: { passed: boolean; score: number; details: string }) => void;
+  onGuardrail?: (result: {
+    passed: boolean;
+    score: number;
+    details: string;
+    /** Truth Lens (L1) — per-claim verdicts. Empty when the answer had none. */
+    claims: Claim[];
+    unsupportedClaims: string[];
+  }) => void;
   onTrustScore?: (score: number, components: Record<string, number>) => void;
   onComplete?: (result: QueryCompleteResult) => void;
   onError?: (code: string, message: string) => void;
-  onProgress?: (phase: string, progress: number) => void;
+  /**
+   * `detail` carries whatever counters the backend attached to this phase's
+   * frame (see api/ws.py) — Claim Ledger's audit trail (Lane D1) uses them for
+   * "16 found", "kept the top 5", word/claim tallies. Always present (possibly
+   * all-null) so callers don't need an `undefined` check on top of each field.
+   */
+  onProgress?: (phase: string, progress: number, detail: QueryProgressDetail) => void;
   /** The socket dropped mid-stream; attempt `attempt` of `WS_RECONNECT_MAX` is pending. */
   onReconnecting?: (attempt: number) => void;
   /** A reconnect succeeded and the stream is flowing again — clear any "reconnecting" UI. */
@@ -66,6 +88,8 @@ interface WSSourcePayload {
   explanation?: string;
   updated_at?: string;
   file_type?: string;
+  /** Contradiction Radar (L5) — open contradictions touching this chunk's document. */
+  conflicts?: number;
 }
 
 /** Payload fields the server may attach to a message envelope. */
@@ -77,6 +101,9 @@ interface WSMessagePayload {
   score?: number;
   details?: string;
   components?: Record<string, number>;
+  /** Truth Lens (L1) — carried on the `guardrail` frame. */
+  claims?: Claim[];
+  unsupported_claims?: string[];
   query_id?: string;
   latency_ms?: number;
   model_used?: string;
@@ -88,6 +115,11 @@ interface WSMessagePayload {
   message?: string;
   phase?: string;
   progress?: number;
+  /** `progress` frame counters — see QueryProgressDetail. */
+  found?: number;
+  kept?: number;
+  words?: number;
+  elapsed_ms?: number;
   index?: number;
   /** `resumed` only — the `last_seq` the replay started from. */
   from_seq?: number;
@@ -130,6 +162,8 @@ export class QueryWebSocket {
   private isConnected = false;
   private topK?: number;
   private forceRefresh: boolean;
+  /** K4: the query this run should replace once it saves (Regenerate — R2-21). */
+  private replacesQueryId?: string;
 
   // ─── Resume state ──────────────────────────────────────────────────────────
   /** Server-minted id of the stream in flight, learned from the `ack` frame. */
@@ -156,6 +190,7 @@ export class QueryWebSocket {
     conversationId?: string,
     topK?: number,
     forceRefresh = false,
+    replacesQueryId?: string,
   ) {
     this.workspaceId = workspaceId;
     this.query = query;
@@ -163,6 +198,7 @@ export class QueryWebSocket {
     this.conversationId = conversationId;
     this.topK = topK;
     this.forceRefresh = forceRefresh;
+    this.replacesQueryId = replacesQueryId;
   }
 
   connect(): void {
@@ -279,6 +315,7 @@ export class QueryWebSocket {
         ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
         ...(this.topK ? { top_k: this.topK } : {}),
         ...(this.forceRefresh ? { force_refresh: true } : {}),
+        ...(this.replacesQueryId ? { replaces_query_id: this.replacesQueryId } : {}),
       },
     });
   }
@@ -424,6 +461,7 @@ export class QueryWebSocket {
               explanation: s.explanation,
               updated_at: s.updated_at,
               file_type: s.file_type,
+              conflicts: s.conflicts,
             };
             this.callbacks.onSource?.(source);
           }
@@ -436,6 +474,8 @@ export class QueryWebSocket {
           passed: payload.passed ?? false,
           score: payload.score ?? 0,
           details: payload.details ?? '',
+          claims: payload.claims ?? [],
+          unsupportedClaims: payload.unsupported_claims ?? [],
         });
         break;
       }
@@ -484,7 +524,12 @@ export class QueryWebSocket {
       }
 
       case 'progress': {
-        this.callbacks.onProgress?.(payload.phase ?? '', payload.progress ?? 0);
+        this.callbacks.onProgress?.(payload.phase ?? '', payload.progress ?? 0, {
+          found: payload.found ?? null,
+          kept: payload.kept ?? null,
+          words: payload.words ?? null,
+          elapsedMs: payload.elapsed_ms ?? null,
+        });
         break;
       }
 

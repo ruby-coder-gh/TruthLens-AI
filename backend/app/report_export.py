@@ -3,8 +3,23 @@
 from __future__ import annotations
 
 import csv
+import re
 from io import StringIO
 from typing import Any, Iterable, Sequence
+
+# Matches the same `[source:N]` marker the generator/guardrail emit elsewhere
+# (see app/generation/guardrail.py, app/generation/citer.py).
+_SOURCE_MARKER_RE = re.compile(r"\[source:\s*(\d+)\]")
+
+
+def normalize_citations(text: str) -> str:
+    """`[source:N]` -> `[N]` for a clean markdown export.
+
+    The numbering is unchanged (still 1-based, still lines up with the
+    Evidence register rendered below) — only the internal marker syntax
+    that should never reach a human reader is stripped.
+    """
+    return _SOURCE_MARKER_RE.sub(lambda m: f"[{m.group(1)}]", text)
 
 
 # Characters that make a spreadsheet treat a cell as a formula. Excel,
@@ -82,7 +97,7 @@ def render_investigation_markdown(
         "## Question\n"
         f"{query}\n\n"
         "## Executive report\n"
-        f"{final_report or '_No report generated._'}\n\n"
+        f"{normalize_citations(final_report) if final_report else '_No report generated._'}\n\n"
         "## Human review\n"
         f"{review}\n\n"
         "## Evidence register\n"

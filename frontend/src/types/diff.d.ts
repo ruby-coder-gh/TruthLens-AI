@@ -8,6 +8,8 @@ declare module 'diff' {
 
   export function diffWordsWithSpace(oldText: string, newText: string): Change[];
 
+  export function diffSentences(oldText: string, newText: string): Change[];
+
   export interface DiffLinesOptions {
     ignoreWhitespace?: boolean;
     newlineIsToken?: boolean;

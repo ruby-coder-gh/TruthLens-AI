@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
-import { diffLines } from 'diff';
+import { diffLines, diffSentences } from 'diff';
 import {
   CheckCircle2,
   ChevronDown,
@@ -13,6 +13,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Trash2,
+  Undo2,
   XCircle,
   Zap,
 } from 'lucide-react';
@@ -141,11 +142,14 @@ interface DiffLine {
   text: string;
 }
 
-/** Line-level diff for display. Keys are position-derived, which is stable
- *  because the list is recomputed wholesale whenever either side changes. */
+/** Line-level diff for display (sentence-level when either side is a single
+ *  line, e.g. the one-line built-in prompt — a line diff would show it all as
+ *  removed + re-added). Keys are position-derived, which is stable because the
+ *  list is recomputed wholesale whenever either side changes. */
 function toDiffLines(from: string, to: string): DiffLine[] {
   const lines: DiffLine[] = [];
-  diffLines(from, to).forEach((part, partIndex) => {
+  const singleLine = !from.trim().includes('\n') || !to.trim().includes('\n');
+  (singleLine ? diffSentences(from, to) : diffLines(from, to)).forEach((part, partIndex) => {
     const kind = part.added ? 'added' : part.removed ? 'removed' : 'context';
     const parts = part.value.split('\n');
     // A trailing newline yields an empty final entry — not a real line.
@@ -273,6 +277,16 @@ export default function AdminPromptsPage() {
   const [gateConfirming, setGateConfirming] = useState(false);
   const [diffTarget, setDiffTarget] = useState<PromptVersion | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PromptVersion | null>(null);
+  // BUG-39: rollback shipped a prompt to every user with one click and no
+  // confirmation — it now stops at a modal first. Promote already stops at
+  // the eval-gate dialog (with its own "Force promote" confirm step) for any
+  // version that hasn't cleared its eval; a version that already passed
+  // keeps promoting in one click, matching the existing BUG-4-regression
+  // test coverage for that flow.
+  const [rollbackTarget, setRollbackTarget] = useState<PromptVersion | null>(null);
+  // BUG-39: the only way back to the built-in default once any version has
+  // been promoted — also stops at a confirmation, same as rollback.
+  const [restoreDefaultConfirming, setRestoreDefaultConfirming] = useState(false);
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const promptsQuery = useQuery({
@@ -412,8 +426,19 @@ export default function AdminPromptsPage() {
   const rollbackMutation = useMutation({
     mutationFn: (version: PromptVersion) => adminApi.prompts.rollback(version.id),
     onSuccess: (updated) => {
+      setRollbackTarget(null);
       invalidatePrompts();
       addToast(`Rolled back to ${updated.name} v${updated.version}.`, 'success');
+    },
+    onError: (err) => addToast(errorMessage(err), 'error'),
+  });
+
+  const restoreDefaultMutation = useMutation({
+    mutationFn: () => adminApi.prompts.restoreDefault(PROMPT_NAME),
+    onSuccess: () => {
+      setRestoreDefaultConfirming(false);
+      invalidatePrompts();
+      addToast('Restored the built-in default prompt.', 'success');
     },
     onError: (err) => addToast(errorMessage(err), 'error'),
   });
@@ -460,11 +485,12 @@ export default function AdminPromptsPage() {
     setGateConfirming(false);
   }
 
-  // Line-level colouring is computed client-side from the two prompt bodies —
-  // but only when the loaded active prompt is the *same* prompt name as the
-  // row. For any other name the server's unified diff is the only correct
-  // baseline (it resolves that name's own active row).
-  const diffLinesForTarget = diffTarget && activePrompt && activePrompt.name === diffTarget.name
+  // BUG-40. Line-level colouring computed client-side from the two prompt
+  // bodies (`diff` package, already a dependency) — this page only ever
+  // manages `PROMPT_NAME` ("answer"), so `activePrompt` is always that same
+  // prompt's active row; no name-match guard needed. Falls back to the
+  // server's raw unified diff only while `activePrompt` hasn't loaded yet.
+  const diffLinesForTarget = diffTarget && activePrompt
     ? toDiffLines(activePrompt.content, diffTarget.content)
     : null;
 
@@ -493,21 +519,33 @@ export default function AdminPromptsPage() {
         ) : activePrompt ? (
           <motion.div variants={staggerItem}>
             <Card className="p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
-                  <ShieldCheck size={16} />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-text">
-                    Active prompt · <code className="font-mono text-xs">{activePrompt.content_hash}</code>
-                  </p>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {activePrompt.is_default
-                      ? 'No promoted version yet — answers use the built-in default prompt.'
-                      : `${activePrompt.name} v${activePrompt.version}`}
-                    {activePrompt.model_name ? ` · pinned to ${activePrompt.model_name}` : ' · no model pinned'}
-                  </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-primary/25 bg-primary/10 text-primary-soft">
+                    <ShieldCheck size={16} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text">
+                      Active prompt · <code className="font-mono text-xs">{activePrompt.content_hash}</code>
+                    </p>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {activePrompt.is_default
+                        ? 'No promoted version yet — answers use the built-in default prompt.'
+                        : `${activePrompt.name} v${activePrompt.version}`}
+                      {activePrompt.model_name ? ` · pinned to ${activePrompt.model_name}` : ' · no model pinned'}
+                    </p>
+                  </div>
                 </div>
+                {activePrompt.is_default ? null : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setRestoreDefaultConfirming(true)}
+                  >
+                    <Undo2 size={14} />
+                    Restore built-in default
+                  </Button>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -666,7 +704,7 @@ export default function AdminPromptsPage() {
                               variant="secondary"
                               aria-label={`Roll back to ${label}`}
                               loading={rollingBack}
-                              onClick={() => rollbackMutation.mutate(version)}
+                              onClick={() => setRollbackTarget(version)}
                             >
                               <RotateCcw size={13} />
                               Rollback
@@ -868,6 +906,60 @@ export default function AdminPromptsPage() {
               </div>
             </div>
           ) : null}
+        </Modal>
+
+        {/* ── Rollback confirmation (BUG-39) ────────────────────────────── */}
+        <Modal open={rollbackTarget !== null} onClose={() => setRollbackTarget(null)} title="Roll back prompt">
+          {rollbackTarget ? (
+            <div className="space-y-4">
+              <p className="text-sm text-text-muted">
+                Roll back to {rollbackTarget.name} v{rollbackTarget.version} ({rollbackTarget.content_hash})?
+                This retires whatever is active now and reactivates this version for every user immediately.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setRollbackTarget(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={rollbackMutation.isPending}
+                  onClick={() => rollbackMutation.mutate(rollbackTarget)}
+                >
+                  <RotateCcw size={14} />
+                  Roll back
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
+
+        {/* ── Restore built-in default confirmation (BUG-39) ──────────────── */}
+        <Modal
+          open={restoreDefaultConfirming}
+          onClose={() => setRestoreDefaultConfirming(false)}
+          title="Restore built-in default"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-muted">
+              Retire the active prompt and go back to the built-in default? Every answer will use the
+              hard-coded default prompt immediately, for every user, until a new version is promoted.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setRestoreDefaultConfirming(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={restoreDefaultMutation.isPending}
+                onClick={() => restoreDefaultMutation.mutate()}
+              >
+                <Undo2 size={14} />
+                Restore default
+              </Button>
+            </div>
+          </div>
         </Modal>
       </PageShell>
     </motion.div>

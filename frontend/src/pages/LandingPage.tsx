@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Shield,
@@ -12,11 +12,13 @@ import {
   ArrowRight,
   ChevronDown,
   Check,
-  Code2,
-  Globe,
+  AlertCircle,
 } from 'lucide-react';
 import { Button, Card, Badge } from '../components/ui';
+import { buttonClassName } from '../components/button-classes';
 import Logo from '../components/Logo';
+import { useReady } from '../hooks/useReady';
+import { useAuth } from '../context/auth-context';
 
 const features = [
   {
@@ -94,9 +96,27 @@ const staggerItem = {
 
 export default function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoError, setDemoError] = useState('');
+  const { demoMode, demoWorkspaceId } = useReady();
+  const { loginDemo } = useAuth();
+  const navigate = useNavigate();
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleTryDemo = async () => {
+    setDemoError('');
+    setDemoLoading(true);
+    try {
+      await loginDemo('analyst');
+      navigate(demoWorkspaceId ? `/workspaces/${demoWorkspaceId}/chat` : '/workspaces');
+    } catch (err) {
+      setDemoError(err instanceof Error ? err.message : 'Could not start the demo. Please try again.');
+    } finally {
+      setDemoLoading(false);
+    }
   };
 
   return (
@@ -135,11 +155,11 @@ export default function LandingPage() {
             <Link to="/login" className="text-sm font-medium text-text-muted transition-colors hover:text-text">
               Sign in
             </Link>
-            <Link to="/register">
-              <Button size="sm">
-                Get Started
-                <ArrowRight size={14} />
-              </Button>
+            {/* BUG-58: a styled Link, not <Link><Button>… — an <a> can't
+                contain interactive content like a <button>. */}
+            <Link to="/register" className={buttonClassName('primary', 'sm')}>
+              Get Started
+              <ArrowRight size={14} />
             </Link>
           </div>
 
@@ -190,8 +210,12 @@ export default function LandingPage() {
             >
               Sign in
             </Link>
-            <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
-              <Button size="sm" className="mt-1 w-full">Get Started</Button>
+            <Link
+              to="/register"
+              onClick={() => setMobileMenuOpen(false)}
+              className={buttonClassName('primary', 'sm', 'mt-1 w-full')}
+            >
+              Get Started
             </Link>
           </div>
         </motion.div>
@@ -217,12 +241,22 @@ export default function LandingPage() {
             </p>
 
             <div className="mt-8 flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-              <Link to="/register">
-                <Button size="lg">
-                  Launch Workspace
+              {demoMode ? (
+                <Button size="lg" loading={demoLoading} onClick={() => void handleTryDemo()}>
+                  Try the live demo
                   <ArrowRight size={18} />
                 </Button>
-              </Link>
+              ) : (
+                <Link to="/register" className={buttonClassName('primary', 'lg')}>
+                  Launch Workspace
+                  <ArrowRight size={18} />
+                </Link>
+              )}
+              {demoMode && (
+                <Link to="/register" className={buttonClassName('secondary', 'lg', 'w-full sm:w-auto')}>
+                  Launch Workspace
+                </Link>
+              )}
               <Button
                 variant="secondary"
                 size="lg"
@@ -233,6 +267,13 @@ export default function LandingPage() {
                 <ChevronDown size={16} />
               </Button>
             </div>
+
+            {demoError && (
+              <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-red">
+                <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
+                {demoError}
+              </p>
+            )}
 
             <div className="mt-8 grid gap-2 text-sm text-text-muted sm:grid-cols-2">
               <p className="flex items-center gap-2"><Check size={15} className="shrink-0 text-green" aria-hidden="true" /> Citations linked to source chunks.</p>
@@ -388,15 +429,11 @@ export default function LandingPage() {
               Move from opaque chatbot answers to source-backed responses with confidence scoring and audit trails.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link to="/register">
-                <Button size="lg">
-                  Get Started
-                  <ArrowRight size={18} />
-                </Button>
+              <Link to="/register" className={buttonClassName('primary', 'lg')}>
+                Get Started
+                <ArrowRight size={18} />
               </Link>
-              <Link to="/login">
-                <Button variant="secondary" size="lg">Sign in</Button>
-              </Link>
+              <Link to="/login" className={buttonClassName('secondary', 'lg')}>Sign in</Link>
             </div>
           </motion.div>
         </section>
@@ -413,10 +450,6 @@ export default function LandingPage() {
             <Link to="/privacy" className="transition-colors hover:text-text">Privacy</Link>
             <Link to="/terms" className="transition-colors hover:text-text">Terms</Link>
             <Link to="/contact" className="transition-colors hover:text-text">Contact</Link>
-          </div>
-          <div className="flex items-center gap-3 text-text-muted">
-            <a href="#" aria-label="GitHub" className="transition-colors hover:text-text"><Code2 size={16} /></a>
-            <a href="#" aria-label="Twitter" className="transition-colors hover:text-text"><Globe size={16} /></a>
           </div>
         </div>
       </footer>

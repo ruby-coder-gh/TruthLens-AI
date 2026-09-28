@@ -16,6 +16,10 @@ from app.models.query_pin import QueryPin
 from app.models.annotation import Annotation
 from app.models.refresh_token_session import RefreshTokenSession
 from app.models.prompt_version import PromptVersion
+from app.models.query_claims import QueryClaims
+from app.models.receipt import Receipt
+from app.models.radar_scan import RadarScan
+from app.models.contradiction import Contradiction
 
 __all__ = [
     "DeclarativeBase",
@@ -41,4 +45,8 @@ __all__ = [
     "Annotation",
     "RefreshTokenSession",
     "PromptVersion",
+    "QueryClaims",
+    "Receipt",
+    "RadarScan",
+    "Contradiction",
 ]

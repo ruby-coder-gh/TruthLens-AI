@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
@@ -19,9 +19,11 @@ from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.comparison import ComparisonResult
+from app.models.contradiction import Contradiction
 from app.models.document import Document
 from app.models.user import User
 from app.query_cache import bump_workspace_document_version
+from app.receipts import revoke_receipts_for_document
 from app.schemas.document import (
     BulkDocumentAction,
     BulkDocumentResponse,
@@ -186,6 +188,11 @@ async def _bulk_delete(
             warning = f"file cleanup failed: {e}"
             logger.warning("bulk_delete_file_cleanup_failed", document_id=doc.id, error=str(e))
 
+        # A public receipt must not keep quoting evidence that no longer exists.
+        await revoke_receipts_for_document(
+            db, workspace_id=workspace_id, document_id=doc.id, document_name=doc.original_filename
+        )
+
         to_delete_ids.append(doc.id)
         results[doc.id] = BulkDocumentResult(id=doc.id, status="ok", warning=warning)
 
@@ -207,6 +214,9 @@ async def _bulk_delete(
         # not resolve them to a filename to render, and copies of the deleted
         # document's text survived the delete.
         await db.execute(delete(ChunkQuarantine).where(ChunkQuarantine.document_id.in_(to_delete_ids)))
+        await db.execute(delete(Contradiction).where(
+            or_(Contradiction.doc_a_id.in_(to_delete_ids), Contradiction.doc_b_id.in_(to_delete_ids))
+        ))
         await db.execute(delete(Document).where(Document.id.in_(to_delete_ids)))
         await bump_workspace_document_version(db, workspace_id)
 

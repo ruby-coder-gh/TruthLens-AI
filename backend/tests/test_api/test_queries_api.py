@@ -11,6 +11,7 @@ from app.api.queries import MAX_PAGE_SIZE
 from app.core.auth import create_access_token
 from app.models.query import Query
 from app.models.user import User
+from app.models.workspace import WorkspaceMember
 
 
 @pytest.fixture
@@ -56,6 +57,39 @@ async def seeded_query(
 
 
 # ── List ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_list_all_queries_mine_true_filters_to_caller(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """C3: GET /api/queries?mine=true returns only the caller's own queries,
+    not every workspace member's (BUG-59: the sidebar "Recent" list implies
+    "your recent chats")."""
+    owner = User(email="mine-owner@example.com", username="mineowner", password_hash="x", role="user", is_active=True)
+    other = User(email="mine-other@example.com", username="mineother", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, other])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(other)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Mine WS"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=other.id, role="viewer"))
+    test_db.add(Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question"))
+    test_db.add(Query(workspace_id=ws_id, user_id=other.id, query_text="Other member question"))
+    await test_db.commit()
+
+    resp = await client.get("/api/queries?mine=true", headers=owner_headers)
+    assert resp.status_code == 200
+    texts = [row["query_text"] for row in resp.json()["data"]]
+    assert texts == ["Owner question"]
+
+    # Without mine=true, the endpoint still lists every accessible query.
+    resp_all = await client.get("/api/queries", headers=owner_headers)
+    assert len(resp_all.json()["data"]) == 2
+
 
 @pytest.mark.asyncio
 async def test_list_queries(
@@ -254,6 +288,101 @@ async def test_delete_query_no_access(
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_delete_query_viewer_cannot_delete_others_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6/R2-1: a viewer member can't delete another member's query (only
+    their own, or an owner/editor/admin can)."""
+    owner = User(email="del-owner@example.com", username="delowner", password_hash="x", role="user", is_active=True)
+    viewer = User(email="del-viewer@example.com", username="delviewer", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, viewer])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(viewer)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    viewer_headers = {"Authorization": f"Bearer {create_access_token(viewer.id, viewer.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
+    query = Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=viewer_headers,
+    )
+    assert resp.status_code == 403
+
+    # The query still exists.
+    get_resp = await client.get(f"/api/workspaces/{ws_id}/queries/{query.id}", headers=owner_headers)
+    assert get_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_query_viewer_can_delete_own_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6: a viewer can always delete a query they authored themselves."""
+    owner = User(email="del-owner2@example.com", username="delowner2", password_hash="x", role="user", is_active=True)
+    viewer = User(email="del-viewer2@example.com", username="delviewer2", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, viewer])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(viewer)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    viewer_headers = {"Authorization": f"Bearer {create_access_token(viewer.id, viewer.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS 2"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
+    query = Query(workspace_id=ws_id, user_id=viewer.id, query_text="Viewer's own question")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=viewer_headers,
+    )
+    assert resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_query_editor_can_delete_others_query(
+    client: AsyncClient,
+    test_db: AsyncSession,
+):
+    """K6: an editor member can delete another member's query."""
+    owner = User(email="del-owner3@example.com", username="delowner3", password_hash="x", role="user", is_active=True)
+    editor = User(email="del-editor3@example.com", username="deleditor3", password_hash="x", role="user", is_active=True)
+    test_db.add_all([owner, editor])
+    await test_db.commit()
+    await test_db.refresh(owner)
+    await test_db.refresh(editor)
+    owner_headers = {"Authorization": f"Bearer {create_access_token(owner.id, owner.role)}"}
+    editor_headers = {"Authorization": f"Bearer {create_access_token(editor.id, editor.role)}"}
+
+    ws_resp = await client.post("/api/workspaces", json={"name": "Del WS 3"}, headers=owner_headers)
+    ws_id = ws_resp.json()["id"]
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=editor.id, role="editor"))
+    query = Query(workspace_id=ws_id, user_id=owner.id, query_text="Owner question 3")
+    test_db.add(query)
+    await test_db.commit()
+    await test_db.refresh(query)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws_id}/queries/{query.id}",
+        headers=editor_headers,
+    )
+    assert resp.status_code == 204
+
+
 # ── Export ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -280,6 +409,26 @@ async def test_export_query_markdown(
     assert "RAG stands for Retrieval Augmented Generation." in body
     assert "92%" in body
     assert "doc1.pdf" in body
+
+
+@pytest.mark.asyncio
+async def test_export_query_markdown_normalizes_source_markers(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_db: AsyncSession,
+    seeded_query: tuple[str, str],
+):
+    """BUG-9 (backend): the exported `.md` must not leak raw `[source:N]` markers."""
+    ws_id, q_id = seeded_query
+    query = await test_db.get(Query, q_id)
+    query.response_text = "RAG combines retrieval and generation [source:1]."
+    await test_db.commit()
+
+    resp = await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "[source:1]" not in body
+    assert "[1]" in body
 
 
 @pytest.mark.asyncio
@@ -378,3 +527,109 @@ async def test_query_list_and_detail_expose_the_abstention_edge_case(
     detail = await client.get(f"/api/queries/{abstained.id}", headers=auth_headers)
     assert detail.status_code == 200
     assert detail.json()["edge_case"] == "insufficient_evidence"
+
+
+# ── Truth Lens claims ───────────────────────────────────────────
+
+SUPPORTED_CLAIM = {
+    "text": "RAG stands for Retrieval Augmented Generation.",
+    "start": 0,
+    "end": 46,
+    "verdict": "supported",
+    "entailment": 0.97,
+    "contradiction": 0.01,
+    "source_index": 1,
+    "chunk_id": "c1",
+    "document_id": "d1",
+    "document_name": "doc1.pdf",
+    "page_number": 2,
+    "evidence": "RAG is a technique that stands for Retrieval Augmented Generation.",
+}
+CONTRADICTED_CLAIM = {
+    **SUPPORTED_CLAIM,
+    "text": "RAG was invented in 1970.",
+    "start": 47,
+    "end": 72,
+    "verdict": "contradicted",
+    "entailment": 0.01,
+    "contradiction": 0.95,
+    "page_number": None,
+    "evidence": "RAG was introduced in 2020.",
+}
+
+
+@pytest.fixture
+async def seeded_claims(test_db: AsyncSession, seeded_query: tuple[str, str]) -> tuple[str, str]:
+    from app.models.query_claims import QueryClaims
+
+    ws_id, q_id = seeded_query
+    test_db.add(QueryClaims(query_id=q_id, claims=json.dumps([SUPPORTED_CLAIM, CONTRADICTED_CLAIM])))
+    await test_db.commit()
+    return ws_id, q_id
+
+
+@pytest.mark.asyncio
+async def test_query_detail_endpoints_return_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    ws_id, q_id = seeded_claims
+    for url in (f"/api/workspaces/{ws_id}/queries/{q_id}", f"/api/queries/{q_id}"):
+        resp = await client.get(url, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["claims"] == [SUPPORTED_CLAIM, CONTRADICTED_CLAIM]
+
+
+@pytest.mark.asyncio
+async def test_query_detail_without_claims_row_has_null_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_query: tuple[str, str]
+):
+    ws_id, q_id = seeded_query
+    resp = await client.get(f"/api/workspaces/{ws_id}/queries/{q_id}", headers=auth_headers)
+    assert resp.json()["claims"] is None
+
+
+@pytest.mark.asyncio
+async def test_query_list_does_not_carry_claims(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    ws_id, _ = seeded_claims
+    resp = await client.get(f"/api/workspaces/{ws_id}/queries", headers=auth_headers)
+    assert all("claims" not in item for item in resp.json()["data"])
+
+
+@pytest.mark.asyncio
+async def test_delete_query_removes_its_claims_row(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, seeded_claims: tuple[str, str]
+):
+    from sqlalchemy import select
+
+    from app.models.query_claims import QueryClaims
+
+    ws_id, q_id = seeded_claims
+    resp = await client.delete(f"/api/workspaces/{ws_id}/queries/{q_id}", headers=auth_headers)
+    assert resp.status_code == 204
+    remaining = (await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == q_id))).all()
+    assert remaining == []
+
+
+@pytest.mark.asyncio
+async def test_export_includes_claim_verification(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_claims: tuple[str, str]
+):
+    _, q_id = seeded_claims
+    body = (await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)).text
+    assert "## Claim verification" in body
+    assert "✅ Supported: RAG stands for Retrieval Augmented Generation. (source 1: doc1.pdf, p. 2)" in body
+    assert "⛔ Contradicted: RAG was invented in 1970. (source 1: doc1.pdf)" in body
+    assert "> RAG was introduced in 2020." in body
+    # Section sits between the trust score and the sources.
+    assert body.index("## Trust Score") < body.index("## Claim verification") < body.index("## Sources")
+
+
+@pytest.mark.asyncio
+async def test_export_without_claims_has_no_claim_section(
+    client: AsyncClient, auth_headers: dict[str, str], seeded_query: tuple[str, str]
+):
+    _, q_id = seeded_query
+    body = (await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)).text
+    assert "Claim verification" not in body

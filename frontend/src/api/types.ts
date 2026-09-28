@@ -72,6 +72,9 @@ export interface Document {
   status: string;
   error_message?: string;
   uploaded_by: string;
+  /** K3. Username, else email, of the uploader — absent on responses from a
+   *  backend build that predates the field; callers fall back to `uploaded_by`. */
+  uploaded_by_name?: string;
   created_at: string;
   updated_at: string;
   tags: string[];
@@ -83,6 +86,8 @@ export interface Document {
    * "ready" with nothing indexed. Absent on rows predating the fix.
    */
   is_searchable?: boolean;
+  /** BUG-18. The collection this document is assigned to, if any. */
+  collection_id?: string | null;
 }
 
 export interface DocumentStatus {
@@ -158,6 +163,8 @@ export interface QueryDetail {
   reviewed_at?: string;
   created_at: string;
   edge_case?: QueryEdgeCase | null;
+  /** Truth Lens (L1) — per-claim verdicts. Null/absent on rows predating the feature. */
+  claims?: Claim[] | null;
 }
 
 export interface Source {
@@ -173,6 +180,26 @@ export interface Source {
   explanation?: string;
   updated_at?: string;
   file_type?: string;
+  /** Contradiction Radar (L5) — count of open contradictions involving this source's chunk. */
+  conflicts?: number;
+}
+
+// ─── Truth Lens (L1/L2) ──────────────────────────────────────────────────────
+export type ClaimVerdict = 'supported' | 'partial' | 'unsupported' | 'contradicted';
+
+export interface Claim {
+  text: string;
+  start: number;
+  end: number;
+  verdict: ClaimVerdict;
+  entailment: number;
+  contradiction: number;
+  source_index: number | null;
+  chunk_id: string | null;
+  document_id: string | null;
+  document_name: string | null;
+  page_number: number | null;
+  evidence: string | null;
 }
 
 // ─── Feedback ───────────────────────────────────────────────────────────────
@@ -285,6 +312,9 @@ export interface AdminStats {
 export interface AuditLogEntry {
   id: string;
   user_id: string | null;
+  /** K3. Username of `user_id`, when resolvable — absent on responses from a
+   *  backend build that predates the field; callers fall back to `user_id`. */
+  user_name?: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;
@@ -356,6 +386,32 @@ export interface InvestigationSummary {
   review_status: InvestigationReviewStatus;
   created_at: string;
   updated_at: string;
+}
+
+// BUG-10: `POST .../investigate` now starts a background job (202) instead
+// of blocking for minutes; poll `.../progress` for step-by-step status.
+export interface InvestigationStartResponse {
+  id: string;
+  workspace_id: string;
+  status: 'running';
+}
+
+export interface InvestigationProgressSubQuestion {
+  text: string;
+  status: 'pending' | 'running' | 'done';
+}
+
+export interface InvestigationProgressResponse {
+  id: string;
+  query: string;
+  status: 'running' | 'done' | 'failed';
+  step: string;
+  done_steps: number;
+  total_steps: number;
+  sub_questions: InvestigationProgressSubQuestion[];
+  elapsed_ms: number;
+  error?: string;
+  report?: InvestigationResponse | null;
 }
 
 export interface InvestigationReviewUpdate {
@@ -509,7 +565,10 @@ export interface UpdateWorkspaceRequest {
 }
 
 export interface AddMemberRequest {
-  user_id: string;
+  // C2: the backend accepts either identifier — the Members tab (owners have
+  // no way to look up another user's UUID) sends `email`.
+  user_id?: string;
+  email?: string;
   role?: string;
 }
 
@@ -679,6 +738,9 @@ export interface GoldenEntryResponse {
   source: 'builtin' | 'promoted';
   source_query_id?: string | null;
   workspace_id?: string | null;
+  /** K3. Name of `workspace_id`, when resolvable — absent on responses from
+   *  a backend build that predates the field; callers fall back to `workspace_id`. */
+  workspace_name?: string | null;
   created_by?: string | null;
   created_at?: string | null;
   status: GoldenApprovalStatus;
@@ -878,3 +940,144 @@ export interface PromptGateFailure {
   thresholds?: EvalThresholds;
   scores?: Record<string, number | null>;
 }
+
+// ─── Truth Receipt (L3/L4) ──────────────────────────────────────────────────
+export interface ReceiptCreated {
+  token: string;
+  url_path: string;
+  seal: string;
+  created_at: string;
+}
+
+export interface ReceiptSummary {
+  token: string;
+  url_path: string;
+  seal: string;
+  created_at: string;
+  revoked_at: string | null;
+  view_count: number;
+}
+
+/** Canonical, signed snapshot of an answer — the payload a receipt seals. */
+export interface ReceiptPayload {
+  version: string;
+  question: string;
+  answer: string;
+  claims: Claim[];
+  sources: Array<{
+    index: number;
+    document_name: string;
+    page_number: number | null;
+    excerpt: string;
+    content_sha256: string;
+  }>;
+  trust: { score: number | null; components: Record<string, number> | null };
+  guardrail: { passed: boolean | null; score: number | null };
+  model_used: string | null;
+  prompt_version: string | null;
+  workspace_name: string | null;
+  asked_at: string | null;
+  issued_at: string;
+  issuer: string;
+  /** K5: open Radar contradictions involving this answer's cited chunks —
+   *  a public reader must learn the sources disagree, not just the seal
+   *  holder who saw the chat's D-rows (R2-16). */
+  conflicts?: ReceiptConflict[];
+}
+
+export interface ReceiptConflictSide {
+  document_name: string;
+  page_number: number | null;
+  sentence: string;
+}
+
+export interface ReceiptConflict {
+  a: ReceiptConflictSide;
+  b: ReceiptConflictSide;
+  score: number;
+}
+
+export interface ReceiptView {
+  payload: ReceiptPayload;
+  canonical: string;
+  seal: string;
+  seal_valid: boolean;
+  signature_valid: boolean;
+  issued_at: string;
+  revoked: boolean;
+}
+
+// ─── Contradiction Radar (L5/L6) ────────────────────────────────────────────
+export type RadarScanStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface RadarScan {
+  id: string;
+  status: RadarScanStatus;
+  scope: string[] | null;
+  chunks_scanned: number;
+  pairs_checked: number;
+  found: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export type ContradictionStatus = 'open' | 'dismissed' | 'resolved';
+
+export interface ContradictionSide {
+  document_id: string;
+  document_name: string;
+  chunk_id: string;
+  page_number: number | null;
+  sentence: string;
+}
+
+export interface Contradiction {
+  id: string;
+  score: number;
+  similarity: number;
+  status: ContradictionStatus;
+  created_at: string;
+  a: ContradictionSide;
+  b: ContradictionSide;
+}
+
+export interface RadarState {
+  latest_scan: RadarScan | null;
+  contradictions: Contradiction[];
+  counts: { open: number; dismissed: number; resolved: number };
+}
+
+// ─── Source viewer (L7/L8) ──────────────────────────────────────────────────
+export interface ChunkLocation {
+  mode: 'pdf' | 'text';
+  page_number: number | null;
+  page_count: number | null;
+  page_width: number | null;
+  page_height: number | null;
+  rects: Array<[number, number, number, number]>;
+  content: string;
+  context_before: string | null;
+  context_after: string | null;
+  /** K2: in `mode: 'text'`, the character offsets of the requested `text`
+   *  within `content` (whitespace-insensitive match) — `null` when no `text`
+   *  query was sent, or when it couldn't be found (BUG-17: text-mode used to
+   *  always mark the whole chunk; now it marks only this span, if given). */
+  highlight?: { start: number; end: number } | null;
+}
+
+// ─── Demo mode (L9/L10) ──────────────────────────────────────────────────────
+export type ModelWarmState = 'cold' | 'loading' | 'warm' | 'error';
+
+export interface ReadyStatus {
+  status: string;
+  demo_mode: boolean;
+  warm: boolean;
+  ollama: { reachable: boolean; model: string; model_present: boolean };
+  models: { embedder: ModelWarmState; reranker: ModelWarmState; nli: ModelWarmState };
+  /** Present when a demo corpus has been seeded (lane L9). */
+  demo_workspace_id?: string | null;
+}
+
+export type DemoPersona = 'analyst' | 'admin';

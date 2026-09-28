@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
-import { renderWithProviders } from '../test/utils';
+import { createTestQueryClient, renderWithProviders } from '../test/utils';
 import ReviewQueuePage from './ReviewQueuePage';
 import type { QuarantinedChunk, ReviewQueueItem } from '../api/types';
 import type { ToastContextValue } from '../components/toast-context';
@@ -16,6 +16,7 @@ const {
   mockQuarantineDismiss,
   mockPromoteGolden,
   mockWorkspaceGet,
+  mockListMembers,
 } = vi.hoisted(() => ({
   mockList: vi.fn(),
   mockReview: vi.fn(),
@@ -25,6 +26,7 @@ const {
   mockQuarantineDismiss: vi.fn(),
   mockPromoteGolden: vi.fn(),
   mockWorkspaceGet: vi.fn(),
+  mockListMembers: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
@@ -39,7 +41,7 @@ vi.mock('../api/client', () => ({
       dismiss: mockQuarantineDismiss,
     },
   },
-  workspaceApi: { get: mockWorkspaceGet },
+  workspaceApi: { get: mockWorkspaceGet, listMembers: mockListMembers },
 }));
 
 /** Mirrors `ApiError` from client.ts — an Error carrying an HTTP `status`. */
@@ -80,13 +82,19 @@ function makeChunk(overrides: Partial<QuarantinedChunk> = {}): QuarantinedChunk 
   };
 }
 
-function renderPage(addToast?: ToastContextValue['addToast']) {
+// Owner by default (`mockWorkspaceGet`'s owner_id below) — most tests here
+// exercise the moderation actions themselves, not role gating (that's R2-6's
+// own dedicated tests, which render as a non-owner/non-editor instead).
+const OWNER_USER = { id: 'user-1', email: 'owner@x.com', username: 'owner', role: 'analyst' as const, is_active: true, created_at: '', updated_at: '' };
+
+function renderPage(addToast?: ToastContextValue['addToast'], user = OWNER_USER) {
   return renderWithProviders(
     <Routes>
       <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
     </Routes>,
     {
       route: '/workspaces/ws-1/review-queue',
+      authValue: { user, isAuthenticated: true },
       ...(addToast ? { toastValue: { addToast } } : {}),
     },
   );
@@ -97,6 +105,7 @@ describe('ReviewQueuePage', () => {
     vi.clearAllMocks();
     mockList.mockResolvedValue({ data: [makeItem()], meta: { page: 1, page_size: 20, total: 1, enabled: true } });
     mockWorkspaceGet.mockResolvedValue({ id: 'ws-1', owner_id: 'user-1' });
+    mockListMembers.mockResolvedValue({ data: [] });
     mockQuarantineList.mockResolvedValue({
       data: [makeChunk()],
       meta: { page: 1, page_size: 20, total: 1 },
@@ -312,5 +321,65 @@ describe('ReviewQueuePage', () => {
     expect(
       await within(screen.getByRole('dialog')).findByRole('alert'),
     ).toHaveTextContent('A reviewer-written reference answer is required for an abstention.');
+  });
+
+  it('refreshes the sidebar review-queue count after Mark reviewed (BUG-51)', async () => {
+    mockReview.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const queryClient = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
+      </Routes>,
+      { route: '/workspaces/ws-1/review-queue', queryClient, authValue: { user: OWNER_USER, isAuthenticated: true } },
+    );
+
+    await user.click(await screen.findByRole('button', { name: /mark reviewed/i }));
+
+    await waitFor(() => expect(mockReview).toHaveBeenCalledTimes(1));
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['review-queue', 'ws-1', 'count'] }),
+    );
+  });
+
+  // ─── R2-6: viewer role gating ──────────────────────────────────────────────
+
+  const VIEWER_USER = { id: 'user-2', email: 'viewer@x.com', username: 'viewer2', role: 'analyst' as const, is_active: true, created_at: '', updated_at: '' };
+
+  it('hides Mark reviewed / Dismiss / Promote for a viewer, keeping only the read-only Re-run link (R2-6)', async () => {
+    mockListMembers.mockResolvedValue({ data: [{ id: 'm-1', workspace_id: 'ws-1', user_id: 'user-2', role: 'viewer', username: 'viewer2', email: 'viewer@x.com', joined_at: '' }] });
+    renderPage(undefined, VIEWER_USER);
+
+    await screen.findByText('What is the PTO carryover limit?');
+    expect(screen.queryByRole('button', { name: /mark reviewed/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^dismiss$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /promote to golden set/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /re-run query/i })).toBeInTheDocument();
+  });
+
+  it('hides quarantine Release / Dismiss chunk for a viewer (R2-6)', async () => {
+    mockListMembers.mockResolvedValue({ data: [{ id: 'm-1', workspace_id: 'ws-1', user_id: 'user-2', role: 'viewer', username: 'viewer2', email: 'viewer@x.com', joined_at: '' }] });
+    const user = userEvent.setup();
+    renderPage(undefined, VIEWER_USER);
+
+    await user.click(await screen.findByRole('tab', { name: /quarantined content/i }));
+    await screen.findByText('handbook.pdf');
+    expect(screen.queryByRole('button', { name: /^release$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /dismiss chunk/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an editor\'s real 403 message on Mark reviewed instead of failing silently (R2-6)', async () => {
+    mockReview.mockRejectedValue(apiError('Viewer role cannot update review status', 403));
+    const addToast = vi.fn();
+    const user = userEvent.setup();
+    renderPage(addToast);
+
+    await user.click(await screen.findByRole('button', { name: /mark reviewed/i }));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Viewer role cannot update review status', 'error'));
+    // The card must still be there — a failed mutation isn't silently dropped.
+    expect(screen.getByText('What is the PTO carryover limit?')).toBeInTheDocument();
   });
 });

@@ -13,86 +13,15 @@ import { authApi } from '../api/client';
 import PremiumButton from '../components/premium/PremiumButton';
 import AnimatedInput, { InputActionButton } from '../components/premium/AnimatedInput';
 
-/**
- * The decorative layers below take a *token reference* — `var(--color-…)` —
- * rather than a literal, and derive every alpha step with `color-mix`. That is
- * what lets them follow `[data-theme]`: string-concatenated hex alpha
- * (`${color}30`) cannot. Motion is on `opacity` only, because framer-motion
- * cannot interpolate a `color-mix()` keyframe.
- */
-
-// ─── Aurora background for cards ───────────────────────────────────────────
-function AuroraBg({ color1 = 'var(--color-primary)', color2 = 'var(--color-primary)' }: { color1?: string; color2?: string }) {
-  return (
-    <div className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none" aria-hidden="true">
-      <motion.div
-        className="absolute -inset-[100%] opacity-20"
-        style={{
-          background: `radial-gradient(ellipse 50% 50% at 30% 20%, color-mix(in srgb, ${color1} 55%, transparent), transparent),
-                      radial-gradient(ellipse 50% 50% at 70% 80%, color-mix(in srgb, ${color2} 55%, transparent), transparent)`,
-        }}
-        animate={{
-          transform: ['translate(0,0) scale(1)', 'translate(10px,-10px) scale(1.1)', 'translate(-5px,5px) scale(0.95)', 'translate(0,0) scale(1)'],
-        }}
-        transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    </div>
-  );
-}
-
-// ─── Scanning line effect ───────────────────────────────────────────────────
-function ScanningLine() {
-  return (
-    <div className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none" aria-hidden="true">
-      <motion.div
-        className="absolute left-0 right-0 h-[1px] opacity-40"
-        style={{
-          background: 'linear-gradient(90deg, transparent, var(--color-primary), transparent)',
-          filter: 'blur(1px)',
-        }}
-        animate={{ top: ['0%', '100%', '0%'] }}
-        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    </div>
-  );
-}
-
-// ─── Animated Icon wrapper ──────────────────────────────────────────────────
-function AnimatedIcon({ icon, color = 'var(--color-primary)' }: { icon: React.ReactNode; color?: string }) {
-  return (
-    <span className="relative flex items-center justify-center">
-      {icon}
-      <motion.span
-        className="absolute inset-0 rounded-full"
-        style={{ background: `radial-gradient(circle, color-mix(in srgb, ${color} 30%, transparent), transparent)`, filter: 'blur(4px)' }}
-        animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0.8, 0.4] }}
-        transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-      />
-    </span>
-  );
-}
-
-// ─── Floating neon border ──────────────────────────────────────────────────
-function FloatingBorder({ color = 'var(--color-primary)', active = true }: { color?: string; active?: boolean }) {
-  if (!active) return null;
-  return (
-    <motion.div
-      className="absolute inset-0 rounded-xl pointer-events-none"
-      style={{
-        border: `1px solid color-mix(in srgb, ${color} 34%, transparent)`,
-        boxShadow: `0 0 18px color-mix(in srgb, ${color} 14%, transparent)`,
-      }}
-      animate={{ opacity: [0.45, 1, 0.45] }}
-      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-    />
-  );
-}
+// The aurora washes, scanning line, pulsing icon halos and neon borders that
+// used to decorate these cards are gone: the Claim Ledger system is flat, and
+// those infinite framer loops ignored prefers-reduced-motion.
 
 // ─── Section Header ────────────────────────────────────────────────────────
-function SectionHeader({ icon, title, color = 'var(--color-primary)' }: { icon: React.ReactNode; title: string; color?: string }) {
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
     <div className="flex items-center gap-2.5 mb-5">
-      <AnimatedIcon icon={icon} color={color} />
+      {icon}
       <span className="text-base font-semibold text-text">{title}</span>
     </div>
   );
@@ -202,7 +131,7 @@ export default function SettingsPage() {
         {/* Page header */}
         <motion.div variants={staggerItem}>
           <PageHeader
-            title={<span className="gradient-text">Settings</span>}
+            title="Settings"
             description="Manage your account, security, and preferences."
           />
         </motion.div>
@@ -216,11 +145,8 @@ export default function SettingsPage() {
           {/* ═══ PROFILE CARD ═════════════════════════════════════════════════ */}
           <motion.div variants={staggerItem} ref={profileCardRef}>
             <div className="relative overflow-hidden rounded-xl glass border border-border p-5 lg:p-6">
-              <AuroraBg color1="var(--color-primary)" color2="var(--color-primary)" />
-              <FloatingBorder color="var(--color-primary)" />
-
               <div className="relative z-10">
-                <SectionHeader icon={<User size={16} className="text-primary-soft" />} title="Profile" color="var(--color-primary)" />
+                <SectionHeader icon={<User size={16} className="text-primary-soft" />} title="Profile" />
 
                 <form onSubmit={handleProfileSave} className="space-y-4">
                   <AnimatedInput
@@ -255,12 +181,8 @@ export default function SettingsPage() {
           {/* ═══ PASSWORD CARD ════════════════════════════════════════════════ */}
           <motion.div variants={staggerItem} ref={passwordCardRef}>
             <div className="relative overflow-hidden rounded-xl glass border border-border p-5 lg:p-6">
-              <AuroraBg color1="var(--color-green)" color2="var(--color-primary)" />
-              <FloatingBorder color="var(--color-green)" />
-              <ScanningLine />
-
               <div className="relative z-10">
-                <SectionHeader icon={<Lock size={16} className="text-green" />} title="Password" color="var(--color-green)" />
+                <SectionHeader icon={<Lock size={16} className="text-green" />} title="Password" />
 
                 <form onSubmit={handlePasswordChange} className="space-y-4">
                   <AnimatedInput
@@ -271,7 +193,11 @@ export default function SettingsPage() {
                     error={passwordErrors.current}
                     icon={<Key size={15} />}
                     actionButton={
-                      <InputActionButton onClick={() => setShowPasswords((p) => !p)} active={showPasswords}>
+                      <InputActionButton
+                        onClick={() => setShowPasswords((p) => !p)}
+                        active={showPasswords}
+                        aria-label={showPasswords ? 'Hide passwords' : 'Show passwords'}
+                      >
                         {showPasswords ? <EyeOff size={13} /> : <Eye size={13} />}
                       </InputActionButton>
                     }
@@ -310,11 +236,10 @@ export default function SettingsPage() {
 
           {/* ═══ DANGER ZONE ══════════════════════════════════════════════════ */}
           <motion.div variants={staggerItem}>
-            <div className="relative overflow-hidden rounded-xl border border-red/25 bg-card p-5 lg:p-6 backdrop-blur-xl">
-              <FloatingBorder color="var(--color-red)" />
+            <div className="relative overflow-hidden rounded-xl border border-red/25 bg-card p-5 lg:p-6">
               <div className="relative z-10">
                 <div className="flex items-center gap-2.5 mb-4">
-                  <AnimatedIcon icon={<AlertTriangle size={16} className="text-red" />} color="var(--color-red)" />
+                  <AlertTriangle size={16} className="text-red" aria-hidden="true" />
                   <span className="text-base font-semibold text-red">Danger Zone</span>
                 </div>
                 <p className="text-sm text-text-muted mb-4">

@@ -6,7 +6,7 @@ import AdminPromptsPage from './AdminPromptsPage';
 import type { ActivePrompt, PromptEvalSummary, PromptVersion } from '../api/types';
 
 const {
-  list, get, active, create, evaluate, promote, rollback, remove, diff,
+  list, get, active, create, evaluate, promote, rollback, remove, diff, restoreDefault,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
@@ -17,11 +17,12 @@ const {
   rollback: vi.fn(),
   remove: vi.fn(),
   diff: vi.fn(),
+  restoreDefault: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
   adminApi: {
-    prompts: { list, get, active, create, evaluate, promote, rollback, remove, diff },
+    prompts: { list, get, active, create, evaluate, promote, rollback, remove, diff, restoreDefault },
   },
 }));
 
@@ -92,6 +93,13 @@ const activeVersion = makeVersion({
   content_hash: 'eee555fff666',
   content: ACTIVE_CONTENT,
   promoted_at: '2026-09-02T18:00:00Z',
+});
+
+const retiredVersion = makeVersion({
+  id: 'p-retired',
+  version: 0,
+  status: 'retired',
+  content_hash: 'ggg777hhh888',
 });
 
 const activePrompt: ActivePrompt = {
@@ -219,6 +227,57 @@ describe('AdminPromptsPage', () => {
     await waitFor(() => expect(promote).toHaveBeenLastCalledWith('p-staged', true));
   });
 
+  // BUG-39: rollback used to fire on a single click with no confirmation.
+  it('confirms before rolling back a retired version', async () => {
+    const user = userEvent.setup();
+    list.mockResolvedValue({ data: [draftVersion, stagedVersion, activeVersion, retiredVersion] });
+    rollback.mockResolvedValueOnce({ ...retiredVersion, status: 'active' });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: 'Roll back to answer v0' }));
+    expect(rollback).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('dialog', { name: /roll back prompt/i });
+    await user.click(within(dialog).getByRole('button', { name: /^roll back$/i }));
+
+    await waitFor(() => expect(rollback).toHaveBeenCalledWith('p-retired'));
+  });
+
+  // BUG-39: once a version is promoted, there was no way back to the
+  // built-in default without creating a copy of it.
+  it('confirms before restoring the built-in default prompt', async () => {
+    const user = userEvent.setup();
+    restoreDefault.mockResolvedValueOnce({
+      name: 'answer',
+      content: 'Built-in default prompt text.',
+      content_hash: 'default-hash',
+      model_name: null,
+      version: null,
+      version_id: null,
+      is_default: true,
+    });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: /restore built-in default/i }));
+    expect(restoreDefault).not.toHaveBeenCalled();
+
+    const dialog = await screen.findByRole('dialog', { name: /restore built-in default/i });
+    await user.click(within(dialog).getByRole('button', { name: /^restore default$/i }));
+
+    await waitFor(() => expect(restoreDefault).toHaveBeenCalledWith('answer'));
+  });
+
+  it('hides the restore-default button once the built-in default is already active', async () => {
+    active.mockResolvedValue({ ...activePrompt, is_default: true, version: null, version_id: null });
+
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await screen.findByText(/no promoted version yet/i);
+    expect(screen.queryByRole('button', { name: /restore built-in default/i })).not.toBeInTheDocument();
+  });
+
   it('queues a smoke eval for the selected row', async () => {
     const user = userEvent.setup();
     evaluate.mockResolvedValue({
@@ -253,6 +312,24 @@ describe('AdminPromptsPage', () => {
 
     // Unchanged context lines are still rendered, uncoloured.
     expect(within(dialog).getByText('Line one').closest('li')).not.toHaveClass('text-green');
+  });
+
+  it('diffs a one-line prompt by sentence instead of removing and re-adding it all', async () => {
+    const user = userEvent.setup();
+    const base = 'Answer only from the context. Cite every source.';
+    const edited = { ...draftVersion, content: `${base} Be concise.` };
+    list.mockResolvedValue({ data: [edited, stagedVersion, activeVersion] });
+    active.mockResolvedValue({ ...activePrompt, content: base });
+    get.mockResolvedValue(edited);
+    renderWithProviders(<AdminPromptsPage />, { route: '/admin/prompts' });
+
+    await user.click(await screen.findByRole('button', { name: 'Diff answer v3 against active' }));
+    const dialog = await screen.findByRole('dialog', { name: /diff vs active/i });
+
+    const added = await within(dialog).findByText(/Be concise\./);
+    expect(added.closest('li')).toHaveClass('text-green');
+    const kept = within(dialog).getByText(/Answer only from the context\./);
+    expect(kept.closest('li')).not.toHaveClass('text-red');
   });
 
   it('renders an error state with a retry when the list fails', async () => {

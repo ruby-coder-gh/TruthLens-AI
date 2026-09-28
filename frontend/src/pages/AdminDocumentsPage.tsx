@@ -17,13 +17,23 @@ const ACTION_LABELS: Record<BulkDocumentAction, string> = {
   untag: 'Untag',
 };
 
+// BUG-38. Matches `SUPPORTED_MIME_TYPES` in `backend/app/api/documents.py` —
+// csv/md/json fell through to the generic "FILE" label because they weren't
+// checked at all.
 function getFileType(mime: string): string {
   if (mime.includes('pdf')) return 'PDF';
-  if (mime.includes('docx') || mime.includes('document')) return 'DOCX';
-  if (mime.includes('sheet') || mime.includes('excel')) return 'XLSX';
-  if (mime.includes('txt')) return 'TXT';
+  if (mime.includes('wordprocessingml') || mime.includes('docx')) return 'DOCX';
+  if (mime.includes('csv')) return 'CSV';
+  if (mime.includes('json')) return 'JSON';
+  if (mime === 'text/markdown' || mime.includes('markdown')) return 'MD';
+  if (mime.includes('plain') || mime.includes('txt')) return 'TXT';
   return 'FILE';
 }
+
+// BUG-37. A bulk reindex leaves a document `pending` for real processing
+// time — poll while any row on the current page is still `pending` or
+// `processing`, same pattern as `RadarPanel`'s scan poll.
+const REINDEXING_STATUSES = new Set(['pending', 'processing']);
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -35,9 +45,12 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// `backend/app/api/documents.py` only ever sets pending/processing/ready/
+// failed/quarantined — 'indexed' kept as a harmless legacy alias.
 function statusBadgeColor(status: string): 'green' | 'orange' | 'red' | 'blue' | 'gray' {
   switch (status) {
-    case 'indexed': return 'green';
+    case 'indexed':
+    case 'ready': return 'green';
     case 'pending': return 'orange';
     case 'failed': return 'red';
     case 'processing': return 'blue';
@@ -82,6 +95,13 @@ export default function AdminDocumentsPage() {
       tags: tagFilter || undefined,
     }),
     placeholderData: (prev) => prev,
+    // BUG-37. Poll only while something on the current page is actually
+    // reindexing — react-query stops the interval itself the instant this
+    // returns `false` on a later render (same pattern as `RadarPanel`).
+    refetchInterval: (query) => {
+      const rows = query.state.data?.data ?? [];
+      return rows.some((doc) => REINDEXING_STATUSES.has(doc.status)) ? 3000 : false;
+    },
   });
 
   // Tracks the last `data` reference the selection was pruned against — lets
@@ -316,7 +336,7 @@ export default function AdminDocumentsPage() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border bg-card-2">
-              <th className="px-4 py-2.5 w-10">
+              <th className="px-3 py-2.5 w-10">
                 <input
                   type="checkbox"
                   checked={allSelected}
@@ -326,15 +346,15 @@ export default function AdminDocumentsPage() {
                   className="h-4 w-4 accent-primary"
                 />
               </th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Type</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Chunks</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Size</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Tags</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Uploaded By</th>
-              <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Date</th>
-              <th className="px-4 py-2.5 w-10" />
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Name</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Type</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Status</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Chunks</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Size</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Tags</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Uploaded By</th>
+              <th className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-text-dim">Date</th>
+              <th className="px-3 py-2.5 w-10" />
             </tr>
           </thead>
           <motion.tbody variants={staggerContainer} initial="initial" animate="animate">
@@ -360,7 +380,7 @@ export default function AdminDocumentsPage() {
                       : 'hover:bg-card-2'
                   }`}
                 >
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selected.has(doc.id)}
@@ -369,14 +389,14 @@ export default function AdminDocumentsPage() {
                       className="h-4 w-4 accent-primary"
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-primary-soft shrink-0" />
-                      <span className="text-text truncate max-w-[220px] block">{doc.original_filename}</span>
+                      <span className="text-text truncate max-w-[190px] block">{doc.original_filename}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text-muted">{getFileType(doc.mime_type)}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-text-muted whitespace-nowrap">{getFileType(doc.mime_type)}</td>
+                  <td className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge color={statusBadgeColor(doc.status)}>{doc.status}</Badge>
                       {isUnsearchableReady(doc) && (
@@ -386,10 +406,14 @@ export default function AdminDocumentsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text tabular-nums">{doc.chunk_count ?? '—'}</td>
-                  <td className="px-4 py-3 text-text-muted tabular-nums">{formatFileSize(doc.file_size)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1 max-w-[160px]">
+                  <td className="px-3 py-3 text-text tabular-nums whitespace-nowrap">{doc.chunk_count ?? '—'}</td>
+                  {/* BUG-38: `whitespace-nowrap` — without it, once the row's
+                      other columns got tight, this was the flexible one the
+                      table layout squeezed, wrapping "171 KB" onto two
+                      lines. */}
+                  <td className="px-3 py-3 text-text-muted tabular-nums whitespace-nowrap">{formatFileSize(doc.file_size)}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap gap-1 max-w-[120px]">
                       {(doc.tags ?? []).length === 0 ? (
                         <span className="text-xs text-text-dim">—</span>
                       ) : (
@@ -397,14 +421,21 @@ export default function AdminDocumentsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text-muted text-xs">{doc.uploaded_by}</td>
-                  <td className="px-4 py-3 text-text-dim text-xs whitespace-nowrap">
+                  {/* K3/BUG-36/BUG-38: a name, not the raw uploader UUID —
+                      also shrinks this column enough that the table stops
+                      scrolling horizontally at 1280px. */}
+                  <td className="px-3 py-3 text-text-muted text-xs">
+                    <span className="block max-w-[110px] truncate" title={doc.uploaded_by}>
+                      {doc.uploaded_by_name ?? doc.uploaded_by}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 text-text-dim text-xs whitespace-nowrap">
                     <span className="flex items-center gap-1">
                       <Clock size={11} />
                       {formatDate(doc.created_at)}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <ChevronRight size={14} className="text-text-dim" />
                   </td>
                 </motion.tr>

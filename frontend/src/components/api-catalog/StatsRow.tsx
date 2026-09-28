@@ -3,7 +3,7 @@ import {
   Globe,
   Radio,
   Cpu,
-  ShieldCheck,
+  Layers,
 } from 'lucide-react';
 import { CATALOG_STATS } from './data';
 import AnimatedCounter from './AnimatedCounter';
@@ -31,11 +31,10 @@ const statsConfig = [
     iconColor: 'text-accent-2',
   },
   {
-    value: CATALOG_STATS.uptime,
-    suffix: '%',
-    label: 'Uptime',
-    icon: <ShieldCheck size={16} />,
-    color: 'from-green-500/20 to-green-500/5 border-green-500/25',
+    value: CATALOG_STATS.groups,
+    label: 'API Groups',
+    icon: <Layers size={16} />,
+    color: 'from-green/15 to-green/5 border-green/25',
     iconColor: 'text-green',
   },
 ];
@@ -65,7 +64,6 @@ export default function StatsRow() {
             </div>
             <AnimatedCounter
               value={stat.value}
-              suffix={stat.suffix || ''}
               duration={1.5 + i * 0.2}
               className="items-start"
             />

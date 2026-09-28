@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # ─── App ───────────────────────────────────
-    APP_NAME: str = "VeritasRAG"
+    APP_NAME: str = "TruthLens AI"
     APP_VERSION: str = "0.1.0"
     APP_ENV: Literal["development", "production"] = "development"
     APP_SECRET_KEY: str
@@ -40,8 +40,8 @@ class Settings(BaseSettings):
 
     # ─── Ollama ────────────────────────────────
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_PRIMARY_MODEL: str = "qwen3:4b"
-    OLLAMA_FALLBACK_MODEL: str = "qwen3:4b"
+    OLLAMA_PRIMARY_MODEL: str = "qwen3:4b-instruct"
+    OLLAMA_FALLBACK_MODEL: str = "qwen3:4b-instruct"
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     OLLAMA_RERANK_MODEL: str = "nomic-embed-text"
     OLLAMA_VISION_MODEL: str = "llava:7b"
@@ -180,6 +180,16 @@ class Settings(BaseSettings):
     # the DB engine is disposed.
     WS_SHUTDOWN_DRAIN_SECONDS: int = 10
 
+    # ─── Investigation Agent (BUG-10) ─────────
+    # A local model is slow per call, and every extra sub-question is a full
+    # retrieval+generation round-trip run mostly serially (one local model, no
+    # real GPU fan-out) — the prompt asked for 3-6 and each LLM call allowed
+    # up to 1536/2048 tokens, which measured ~4 min end-to-end on qwen3:4b.
+    # Capping both keeps a run in the low tens of seconds per step.
+    INVESTIGATION_MAX_SUB_QUESTIONS: int = 4
+    INVESTIGATION_DECOMPOSE_MAX_TOKENS: int = 768
+    INVESTIGATION_SYNTHESIS_MAX_TOKENS: int = 2048
+
     # ─── Rate Limiting ────────────────────────
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_REQUESTS: int = 30
@@ -198,6 +208,31 @@ class Settings(BaseSettings):
     # ─── PII Redaction ────────────────────────
     PII_REDACTION_ENABLED: bool = True
     PII_ENTITIES: str = "EMAIL,PHONE,SSN,CREDIT_CARD,ADDRESS"
+
+    # ─── Demo Mode ─────────────────────────────
+    # A self-contained, seeded demo (fictional corpus + one-click login) for
+    # showing the app without a real workspace. Refused outside DEMO_MODE.
+    DEMO_MODE: bool = False
+    DEMO_WARMUP: bool = True
+    DEMO_PASSWORD: str = ""
+
+    # ─── Ollama Runtime Tuning ─────────────────
+    # Keeps the local model resident between demo queries instead of the
+    # Ollama default unload, and disables qwen3's <think> reasoning block
+    # (which otherwise burns the token budget and can leak into the answer).
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_THINK: bool = False
+
+    # ─── Truth Receipts ────────────────────────
+    RECEIPTS_ENABLED: bool = True
+
+    # ─── Contradiction Radar ───────────────────
+    RADAR_AUTO_SCAN: bool = True
+    RADAR_NEIGHBOURS: int = 4
+    RADAR_MIN_SIMILARITY: float = 0.55
+    RADAR_MIN_CONTRADICTION: float = 0.8
+    RADAR_MAX_CHUNKS: int = 1500
+    RADAR_SENTENCE_PAIRS: int = 3
 
     @property
     def cors_origins_list(self) -> list[str]:

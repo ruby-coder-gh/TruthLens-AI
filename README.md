@@ -4,6 +4,19 @@ Offline-first, enterprise-grade RAG platform. Ask natural-language questions ove
 
 > "Perplexity for your private documents — fully offline, fully free."
 
+## Demo in 60 seconds
+
+Requires [Ollama](https://ollama.ai) installed (the script starts it and pulls the model if needed):
+
+```bash
+./run.sh --demo
+```
+
+First run bootstraps everything (backend venv, frontend deps, Ollama model pull, seeded
+demo workspace) — later runs are fast. When the browser opens, click **Try the demo** on
+the login page and pick **Analyst** or **Admin**; no signup required. See
+[`DEMO_SCRIPT.md`](DEMO_SCRIPT.md) for a 3-minute walkthrough of what to show.
+
 ## Architecture
 
 ```
@@ -27,7 +40,7 @@ Offline-first, enterprise-grade RAG platform. Ask natural-language questions ove
 
 ### Prerequisites
 - Python 3.11+
-- [Ollama](https://ollama.ai) with qwen3:4b (default; any Ollama chat model works — set in `.env`)
+- [Ollama](https://ollama.ai) with qwen3:4b-instruct (default; any Ollama chat model works — set in `.env`)
 - 8GB+ RAM (16GB recommended)
 
 ### 1. Setup
@@ -54,7 +67,7 @@ cp ../.env.example .env
 ### 3. Pull LLM models
 
 ```bash
-ollama pull qwen3:4b         # primary + fallback chat model (matches .env)
+ollama pull qwen3:4b-instruct         # primary + fallback chat model (matches .env)
 ollama pull nomic-embed-text # embeddings/rerank fallback (optional — sentence-transformers used by default)
 ```
 
@@ -85,7 +98,7 @@ This starts:
 
 Wait for Ollama to be healthy, then pull models:
 ```bash
-docker exec veritasrag-ollama ollama pull qwen3:4b
+docker exec veritasrag-ollama ollama pull qwen3:4b-instruct
 ```
 
 ## API
@@ -121,7 +134,7 @@ PDF, DOCX, TXT, MD, CSV
 | Framework | FastAPI (Python 3.11) |
 | Database | SQLite + SQLAlchemy (async) |
 | Vector store | ChromaDB |
-| LLM | Ollama (qwen3:4b default) |
+| LLM | Ollama (qwen3:4b-instruct default) |
 | Search | BM25 + vector hybrid (RRF fusion) |
 | Reranker | Cross-encoder (BGE-reranker) |
 | Guardrail | NLI (DeBERTa) |

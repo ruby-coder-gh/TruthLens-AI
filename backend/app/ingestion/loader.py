@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import csv
+import io
+import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +20,15 @@ try:
 except ImportError:
     fitz = None  # type: ignore[assignment]
 
+_LINE_END_HYPHEN = re.compile(r"(?<=[a-z])-\n(?=[a-z])")
+_LINE_END_COMPOUND = re.compile(r"(?<=\w)-\s*\n\s*(?=[A-Z0-9])")
 
-async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
+
+async def load(path: Path, mime_type: str, display_name: str = "") -> list[dict[str, Any]]:
     """Load document from disk -> list of page/dict text segments with metadata.
+
+    `display_name` is the user-facing filename (stored files are named by UUID);
+    CSV rows and summaries are titled with it so they stay retrievable.
 
     Returns list of dicts: {"text": str, "page_number": int | None, "metadata": dict}
     """
@@ -36,7 +46,9 @@ async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
     elif mime_type == "text/markdown":
         return _load_markdown(path)
     elif mime_type == "text/csv":
-        return _load_csv(path)
+        return _load_csv(path, display_name)
+    elif mime_type == "application/json":
+        return _load_json(path)
     else:
         raise ValueError(f"Unsupported mime type: {mime_type}")
 
@@ -49,7 +61,17 @@ def _load_pdf(path: Path) -> list[dict[str, Any]]:
     pages: list[dict[str, Any]] = []
     for page_num in range(len(doc)):
         page = doc[page_num]
-        text = page.get_text().strip()
+        # PyMuPDF's text layout substitutes ligature glyphs (e.g. "fi" -> the
+        # single U+FB01 codepoint) whenever the page's font supports them, so
+        # a name like "Whitfield" comes back as "Whitﬁeld". NFKC's
+        # compatibility decomposition reverses exactly that substitution,
+        # keeping BM25 tokenization and citation excerpts matching the plain
+        # ASCII the document actually says.
+        # One paragraph per text block, blocks split by blank lines: plain
+        # `get_text()` hard-breaks every rendered line, which glued headings
+        # and table cells onto the next prose sentence.
+        paragraphs = [_block_paragraph(block[4]) for block in page.get_text("blocks") if block[6] == 0]
+        text = "\n\n".join(p for p in paragraphs if p)
         if text:
             pages.append({
                 "text": text,
@@ -64,6 +86,17 @@ def _load_pdf(path: Path) -> list[dict[str, Any]]:
     return pages
 
 
+def _block_paragraph(block_text: str) -> str:
+    """A PDF text block's lines as one paragraph: NFKC, line-end hyphens rejoined, whitespace collapsed."""
+    text = unicodedata.normalize("NFKC", block_text)
+    # ponytail: "fabri-\ncation" -> "fabrication" also turns a compound split
+    # at its hyphen ("gas-\nbacked") into "gasbacked"; needs a dictionary to tell apart.
+    text = _LINE_END_HYPHEN.sub("", text)
+    # "Fourth-\nQuarter" is a real compound: keep the hyphen, drop the break.
+    text = _LINE_END_COMPOUND.sub("-", text)
+    return " ".join(text.split())
+
+
 def _load_docx(path: Path) -> list[dict[str, Any]]:
     doc = DocxDocument(str(path))
     pages: list[dict[str, Any]] = []
@@ -73,8 +106,9 @@ def _load_docx(path: Path) -> list[dict[str, Any]]:
         if para.text.strip():
             full_text.append(para.text.strip())
 
-    # DOCX doesn't have page numbers natively; treat as single page
-    text = "\n".join(full_text)
+    # DOCX doesn't have page numbers natively; treat as single page. Blank
+    # line between paragraphs, as for PDF blocks.
+    text = "\n\n".join(full_text)
     if text:
         pages.append({
             "text": text,
@@ -102,9 +136,9 @@ def _load_markdown(path: Path) -> list[dict[str, Any]]:
     raw = path.read_text(encoding="utf-8", errors="replace")
     # Strip markdown formatting to plain text
     html = markdown.markdown(raw)
-    # Simple HTML-to-text extraction
-    import re
-    text = re.sub(r"<[^>]+>", "", html)
+    # Simple HTML-to-text extraction; blank line between blocks (headings,
+    # paragraphs, list items), as for PDF/DOCX.
+    text = re.sub(r"<[^>]+>", "", html.replace(">\n<", ">\n\n<"))
     text = text.strip()
 
     if not text:
@@ -117,20 +151,143 @@ def _load_markdown(path: Path) -> list[dict[str, Any]]:
     }]
 
 
-def _load_csv(path: Path) -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    with open(path, newline="", encoding="utf-8", errors="replace") as f:
-        reader = csv.reader(f)
-        rows: list[str] = []
-        for row in reader:
-            rows.append(", ".join(row))
+# R3-4: only columns cheap enough to summarize as a handful of named groups.
+_CSV_SUMMARY_MAX_DISTINCT = 8
+# Below this many rows, top-k retrieval already sees the whole table -- skip
+# the rollup (and keep small/toy CSVs summary-free).
+_CSV_SUMMARY_MIN_ROWS = 5
 
-    if rows:
+
+def _csv_title(name: str) -> str:
+    return Path(name).stem.replace("-", " ").replace("_", " ").title()
+
+
+def _humanize_csv_value(value: str) -> str:
+    return value.replace("_", " ").replace("-", " ").strip().capitalize()
+
+
+def _csv_summary_pages(
+    path: Path, headers: list[str], rows: list[dict[str, str]], name: str = "", description: str = ""
+) -> list[dict[str, Any]]:
+    """R3-4: one extra chunk per low-cardinality column (<= 8 distinct
+    values), e.g. "Project Pipeline — status = Construction: Aurora, Ashford
+    Solar, …". An aggregation question ("which projects are under
+    construction?") only reaches the top reranked *row* chunks, so rows past
+    that cutoff are silently missing from the answer even though the corpus
+    has them -- this rollup keeps the whole group in one retrievable chunk.
+    """
+    if len(headers) < 2:
+        return []
+    id_col = headers[0]
+    title = _csv_title(name or path.name)
+    lead = f"{title}. {description}\n" if description else f"{title}.\n"
+    pages: list[dict[str, Any]] = []
+    for col in headers[1:]:
+        groups: dict[str, list[str]] = {}
+        for row in rows:
+            value = (row.get(col) or "").strip()
+            name = (row.get(id_col) or "").strip()
+            if not value or not name:
+                continue
+            groups.setdefault(value, []).append(name)
+        if not groups or len(groups) > _CSV_SUMMARY_MAX_DISTINCT:
+            continue
+        for value, names in groups.items():
+            pages.append({
+                "text": f"{lead}{col} = {_humanize_csv_value(value)}: {', '.join(names)}",
+                "page_number": None,
+                "metadata": {"source": path.name, "summary_column": col, "summary_value": value},
+            })
+    return pages
+
+
+def _load_csv(path: Path, display_name: str = "") -> list[dict[str, Any]]:
+    # C7: one page per data row (chunker below turns each page into its own
+    # chunk), header repeated as "Column: value; …" text on every row so a
+    # single row stays retrievable on its own instead of being buried inside
+    # a single whole-file chunk.
+    #
+    # BUG-7: a bare "col: value; col: value" row has almost no lexical or
+    # semantic overlap with a natural-language question about the table (the
+    # real reranker scored it 0.0004 against "which projects are under
+    # construction?", far under SUFFICIENCY_MIN_RERANK_SCORE) -- the model has
+    # nothing to match the question's framing against. Every row is prefixed
+    # with the filename and a short table description to give it that framing
+    # (0.39-0.89 in the same repro, depending on the description). The CSV can
+    # opt into a stronger, hand-written description via a `# ...` leading
+    # comment line (stripped before parsing, never a data row); otherwise the
+    # description is generic (derived from the column headers).
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    description = None
+    if raw.startswith("#"):
+        comment_line, _, raw = raw.partition("\n")
+        description = comment_line.lstrip("#").strip()
+
+    pages: list[dict[str, Any]] = []
+    reader = csv.DictReader(io.StringIO(raw))
+    headers = reader.fieldnames or []
+    if description is None:
+        description = f"Table with columns: {', '.join(headers)}." if headers else ""
+    name = display_name or path.name
+    prefix = f"{name}. {description}\n" if description else f"{name}.\n"
+
+    rows: list[dict[str, str]] = []
+    for i, row in enumerate(reader):
+        fields = "; ".join(f"{h}: {(row.get(h) or '').strip()}" for h in headers)
+        if not fields.strip():
+            continue
         pages.append({
-            "text": "\n".join(rows),
+            "text": prefix + fields,
             "page_number": None,
-            "metadata": {"source": path.name, "row_count": len(rows)},
+            "metadata": {"source": path.name, "row_index": i},
         })
+        rows.append(row)
+
+    if len(rows) >= _CSV_SUMMARY_MIN_ROWS:
+        pages.extend(_csv_summary_pages(path, headers, rows, name, description))
 
     logger.info("csv_loaded", rows=len(rows), path=str(path))
+    return pages
+
+
+def _flatten_json(obj: Any, prefix: str = "") -> list[str]:
+    """Flatten nested JSON into 'key.path: value' lines (R2-5)."""
+    if isinstance(obj, dict):
+        lines: list[str] = []
+        for key, value in obj.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            lines.extend(_flatten_json(value, path))
+        return lines
+    if isinstance(obj, list):
+        lines = []
+        for i, value in enumerate(obj):
+            lines.extend(_flatten_json(value, f"{prefix}[{i}]"))
+        return lines
+    return [f"{prefix}: {obj}"]
+
+
+def _load_json(path: Path) -> list[dict[str, Any]]:
+    """R2-5: JSON gets the same per-row retrievability as CSV. A top-level
+    array of records becomes one page per item; a single object becomes one
+    page. Each page's text is its 'key.path: value' lines (`_flatten_json`),
+    so a JSON upload no longer raises "Unsupported mime type" -- the upload
+    UI already advertises it (BUG-23) but the loader had no branch for it.
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}") from e
+
+    pages: list[dict[str, Any]] = []
+    items = data if isinstance(data, list) else [data]
+    per_item_page = isinstance(data, list)
+    for i, item in enumerate(items):
+        text = "\n".join(_flatten_json(item))
+        if not text.strip():
+            continue
+        metadata = {"source": path.name, "row_index": i} if per_item_page else {"source": path.name}
+        pages.append({"text": text, "page_number": None, "metadata": metadata})
+
+    logger.info("json_loaded", pages=len(pages), path=str(path))
     return pages

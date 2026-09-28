@@ -112,6 +112,15 @@ describe('AdminGoldenPage', () => {
     expect(screen.queryByText(/9 awaiting approval/)).not.toBeInTheDocument();
   });
 
+  // K3/R2-18: the "Source workspace" column showed a raw workspace UUID.
+  it('shows workspace_name over the raw workspace id when the backend sends it', async () => {
+    list.mockResolvedValue(listResponse([makeEntry({ id: 'ge-named', workspace_id: 'ws-1', workspace_name: 'Northwind Renewables' })]));
+    renderWithProviders(<AdminGoldenPage />, { route: '/admin/golden' });
+
+    expect(await screen.findByText('Northwind Renewables')).toBeInTheDocument();
+    expect(screen.queryByText('ws-1')).not.toBeInTheDocument();
+  });
+
   it('calls approve for the row and refetches on success', async () => {
     const user = userEvent.setup();
     renderWithProviders(<AdminGoldenPage />, { route: '/admin/golden' });

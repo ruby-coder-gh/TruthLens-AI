@@ -254,6 +254,85 @@ async def test_stream_fallback(mock_ollama_module):
     assert len(tokens) >= 1
 
 
+# ── <think> reasoning leak (F-demo, qwen3) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_generate_strips_a_full_think_block(mock_ollama_module):
+    """A complete <think>...</think> block never reaches the persisted answer."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(
+        content="<think>the user wants X, I should say Y</think>\n\nY is the answer."
+    )
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="Q", contexts=[{"content": "c", "document_name": "d.txt"}])
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert "<think>" not in result.text
+    assert "the user wants" not in result.text
+    assert result.text == "Y is the answer."
+
+
+@pytest.mark.asyncio
+async def test_generate_strips_a_leaked_closing_think_tag_with_no_opening_tag(mock_ollama_module):
+    """Verified against a live qwen3:4b: `reasoning=False` still emits the
+    whole chain-of-thought, but langchain-ollama's own boundary parser eats
+    the opening `<think>` tag and only the closing `</think>` survives into
+    `.content`. Nothing before the last `</think>` may reach the user."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(
+        content="the user wants X, I should say Y\n</think>\n\nY is the answer."
+    )
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="Q", contexts=[{"content": "c", "document_name": "d.txt"}])
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert "</think>" not in result.text
+    assert "the user wants" not in result.text
+    assert result.text == "Y is the answer."
+
+
+@pytest.mark.asyncio
+async def test_generate_leaves_think_tags_alone_when_ollama_think_enabled(mock_ollama_module, monkeypatch):
+    """OLLAMA_THINK=True means reasoning was requested — don't strip it."""
+    monkeypatch.setattr("app.config.settings.OLLAMA_THINK", True)
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MockResponse(content="<think>reasoning</think>\n\nAnswer.")
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="Q", contexts=[{"content": "c", "document_name": "d.txt"}])
+    with patch("app.generation.generator.cite", new=AsyncMock(return_value=[])):
+        result = await generate(inp)
+
+    assert "<think>reasoning</think>" in result.text
+
+
+@pytest.mark.asyncio
+async def test_stream_suppresses_a_think_block_split_across_chunks(mock_ollama_module):
+    """The live token stream must never surface reasoning content, even when
+    the opening/closing tags land in separate chunks from the reasoning text."""
+    mock_llm = MagicMock()
+
+    async def async_chunks(_):
+        yield MockResponse("<think>")
+        yield MockResponse("secret reasoning ")
+        yield MockResponse("more reasoning</think>")
+        yield MockResponse("Real answer.")
+
+    mock_llm.astream = async_chunks
+    mock_ollama_module(llm_instance=mock_llm)
+
+    inp = GenerationInput(query="Q", contexts=[{"content": "c", "document_name": "d.txt"}])
+    tokens = [t async for t in stream(inp)]
+
+    assert "".join(tokens) == "Real answer."
+    assert not any("reasoning" in t or "<think>" in t or "</think>" in t for t in tokens)
+
+
 # ── Token accounting / prompt + model pinning ──────────────────
 
 

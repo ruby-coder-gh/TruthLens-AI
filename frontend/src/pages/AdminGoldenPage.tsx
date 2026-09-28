@@ -205,8 +205,9 @@ export default function AdminGoldenPage() {
                       <td className="px-4 py-3 text-xs text-text-muted">
                         {DIFFICULTY_LABEL[entry.difficulty] ?? entry.difficulty}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-text-dim">
-                        {entry.workspace_id ?? '—'}
+                      {/* K3/R2-18: a workspace name instead of the raw UUID. */}
+                      <td className="px-4 py-3 text-xs text-text-dim">
+                        {entry.workspace_name ?? entry.workspace_id ?? '—'}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs text-text-dim">
                         {formatDate(entry.created_at)}

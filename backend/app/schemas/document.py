@@ -45,8 +45,15 @@ class DocumentResponse(_SearchabilityMixin):
     status: str
     error_message: str | None = None
     uploaded_by: str | None = None
+    # K3: username (else email) of the uploader, so the admin UI shows a name
+    # instead of a raw user id (BUG-38).
+    uploaded_by_name: str | None = None
     tags: list[str] = []
     quarantined_chunk_count: int = 0
+    # BUG-18: the collection picker needs to know which documents are already
+    # assigned. `None` covers both an unassigned document and a row written
+    # before collections existed.
+    collection_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -74,6 +81,8 @@ class DocumentDetailResponse(_SearchabilityMixin):
     chunk_count: int
     status: str
     quarantined_chunk_count: int = 0
+    uploaded_by: str | None = None
+    uploaded_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
     chunks: list[ChunkInfo] = []
@@ -129,3 +138,30 @@ class BulkDocumentSummary(BaseModel):
 class BulkDocumentResponse(BaseModel):
     results: list[BulkDocumentResult]
     summary: BulkDocumentSummary
+
+
+# ─── Source viewer (L7/L8) ────────────────────────────────────────────────────
+
+
+class TextHighlight(BaseModel):
+    """Character offsets of a matched span inside `ChunkLocateResponse.content`."""
+
+    start: int
+    end: int
+
+
+class ChunkLocateResponse(BaseModel):
+    """Where a chunk's text lives in its source document, for the viewer."""
+
+    mode: Literal["pdf", "text"]
+    page_number: int | None = None
+    page_count: int | None = None
+    page_width: float | None = None
+    page_height: float | None = None
+    rects: list[list[float]] = []
+    content: str
+    context_before: str | None = None
+    context_after: str | None = None
+    # K2: text mode + `?text=` — offsets of that text inside `content`. None
+    # in PDF mode (page rects carry the highlight there) or when unmatched.
+    highlight: TextHighlight | None = None

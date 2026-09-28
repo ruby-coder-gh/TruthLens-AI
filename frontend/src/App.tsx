@@ -5,7 +5,6 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, Skeleton } from './components/ui';
 import Layout from './components/Layout'
-import CursorGlow from './components/CursorGlow'
 import { ProtectedRoute, AdminRoute } from './components/RouteGuards'
 
 // Route-level code splitting — chunks load on demand
@@ -44,6 +43,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'))
 const TermsPage = lazy(() => import('./pages/TermsPage'))
 const ContactPage = lazy(() => import('./pages/ContactPage'))
+const ReceiptPage = lazy(() => import('./pages/ReceiptPage'))
 
 // ─── HOC helpers ────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -75,6 +75,7 @@ function AppRoutes() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/r/:token" element={<ReceiptPage />} />
 
       {/* ── PROTECTED (with Layout) — user + admin pages ──────────────────── */}
       <Route
@@ -102,6 +103,8 @@ function AppRoutes() {
         <Route path="/workspaces/:id/review-queue" element={<ReviewQueuePage />} />
         <Route path="/workspaces/:id/chat" element={<ChatPage />} />
         <Route path="/workspaces/:id/investigate" element={<InvestigationPage />} />
+        {/* BUG-10: case id in the URL so a running/finished investigation survives a refresh or revisit. */}
+        <Route path="/workspaces/:id/investigate/:caseId" element={<InvestigationPage />} />
 
         {/* Admin pages */}
         <Route element={<AdminRoute />}>
@@ -142,8 +145,6 @@ export default function App() {
           <ToastProvider>
             <AuthProvider>
               <AppRoutes />
-              <CursorGlow />
-              <div className="noise-overlay" aria-hidden="true" />
             </AuthProvider>
           </ToastProvider>
         </BrowserRouter>

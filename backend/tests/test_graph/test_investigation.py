@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import asdict
 
+import pytest
 
 from app.graph.investigation import (
     SubQuestion,
@@ -182,7 +183,7 @@ class TestPromptTemplates:
     def test_synthesis_prompt_formats(self):
         query = "What is AI safety?"
         findings = "### Sub-question 1: Alignment\nFinding: Alignment ensures..."
-        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=findings)
+        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=findings, conflicts="None found.")
         assert query in prompt
         assert findings in prompt
         assert "Executive Summary" in prompt
@@ -194,8 +195,168 @@ class TestPromptTemplates:
             f"### Sub-question {i}: Q{i}\nFinding: Answer {i}\n"
             for i in range(1, 5)
         ])
-        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=findings)
+        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=findings, conflicts="None found.")
         assert findings in prompt
+
+    def test_synthesis_prompt_carries_conflicts_context_and_instruction(self):
+        """R2-7: the prompt has a {conflicts} slot and tells the model to
+        report every listed contradiction, not describe the corpus as
+        consistent or pick a side."""
+        prompt = SYNTHESIS_PROMPT.format(
+            query="Q", sub_findings="F",
+            conflicts='- "Revenue was €412 million." (Annual Report) vs "Revenue was €398 million." (Press Release)',
+        )
+        assert "€412 million" in prompt and "€398 million" in prompt
+        lowered = prompt.lower()
+        assert "contradiction" in lowered
+        assert "do not" in lowered
+
+
+class TestFormatConflictsContext:
+    def test_empty_list_renders_none_found(self):
+        from app.graph.investigation import CONFLICTS_NONE_TEXT, _format_conflicts_context
+        assert _format_conflicts_context([]) == CONFLICTS_NONE_TEXT
+
+    def test_renders_both_sides_and_document_names(self):
+        from app.graph.investigation import _format_conflicts_context
+
+        text = _format_conflicts_context([{
+            "a": {"document_name": "Annual Report", "page_number": 1, "sentence": "Revenue was €412 million."},
+            "b": {"document_name": "Press Release", "page_number": None, "sentence": "Revenue was €398 million."},
+            "score": 0.913,
+        }])
+        assert "€412 million" in text
+        assert "€398 million" in text
+        assert "Annual Report" in text and "Press Release" in text
+
+
+class TestSynthesizeNodeConflicts:
+    """R2-7: investigation synthesis gets the workspace's open Radar
+    contradictions for the retrieved documents as explicit context (document-
+    level, so "identify conflicts" reports every planted pair, not just the
+    ones whose exact chunk a sub-question happened to retrieve), or the whole
+    workspace when the question itself asks about conflicts/contradictions/
+    discrepancies."""
+
+    @staticmethod
+    def _state(sub_questions, query="Summarize the annual report"):
+        return {
+            "query": query,
+            "workspace_id": "ws-1",
+            "sub_questions": sub_questions,
+            "reasoning_trace": [],
+            "investigation_id": None,
+        }
+
+    def test_includes_conflicts_context_in_the_synthesis_prompt(self, monkeypatch):
+        from app.graph import investigation as inv
+
+        sub_questions = [{
+            "question": "Q1", "purpose": "p", "partial_answer": "Answer",
+            "retrieved_chunks": [{"document_id": "doc-a"}, {"document_id": "doc-b"}],
+        }]
+
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
+            assert workspace_id == "ws-1"
+            assert sorted(document_ids) == ["doc-a", "doc-b"]
+            assert whole_workspace is False
+            return [{
+                "a": {"document_name": "Annual Report", "page_number": 1, "sentence": "Revenue was €412 million."},
+                "b": {"document_name": "Press Release", "page_number": 1, "sentence": "Revenue was €398 million."},
+                "score": 0.9,
+            }]
+
+        captured: dict = {}
+
+        def fake_run_llm(system_prompt, user_prompt, **kwargs):
+            captured["user_prompt"] = user_prompt
+            return "# Report\nSynthesized."
+
+        monkeypatch.setattr(inv, "_fetch_investigation_conflicts", fake_fetch)
+        monkeypatch.setattr(inv, "_run_llm", fake_run_llm)
+
+        result = inv._synthesize_node(self._state(sub_questions))
+
+        assert "€412 million" in captured["user_prompt"]
+        assert "€398 million" in captured["user_prompt"]
+        assert result["final_report"] == "# Report\nSynthesized."
+
+    @pytest.mark.parametrize("query", [
+        "Compare the key findings and identify conflicts",
+        "Are there any contradictions between the sources?",
+        "Is there a discrepancy in the reported figures?",
+    ])
+    def test_a_conflict_question_fetches_the_whole_workspace(self, monkeypatch, query):
+        """R2-7 exact repro: 'identify conflicts' must not miss a planted
+        pair just because that document's chunk wasn't retrieved."""
+        from app.graph import investigation as inv
+
+        sub_questions = [{
+            "question": "Q1", "purpose": "p", "partial_answer": "Answer",
+            "retrieved_chunks": [{"document_id": "doc-a"}],
+        }]
+
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
+            assert whole_workspace is True
+            return [
+                {"a": {"document_name": "A", "page_number": 1, "sentence": "Revenue €412M."},
+                 "b": {"document_name": "B", "page_number": 1, "sentence": "Revenue €398M."}, "score": 0.9},
+                {"a": {"document_name": "A", "page_number": 2, "sentence": "CEO since March 2021."},
+                 "b": {"document_name": "C", "page_number": 1, "sentence": "CEO since January 2022."}, "score": 0.9},
+            ]
+
+        captured: dict = {}
+        monkeypatch.setattr(inv, "_fetch_investigation_conflicts", fake_fetch)
+        monkeypatch.setattr(inv, "_run_llm", lambda sp, up, **kw: captured.setdefault("user_prompt", up) or "# Report")
+
+        inv._synthesize_node(self._state(sub_questions, query=query))
+
+        assert "€412M" in captured["user_prompt"] and "€398M" in captured["user_prompt"]
+        assert "March 2021" in captured["user_prompt"] and "January 2022" in captured["user_prompt"]
+
+    def test_no_retrieved_documents_and_no_conflict_question_skips_the_lookup(self, monkeypatch):
+        from app.graph import investigation as inv
+
+        called: list[bool] = []
+
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
+            called.append(True)
+            return []
+
+        monkeypatch.setattr(inv, "_fetch_investigation_conflicts", fake_fetch)
+        monkeypatch.setattr(inv, "_run_llm", lambda *a, **kw: "# Report")
+
+        inv._synthesize_node(self._state([
+            {"question": "Q", "purpose": "p", "partial_answer": "A", "retrieved_chunks": []},
+        ]))
+
+        assert called == []
+
+    def test_a_lookup_failure_falls_back_to_no_known_conflicts(self, monkeypatch):
+        """A Radar/DB hiccup must never break report synthesis."""
+        from app.graph import investigation as inv
+
+        async def fake_fetch(workspace_id, document_ids, whole_workspace):
+            raise RuntimeError("db unavailable")
+
+        captured: dict = {}
+
+        def fake_run_llm(system_prompt, user_prompt, **kwargs):
+            captured["user_prompt"] = user_prompt
+            return "# Report"
+
+        monkeypatch.setattr(inv, "_fetch_investigation_conflicts", fake_fetch)
+        monkeypatch.setattr(inv, "_run_llm", fake_run_llm)
+
+        result = inv._synthesize_node(self._state([
+            {
+                "question": "Q", "purpose": "p", "partial_answer": "A",
+                "retrieved_chunks": [{"document_id": "d1"}, {"document_id": "d2"}],
+            },
+        ]))
+
+        assert result["final_report"] == "# Report"
+        assert inv.CONFLICTS_NONE_TEXT in captured["user_prompt"]
 
 
 class TestBuildGraph:

@@ -130,13 +130,16 @@ async def register(
     if email_exists.scalar_one_or_none() or user_exists.scalar_one_or_none():
         raise ConflictException("Email or username already registered")
 
-    # Create user
+    # Create user. R2-12: registering signs the user in immediately (it sets
+    # auth cookies below), so last_login_at should reflect that instead of
+    # staying "Never" until a later, separate login.
     user = User(
         email=body.email,
         username=body.username,
         password_hash=hash_password(body.password),
         role="user",
         is_active=True,
+        last_login_at=datetime.now(timezone.utc),
     )
     db.add(user)
     await db.flush()

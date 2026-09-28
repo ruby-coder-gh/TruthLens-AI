@@ -318,7 +318,7 @@ async def _resolve_active_prompt() -> Any | None:
 
 async def evaluate_pipeline(
     ollama_url: str = "http://localhost:11434",
-    model: str = "qwen3:4b",
+    model: str = "qwen3:4b-instruct",
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Run golden dataset evaluation against the RAG pipeline.

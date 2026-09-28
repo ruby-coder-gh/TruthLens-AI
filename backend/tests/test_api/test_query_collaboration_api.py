@@ -108,6 +108,40 @@ async def test_answer_comparison_persists_rerun_and_returns_source_diff_and_trus
 
 
 @pytest.mark.asyncio
+async def test_answer_comparison_persists_the_rerun_truth_lens_claims(
+    client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    from app.models.query_claims import QueryClaims
+
+    workspace_id, [original, *_] = await _seed_queries(client, auth_headers, test_db, count=1)
+    claim = {
+        "text": "A revised answer here.", "start": 0, "end": 22, "verdict": "partial",
+        "entailment": 0.4, "contradiction": 0.1, "source_index": 1, "chunk_id": "source-0",
+        "document_id": "doc-0", "document_name": "Doc 0", "page_number": None, "evidence": "Shared source",
+    }
+
+    async def fake_rerun(**_: object):
+        return {
+            "query_id": str(uuid.uuid4()),
+            "response_text": "A revised answer here.",
+            "contexts": [{"chunk_id": "source-0", "document_id": "doc-0", "content": "Shared source"}],
+            "guardrail_result": {"passed": False, "score": 0.6, "claims": [claim]},
+        }
+
+    monkeypatch.setattr("app.api.queries._run_fresh_query", fake_rerun)
+    response = await client.post(f"/api/workspaces/{workspace_id}/queries/{original.id}/compare", headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rerun"]["claims"] == [claim]
+    assert body["original"]["claims"] is None
+    row = (
+        await test_db.execute(select(QueryClaims).where(QueryClaims.query_id == body["rerun"]["id"]))
+    ).scalar_one()
+    assert json.loads(row.claims) == [claim]
+
+
+@pytest.mark.asyncio
 async def test_answer_comparison_persists_prompt_version_and_token_counts(
     client: AsyncClient, auth_headers: dict[str, str], test_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):

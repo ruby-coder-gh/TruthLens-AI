@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -23,10 +24,17 @@ import {
 } from '../components/ui';
 import { PageHeader, PageShell } from '../components/PageWrappers';
 import { reviewQueueApi, workspaceApi } from '../api/client';
-import type { GoldenCategory, QuarantinedChunk, ReviewQueueItem } from '../api/types';
+import type { GoldenCategory, QuarantinedChunk, ReviewQueueItem, WorkspaceMember } from '../api/types';
 import { useAuth } from '../context/auth-context';
 import { useToast } from '../components/toast-context';
 import { getTrustBadgeColor } from '../utils/relevance';
+
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces
+// (this page has no citation-chip renderer) — show the same bracketed
+// number the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -97,11 +105,14 @@ function TrustBreakdown({ item }: { item: ReviewQueueItem }) {
 function QuarantineRow({
   chunk,
   busy,
+  canModerate,
   onRelease,
   onDismiss,
 }: {
   chunk: QuarantinedChunk;
   busy: boolean;
+  /** R2-6: viewers can read the quarantine list, but release/dismiss are editor-only. */
+  canModerate: boolean;
   onRelease: () => void;
   onDismiss: () => void;
 }) {
@@ -136,14 +147,16 @@ function QuarantineRow({
           )}
         </div>
 
-        <div className="flex w-full flex-wrap gap-2 sm:max-w-xs sm:flex-col sm:items-stretch">
-          <Button size="sm" variant="secondary" disabled={busy} onClick={onRelease}>
-            <CheckCircle2 size={13} /> Release
-          </Button>
-          <Button size="sm" variant="ghost" loading={busy} onClick={onDismiss}>
-            <XCircle size={13} /> Dismiss chunk
-          </Button>
-        </div>
+        {canModerate && (
+          <div className="flex w-full flex-wrap gap-2 sm:max-w-xs sm:flex-col sm:items-stretch">
+            <Button size="sm" variant="secondary" disabled={busy} onClick={onRelease}>
+              <CheckCircle2 size={13} /> Release
+            </Button>
+            <Button size="sm" variant="ghost" loading={busy} onClick={onDismiss}>
+              <XCircle size={13} /> Dismiss chunk
+            </Button>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -171,7 +184,9 @@ function PromoteGoldenModal({
   // than bake it in. Start the field empty and make the reviewer write one.
   const isAbstention = Boolean(item.edge_case);
   const [category, setCategory] = useState<GoldenCategory>('answerable');
-  const [referenceAnswer, setReferenceAnswer] = useState(isAbstention ? '' : item.response_text ?? '');
+  const [referenceAnswer, setReferenceAnswer] = useState(
+    isAbstention ? '' : stripCitationMarkers(item.response_text ?? ''),
+  );
   const [difficulty, setDifficulty] = useState('1');
   const [notes, setNotes] = useState('');
   const [touched, setTouched] = useState(false);
@@ -275,6 +290,7 @@ function PromoteGoldenModal({
 export default function ReviewQueuePage() {
   const { id: workspaceId } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState('queue');
@@ -285,6 +301,7 @@ export default function ReviewQueuePage() {
   const [quarantineError, setQuarantineError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [workspaceOwner, setWorkspaceOwner] = useState<string | null>(null);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [acting, setActing] = useState<string | null>(null);
   const [quarantineActing, setQuarantineActing] = useState<string | null>(null);
@@ -298,12 +315,13 @@ export default function ReviewQueuePage() {
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setLoading(true);
-      Promise.all([reviewQueueApi.list(workspaceId), workspaceApi.get(workspaceId)])
-        .then(([queue, workspace]) => {
+      Promise.all([reviewQueueApi.list(workspaceId), workspaceApi.get(workspaceId), workspaceApi.listMembers(workspaceId)])
+        .then(([queue, workspace, memberList]) => {
           if (cancelled) return;
           setItems(queue.data);
           setEnabled(Boolean(queue.meta.enabled));
           setWorkspaceOwner(workspace.owner_id);
+          setMembers(memberList.data);
         })
         .finally(() => {
           if (!cancelled) setLoading(false);
@@ -315,8 +333,9 @@ export default function ReviewQueuePage() {
     };
   }, [workspaceId]);
 
-  // Quarantine is its own request so a 403 (viewer role) or a disabled scanner
-  // never blanks the main review queue.
+  // Quarantine is its own request so a disabled scanner (or any other
+  // failure) never blanks the main review queue. Viewers can read this list
+  // (C4) — only the release/dismiss mutations below are editor-only.
   useEffect(() => {
     if (!workspaceId) return undefined;
     let cancelled = false;
@@ -344,6 +363,15 @@ export default function ReviewQueuePage() {
     };
   }, [workspaceId]);
 
+  // R2-6: a viewer role is read-only here — the server already rejects the
+  // mutation with 403, but the buttons still offered it, and (BUG-R2-6) the
+  // rejection had no catch, so it just failed silently with the card left
+  // stuck in place. Gate the controls client-side, and surface the server's
+  // real message on any 403 that still gets through.
+  const isOwner = workspaceOwner === user?.id;
+  const myRole = members.find((m) => m.user_id === user?.id)?.role;
+  const canModerate = isOwner || myRole === 'editor';
+
   const review = useCallback(
     async (item: ReviewQueueItem, status: 'reviewed' | 'dismissed') => {
       if (!workspaceId) return;
@@ -354,11 +382,17 @@ export default function ReviewQueuePage() {
           review_note: notes[item.id]?.trim() || undefined,
         });
         setItems((current) => current.filter((entry) => entry.id !== item.id));
+        // BUG-51: the sidebar's "N to review" badge (Layout.tsx) is a
+        // separate react-query cache entry — it kept showing the stale
+        // count after Mark reviewed/Dismiss without this.
+        queryClient.invalidateQueries({ queryKey: ['review-queue', workspaceId, 'count'] });
+      } catch (reason) {
+        addToast(reason instanceof Error ? reason.message : 'Could not update this review.', 'error');
       } finally {
         setActing(null);
       }
     },
-    [workspaceId, notes],
+    [workspaceId, notes, queryClient, addToast],
   );
 
   const toggleEnabled = useCallback(async () => {
@@ -547,7 +581,7 @@ export default function ReviewQueuePage() {
                         </span>
                       </div>
                       <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-text-muted">
-                        {item.response_text || 'No answer text was persisted.'}
+                        {item.response_text ? stripCitationMarkers(item.response_text) : 'No answer text was persisted.'}
                       </p>
                       <TrustBreakdown item={item} />
                     </div>
@@ -562,21 +596,25 @@ export default function ReviewQueuePage() {
                         placeholder="Review note (optional)…"
                       />
                       <div className="flex flex-wrap gap-2">
-                        <Button size="sm" loading={acting === item.id} onClick={() => void review(item, 'reviewed')}>
-                          <CheckCircle2 size={13} /> Mark reviewed
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={acting === item.id}
-                          onClick={() => void review(item, 'dismissed')}
-                        >
-                          <XCircle size={13} /> Dismiss
-                        </Button>
-                        {!item.golden_entry_id && (
-                          <Button size="sm" variant="ghost" onClick={() => openPromote(item)}>
-                            <Sparkles size={13} /> Promote to golden set
-                          </Button>
+                        {canModerate && (
+                          <>
+                            <Button size="sm" loading={acting === item.id} onClick={() => void review(item, 'reviewed')}>
+                              <CheckCircle2 size={13} /> Mark reviewed
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={acting === item.id}
+                              onClick={() => void review(item, 'dismissed')}
+                            >
+                              <XCircle size={13} /> Dismiss
+                            </Button>
+                            {!item.golden_entry_id && (
+                              <Button size="sm" variant="ghost" onClick={() => openPromote(item)}>
+                                <Sparkles size={13} /> Promote to golden set
+                              </Button>
+                            )}
+                          </>
                         )}
                         <Link to={`/workspaces/${workspaceId}/queries/${item.id}?compare=true`}>
                           <Button size="sm" variant="ghost">
@@ -618,6 +656,7 @@ export default function ReviewQueuePage() {
                 key={chunk.id}
                 chunk={chunk}
                 busy={quarantineActing === chunk.id}
+                canModerate={canModerate}
                 onRelease={() => setReleaseTarget(chunk)}
                 onDismiss={() => void dismissChunk(chunk)}
               />

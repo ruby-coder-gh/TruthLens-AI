@@ -74,7 +74,7 @@ async def run_ingestion_pipeline(
     try:
         # 1. Load
         logger.info("ingestion_phase", phase="load", document_id=document_id)
-        state.pages = await load(state.file_path, state.mime_type)
+        state.pages = await load(state.file_path, state.mime_type, state.original_filename)
         if not state.pages:
             raise ValueError(f"No content extracted from {state.original_filename}")
 

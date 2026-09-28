@@ -12,6 +12,7 @@ const defaultAuthValue: AuthContextValue = {
   login: vi.fn(),
   register: vi.fn(),
   logout: vi.fn(),
+  loginDemo: vi.fn(),
 };
 
 const defaultToastValue: ToastContextValue = {

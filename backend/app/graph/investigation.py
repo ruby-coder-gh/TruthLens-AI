@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -26,6 +27,7 @@ from app.generation.citer import cite
 from app.generation.generator import GenerationInput, GenerationResult, generate as generate_answer
 from app.generation.provider import get_chat_llm
 from app.generation.guardrail import GuardrailResult, check as guardrail_check
+from app.graph import investigation_progress
 from app.retrieval.hybrid_search import hybrid_search
 from app.retrieval.reranker import rerank
 from app.utils.logger import logger
@@ -68,6 +70,11 @@ class InvestigationState(TypedDict):
     query_id: str
     top_k: int
     filters: dict | None
+    # Set when the caller (API layer) already created the durable row and
+    # wants step-level progress reported into `investigation_progress` as the
+    # graph runs (BUG-10). `None` for direct/test invocations — every node
+    # guards on it before touching the registry.
+    investigation_id: str | None
 
     # Decomposition
     sub_questions: list[dict[str, Any]]  # Serialized SubQuestion dicts
@@ -91,8 +98,8 @@ class InvestigationState(TypedDict):
 
 DECOMPOSITION_PROMPT = """You are a research question decomposition assistant.
 
-Given a complex user question, break it down into 3-6 specific sub-questions
-that together cover all aspects needed to answer the original question thoroughly.
+Given a complex user question, break it down into a small number of specific
+sub-questions (enough to cover the question thoroughly, but no more than needed).
 
 For each sub-question, provide:
 1. A clear, standalone question optimized for document search
@@ -112,15 +119,60 @@ Original question: {query}
 Sub-question findings:
 {sub_findings}
 
+Known contradictions among the retrieved documents (from Contradiction Radar):
+{conflicts}
+
 Your task: Synthesize these findings into a comprehensive, well-structured report.
 Organize it with:
 1. **Executive Summary** — 2-3 sentence overview of the answer
-2. **Detailed Findings** — Organized by theme, with evidence from each sub-question
-3. **Key Sources** — List the most important documents or sources referenced
-4. **Confidence Assessment** — Based on the strength of evidence found
+2. **Contradictions Found** — List every item from "Known contradictions" above FIRST,
+   before any other section, and concisely (one or two sentences each): state both
+   sides with their sources. Do not omit any of them, do not pick a side, and do not
+   describe the corpus as consistent when contradictions are listed above. If none are
+   listed, say so in one sentence.
+3. **Detailed Findings** — Organized by theme, with evidence from each sub-question
+4. **Key Sources** — List the most important documents or sources referenced
+5. **Confidence Assessment** — Based on the strength of evidence found
 
 Use clear section headings. Cite sources as [source:N] where N corresponds
 to the source number. Be factual and grounded in the evidence provided."""
+
+# R2-7: rendered when no open Radar contradiction touches the investigation's
+# retrieved documents, or the lookup itself failed (never blocks synthesis).
+CONFLICTS_NONE_TEXT = "No known contradictions among the retrieved documents."
+# R2-7: a question that itself asks about conflicts/contradictions/discrepancies
+# gets every open contradiction in the workspace fed into synthesis, not just
+# the ones touching documents a sub-question happened to retrieve.
+_CONFLICT_QUESTION_RE = re.compile(r"\b(?:conflict|contradiction|discrepanc)\w*", re.IGNORECASE)
+
+
+def _format_conflicts_context(conflicts: list[dict[str, Any]]) -> str:
+    """Render open Radar contradictions as synthesis prompt context (R2-7)."""
+    if not conflicts:
+        return CONFLICTS_NONE_TEXT
+    lines = []
+    for c in conflicts:
+        a, b = c["a"], c["b"]
+        lines.append(
+            f'- "{a["sentence"]}" ({a["document_name"]}) vs '
+            f'"{b["sentence"]}" ({b["document_name"]})'
+        )
+    return "\n".join(lines)
+
+
+async def _fetch_investigation_conflicts(
+    workspace_id: str, document_ids: list[str], whole_workspace: bool = False
+) -> list[dict[str, Any]]:
+    """Open Radar contradictions for the investigation's retrieved documents,
+    or every open contradiction in the workspace when `whole_workspace` (the
+    question itself asks about conflicts/contradictions/discrepancies) (R2-7)."""
+    from app.database import async_session_factory
+    from app.radar import open_conflicts_for_workspace
+
+    async with async_session_factory() as db:
+        return await open_conflicts_for_workspace(
+            db, workspace_id, document_ids=None if whole_workspace else set(document_ids)
+        )
 
 
 # ─── Helper: run LLM call ─────────────────────────────────────────────────────
@@ -185,6 +237,7 @@ def _decompose_node(state: InvestigationState) -> dict:
     """Decompose the complex question into sub-questions."""
     start_time = time.time()
     query = state["query"]
+    investigation_id = state.get("investigation_id")
 
     trace_step = ReasoningStep(
         phase="decompose",
@@ -199,7 +252,7 @@ def _decompose_node(state: InvestigationState) -> dict:
             "You are a precise question decomposition assistant. Always return valid JSON.",
             prompt,
             temperature=0.3,
-            max_tokens=1536,
+            max_tokens=settings.INVESTIGATION_DECOMPOSE_MAX_TOKENS,
         )
 
         parsed = _try_parse_json(response)
@@ -208,6 +261,11 @@ def _decompose_node(state: InvestigationState) -> dict:
             # Fallback: create a single sub-question from the original query
             parsed = [{"question": query, "purpose": "Answer the original question directly"}]
 
+        # BUG-10: a small local model doesn't reliably respect the prompt's
+        # "small number" hint, and every extra sub-question is a full
+        # retrieval+generation round-trip — enforce the cap in code.
+        parsed = parsed[: settings.INVESTIGATION_MAX_SUB_QUESTIONS]
+
         sub_questions = []
         for i, sq in enumerate(parsed):
             sub_questions.append(asdict(SubQuestion(
@@ -215,6 +273,9 @@ def _decompose_node(state: InvestigationState) -> dict:
                 question=sq.get("question", query),
                 purpose=sq.get("purpose", f"Sub-question {i + 1}"),
             )))
+
+        if investigation_id:
+            investigation_progress.set_sub_questions(investigation_id, [sq["question"] for sq in sub_questions])
 
         trace_step.details = {
             "sub_question_count": len(sub_questions),
@@ -243,6 +304,8 @@ def _decompose_node(state: InvestigationState) -> dict:
             question=query,
             purpose="Answer the original question directly",
         ))]
+        if investigation_id:
+            investigation_progress.set_sub_questions(investigation_id, [sq["question"] for sq in sub_questions])
         return {
             "sub_questions": sub_questions,
             "reasoning_trace": [asdict(trace_step)],
@@ -254,6 +317,8 @@ async def _investigate_sub_question(
     workspace_id: str,
     top_k: int,
     filters: dict | None,
+    investigation_id: str | None = None,
+    index: int = 0,
 ) -> dict[str, Any]:
     """Investigate a single sub-question: retrieve → rerank → generate → guardrail."""
     start_time = time.time()
@@ -267,6 +332,9 @@ async def _investigate_sub_question(
         timestamp_ms=int(time.time() * 1000),
     )
 
+    if investigation_id:
+        investigation_progress.mark_sub_question(investigation_id, index, "running")
+
     try:
         # 1. Hybrid search
         results = await hybrid_search(question, workspace_id, top_k=top_k, filters=filters)
@@ -275,6 +343,8 @@ async def _investigate_sub_question(
         if not results:
             step.details["outcome"] = "no_results"
             elapsed = int((time.time() - start_time) * 1000)
+            if investigation_id:
+                investigation_progress.mark_sub_question(investigation_id, index, "done")
             return {
                 "id": sq_id,
                 "partial_answer": "No relevant documents found for this sub-question.",
@@ -329,6 +399,8 @@ async def _investigate_sub_question(
             "latency_ms": elapsed,
         })
 
+        if investigation_id:
+            investigation_progress.mark_sub_question(investigation_id, index, "done")
         return {
             "id": sq_id,
             "partial_answer": gen_result.text,
@@ -350,6 +422,8 @@ async def _investigate_sub_question(
         elapsed = int((time.time() - start_time) * 1000)
         step.details["outcome"] = "error"
         step.details["error"] = str(e)
+        if investigation_id:
+            investigation_progress.mark_sub_question(investigation_id, index, "done")
         return {
             "id": sq_id,
             "partial_answer": f"Error investigating this sub-question: {e}",
@@ -369,6 +443,7 @@ def _investigate_node(state: InvestigationState) -> dict:
     workspace_id = state["workspace_id"]
     top_k = state.get("top_k", settings.RETRIEVAL_TOP_K)
     filters = state.get("filters")
+    investigation_id = state.get("investigation_id")
 
     if not sub_questions:
         return {"error": "No sub-questions to investigate"}
@@ -378,8 +453,8 @@ def _investigate_node(state: InvestigationState) -> dict:
     # retrieval/generation work instead of relying on get_event_loop().
     async def run_sub_questions() -> list[dict[str, Any]]:
         return await asyncio.gather(*[
-            _investigate_sub_question(sq, workspace_id, top_k, filters)
-            for sq in sub_questions
+            _investigate_sub_question(sq, workspace_id, top_k, filters, investigation_id, index)
+            for index, sq in enumerate(sub_questions)
         ])
 
     results = asyncio.run(run_sub_questions())
@@ -425,6 +500,10 @@ def _synthesize_node(state: InvestigationState) -> dict:
     start_time = time.time()
     query = state["query"]
     sub_questions = state.get("sub_questions", [])
+    investigation_id = state.get("investigation_id")
+
+    if investigation_id:
+        investigation_progress.set_step(investigation_id, "synthesize")
 
     trace_step = ReasoningStep(
         phase="synthesize",
@@ -444,13 +523,38 @@ def _synthesize_node(state: InvestigationState) -> dict:
 
     sub_findings = "\n".join(findings_parts)
 
+    # R2-7: feed the workspace's open Radar contradictions into synthesis as
+    # explicit context, so "identify conflicts" reports them instead of the
+    # model having to notice them itself from prose alone. Document-level
+    # (not just the exact chunks a sub-question happened to retrieve) -- and
+    # the *whole* workspace when the question itself asks about conflicts/
+    # contradictions/discrepancies, so a planted pair is never missed just
+    # because retrieval didn't surface its document. A lookup failure must
+    # never break the report.
+    document_ids = sorted({
+        str(c["document_id"])
+        for sq in sub_questions
+        for c in sq.get("retrieved_chunks", [])
+        if c.get("document_id")
+    })
+    whole_workspace = bool(_CONFLICT_QUESTION_RE.search(query))
+    conflicts: list[dict[str, Any]] = []
+    if document_ids or whole_workspace:
+        try:
+            conflicts = asyncio.run(
+                _fetch_investigation_conflicts(state["workspace_id"], document_ids, whole_workspace)
+            )
+        except Exception as e:
+            logger.warning("investigation_conflicts_lookup_failed", error=str(e))
+    conflicts_context = _format_conflicts_context(conflicts)
+
     try:
-        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=sub_findings)
+        prompt = SYNTHESIS_PROMPT.format(query=query, sub_findings=sub_findings, conflicts=conflicts_context)
         report = _run_llm(
             "You are a precise research report synthesizer. Be factual, well-structured, and grounded in evidence.",
             prompt,
             temperature=0.3,
-            max_tokens=2048,
+            max_tokens=settings.INVESTIGATION_SYNTHESIS_MAX_TOKENS,
         )
 
         # Extract citations from the report and map them
@@ -478,6 +582,8 @@ def _synthesize_node(state: InvestigationState) -> dict:
         elapsed = int((time.time() - start_time) * 1000)
         trace_step.details["latency_ms"] = elapsed
         existing_trace = state.get("reasoning_trace", [])
+        if investigation_id:
+            investigation_progress.advance_step(investigation_id, "trust_score")
         return {
             "final_report": report,
             "reasoning_trace": existing_trace + [asdict(trace_step)],
@@ -496,6 +602,8 @@ def _synthesize_node(state: InvestigationState) -> dict:
         report = "\n".join(fallback_parts)
 
         existing_trace = state.get("reasoning_trace", [])
+        if investigation_id:
+            investigation_progress.advance_step(investigation_id, "trust_score")
         return {
             "final_report": report,
             "reasoning_trace": existing_trace + [asdict(trace_step)],
@@ -605,6 +713,7 @@ def run_investigation(
     query_id: str | None = None,
     top_k: int | None = None,
     filters: dict | None = None,
+    investigation_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the full investigation pipeline and return results.
 
@@ -615,6 +724,9 @@ def run_investigation(
         query_id: Optional query ID for tracking.
         top_k: Number of chunks to retrieve per sub-question.
         filters: Optional metadata filters.
+        investigation_id: Durable row id, when the caller already created one
+            and wants step-level progress reported (BUG-10); see
+            `investigation_progress`. `None` for direct/test invocations.
 
     Returns:
         Dict with keys: final_report, trust_score, trust_components,
@@ -631,6 +743,7 @@ def run_investigation(
         "query_id": query_id or str(uuid.uuid4()),
         "top_k": top_k or settings.RETRIEVAL_TOP_K,
         "filters": filters,
+        "investigation_id": investigation_id,
         "sub_questions": [],
         "reasoning_trace": [],
         "final_report": None,

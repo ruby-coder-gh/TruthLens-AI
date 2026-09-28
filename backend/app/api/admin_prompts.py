@@ -707,6 +707,49 @@ async def rollback_prompt_version(
     return _to_response(prompt, await _linked_run(db, prompt))
 
 
+@router.post("/{name}/restore-default", response_model=ActivePromptResponse)
+async def restore_default_prompt(
+    name: str,
+    user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retire the active version for `name` so generation falls back to the
+    built-in `DEFAULT_SYSTEM_PROMPT` (BUG-39). There is no `PromptVersion` row
+    for the code default, so "restoring" it just means nothing is active —
+    `registry.get_active` already serves the default whenever that's true.
+    Idempotent: calling this with nothing active is a no-op, not an error.
+    """
+    async with _mutation_lock:
+        active = await _current_active(db, name)
+        if active is not None:
+            active.status = "retired"
+            db.add(
+                _audit(
+                    user,
+                    "prompt.restore_default",
+                    active,
+                    {
+                        "name": name,
+                        "from_hash": active.content_hash,
+                        "to_hash": registry.DEFAULT_PROMPT_HASH,
+                    },
+                )
+            )
+            await db.commit()
+            registry.invalidate(name)
+
+    resolved = await registry.get_active(db, name)
+    return ActivePromptResponse(
+        name=name,
+        content=resolved.content,
+        content_hash=resolved.hash,
+        model_name=resolved.model_name,
+        version=None,
+        version_id=resolved.version_id,
+        is_default=resolved.is_default,
+    )
+
+
 @router.delete("/{prompt_id}", status_code=204)
 async def delete_prompt_version(
     prompt_id: str,

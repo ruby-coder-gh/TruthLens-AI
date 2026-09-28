@@ -48,10 +48,14 @@ import { CHART_INITIAL_DIMENSION, toneColor, tooltipStyles, trustBucketColor, us
 // ─── Local types ──────────────────────────────────────────────────────────────
 
 interface EvaluationMetrics {
-  faithfulness: number;
-  answer_relevance: number;
-  context_precision: number;
-  context_recall: number;
+  // BUG-42. `GET /admin/evaluation` returns `EvaluationResponse()` (every
+  // field `None`) before any eval has ever run — a present-but-all-null
+  // object, not a 404/undefined — so these are genuinely nullable, not just
+  // typed that way defensively.
+  faithfulness: number | null;
+  answer_relevance: number | null;
+  context_precision: number | null;
+  context_recall: number | null;
   updated_at?: string;
 }
 
@@ -75,6 +79,8 @@ interface TrustScoreBucket {
 // Backend audit-log actions are exact-match dotted strings like `user.login`,
 // `document.delete`, etc. — bare words (`login`, `delete`, ...) never match
 // anything the API records, so every filter previously returned 0 rows.
+// BUG-36. Kept in sync with `AdminAuditLogPage.tsx` and every `action="…"`
+// string actually written across `backend/app/api/*.py`.
 const ACTION_FILTERS: ActionFilterOption[] = [
   { value: '', label: 'All actions' },
   { value: 'user.login', label: 'User login' },
@@ -91,13 +97,42 @@ const ACTION_FILTERS: ActionFilterOption[] = [
   { value: 'workspace.delete', label: 'Workspace delete' },
   { value: 'workspace.add_member', label: 'Workspace add member' },
   { value: 'workspace.remove_member', label: 'Workspace remove member' },
+  { value: 'workspace.member_role_update', label: 'Workspace member role change' },
   { value: 'document.upload', label: 'Document upload' },
   { value: 'document.delete', label: 'Document delete' },
   { value: 'document.reindex', label: 'Document reindex' },
+  { value: 'document.quarantine', label: 'Document quarantine' },
+  { value: 'document.bulk_delete', label: 'Document bulk delete' },
+  { value: 'document.bulk_reindex', label: 'Document bulk reindex' },
+  { value: 'document.bulk_tag', label: 'Document bulk tag' },
+  { value: 'document.bulk_untag', label: 'Document bulk untag' },
+  { value: 'chunk.dismiss', label: 'Chunk dismiss' },
+  { value: 'chunk.release', label: 'Chunk release' },
   { value: 'investigation.create', label: 'Investigation created' },
   { value: 'investigation.review_update', label: 'Investigation review updated' },
+  { value: 'investigation.audit_export', label: 'Investigation audit export' },
   { value: 'collection.create', label: 'Collection create' },
   { value: 'collection.delete', label: 'Collection delete' },
+  { value: 'query.pin', label: 'Query pin' },
+  { value: 'query.unpin', label: 'Query unpin' },
+  { value: 'query.compare', label: 'Query compare' },
+  { value: 'query.review_update', label: 'Query review update' },
+  { value: 'query.promote_golden', label: 'Query promote to golden' },
+  { value: 'annotation.create', label: 'Annotation create' },
+  { value: 'annotation.update', label: 'Annotation update' },
+  { value: 'annotation.delete', label: 'Annotation delete' },
+  { value: 'receipt.create', label: 'Receipt create' },
+  { value: 'receipt.revoke', label: 'Receipt revoke' },
+  { value: 'radar.scan', label: 'Radar scan' },
+  { value: 'radar.update', label: 'Radar update' },
+  { value: 'golden.approve', label: 'Golden approve' },
+  { value: 'golden.delete', label: 'Golden delete' },
+  { value: 'prompt.promote', label: 'Prompt promote' },
+  { value: 'prompt.rollback', label: 'Prompt rollback' },
+  { value: 'prompt.delete', label: 'Prompt delete' },
+  { value: 'auth.demo_login', label: 'Demo login' },
+  { value: 'audit.export', label: 'Audit export' },
+  { value: 'usage.export', label: 'Usage export' },
 ];
 
 function formatTimestamp(iso: string): string {
@@ -631,7 +666,7 @@ function AuditLogsTab({
             <tr className="border-b border-border bg-card-2/80">
               <th className="px-4 py-3 font-medium text-text-muted w-10" />
               <th className="px-4 py-3 font-medium text-text-muted">Timestamp</th>
-              <th className="px-4 py-3 font-medium text-text-muted">User ID</th>
+              <th className="px-4 py-3 font-medium text-text-muted">User</th>
               <th className="px-4 py-3 font-medium text-text-muted">Action</th>
               <th className="px-4 py-3 font-medium text-text-muted">Resource</th>
               <th className="px-4 py-3 font-medium text-text-muted">Details</th>
@@ -667,14 +702,21 @@ function AuditLogsTab({
                   <td className="whitespace-nowrap px-4 py-3 text-text tabular-nums">
                     {formatTimestamp(entry.created_at)}
                   </td>
-                  {/* `user_id` is an `ondelete=SET NULL` FK — deleting a user
-                      must not white-screen the activity table. */}
-                  <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                    {!entry.user_id
-                      ? '—'
-                      : entry.user_id.length > 12
-                        ? `${entry.user_id.slice(0, 12)}…`
-                        : entry.user_id}
+                  {/* BUG-36: show the resolved username, same as the
+                      dedicated audit-log page — the raw `user_id` is only a
+                      fallback for older responses or a deleted user (an
+                      `ondelete=SET NULL` FK, which must not white-screen
+                      this table). */}
+                  <td className="px-4 py-3 text-xs text-text-muted">
+                    {entry.user_name ?? (
+                      <span className="font-mono">
+                        {!entry.user_id
+                          ? '—'
+                          : entry.user_id.length > 12
+                            ? `${entry.user_id.slice(0, 12)}…`
+                            : entry.user_id}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <Badge color={actionBadgeColor(entry.action)}>
@@ -816,7 +858,17 @@ function EvaluationTab({
     );
   }
 
-  if (!metrics) {
+  const scoreEntries: { label: string; value: number | null; key: string }[] = metrics ? [
+    { label: 'Faithfulness', value: metrics.faithfulness, key: 'faithfulness' },
+    { label: 'Answer Relevance', value: metrics.answer_relevance, key: 'answer_relevance' },
+    { label: 'Context Precision', value: metrics.context_precision, key: 'context_precision' },
+    { label: 'Context Recall', value: metrics.context_recall, key: 'context_recall' },
+  ] : [];
+
+  // BUG-42. The endpoint returns a present object with every field `null`
+  // before any eval has run — not `undefined` — so "no data" has to be
+  // judged by content, not by object identity.
+  if (!metrics || scoreEntries.every((entry) => entry.value === null)) {
     return (
       <motion.div
         variants={fadeIn}
@@ -837,13 +889,6 @@ function EvaluationTab({
       </motion.div>
     );
   }
-
-  const scoreEntries: { label: string; value: number; key: string }[] = [
-    { label: 'Faithfulness', value: metrics.faithfulness, key: 'faithfulness' },
-    { label: 'Answer Relevance', value: metrics.answer_relevance, key: 'answer_relevance' },
-    { label: 'Context Precision', value: metrics.context_precision, key: 'context_precision' },
-    { label: 'Context Recall', value: metrics.context_recall, key: 'context_recall' },
-  ];
 
   return (
     <motion.div
@@ -877,7 +922,10 @@ function EvaluationTab({
       {/* Score cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         {scoreEntries.map((entry) => {
-          const pct = Math.round(entry.value * 100);
+          // Destructured to a local so TS narrows `null` out of it directly,
+          // rather than through a boolean alias of a property access.
+          const { value } = entry;
+          const pct = value === null ? 0 : Math.round(value * 100);
           return (
             <motion.div key={entry.key} variants={staggerItem}>
               <Card>
@@ -887,12 +935,12 @@ function EvaluationTab({
                   </span>
                   <motion.span
                     className="text-lg font-bold tabular-nums"
-                    style={{ color: evalScoreColor(entry.value) }}
+                    style={value === null ? undefined : { color: evalScoreColor(value) }}
                     initial={{ opacity: 0.99, scale: 0.5 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.4, delay: 0.2, ease: [0.16, 1, 0.3, 1] as const }}
                   >
-                    {pct}%
+                    {value === null ? '—' : `${pct}%`}
                   </motion.span>
                 </div>
                 {/* Custom progress bar. Opaque inset track — a translucent
@@ -901,20 +949,22 @@ function EvaluationTab({
                 <div
                   className="h-2.5 w-full overflow-hidden rounded-full bg-solid ring-1 ring-inset ring-border-light"
                   role="progressbar"
-                  aria-valuenow={pct}
+                  aria-valuenow={value === null ? undefined : pct}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-label={`${entry.label}: ${pct}%`}
+                  aria-label={value === null ? `${entry.label}: not available` : `${entry.label}: ${pct}%`}
                 >
-                  <motion.div
-                    className="h-full rounded-full"
-                    initial={{ width: '0%' }}
-                    animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
-                    // Flat severity fill — a meter's colour states one thing;
-                    // the second hue in the old gradient meant nothing.
-                    style={{ backgroundColor: toneColor(evalScoreTone(entry.value), chart) }}
-                  />
+                  {value === null ? null : (
+                    <motion.div
+                      className="h-full rounded-full"
+                      initial={{ width: '0%' }}
+                      animate={{ width: `${pct}%` }}
+                      transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] as const }}
+                      // Flat severity fill — a meter's colour states one thing;
+                      // the second hue in the old gradient meant nothing.
+                      style={{ backgroundColor: toneColor(evalScoreTone(value), chart) }}
+                    />
+                  )}
                 </div>
               </Card>
             </motion.div>
@@ -922,19 +972,6 @@ function EvaluationTab({
         })}
       </div>
     </motion.div>
-  );
-}
-
-// ─── Background ambient blobs ─────────────────────────────────────────────────
-
-function AmbientBlobs() {
-  return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-      <div className="absolute -top-40 -left-40 h-[500px] w-[500px] rounded-full bg-primary/5 blur-[120px]" />
-      <div className="absolute top-1/3 -right-40 h-[400px] w-[400px] rounded-full bg-accent/5 blur-[100px]" />
-      <div className="absolute -bottom-40 left-1/3 h-[450px] w-[450px] rounded-full bg-accent-2/5 blur-[110px]" />
-      <div className="absolute top-2/3 left-1/4 h-[300px] w-[300px] rounded-full bg-gold/5 blur-[90px]" />
-    </div>
   );
 }
 
@@ -1052,7 +1089,6 @@ export default function AdminDashboard() {
 
   return (
     <>
-      <AmbientBlobs />
       <motion.div
         className="relative z-0"
         variants={pageTransition}
@@ -1135,8 +1171,10 @@ export default function AdminDashboard() {
                 className="text-xl font-bold tabular-nums"
                 style={{ color: getTrustColorVar(stats.avg_trust_score) }}
               >
+                {/* BUG-50/C8: trust is 0-100 everywhere in the UI — this was
+                    the one place still showing the raw 0-1 score. */}
                 {stats.avg_trust_score != null
-                  ? stats.avg_trust_score.toFixed(2)
+                  ? `${Math.round(stats.avg_trust_score * 100)}/100`
                   : 'N/A'}
               </span>
               <Badge color={stats.avg_trust_score == null ? 'gray' : getTrustBadgeColor(stats.avg_trust_score)}>

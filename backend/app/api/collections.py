@@ -22,6 +22,7 @@ from app.schemas.collection import (
     CollectionResponse,
     CollectionAccessGrant,
     CollectionAccessResponse,
+    CollectionDocumentsUpdate,
 )
 from app.schemas.common import ListResponse
 
@@ -366,3 +367,111 @@ async def list_collection_access(
         )
         for e in entries
     ])
+
+
+@router.put("/workspaces/{workspace_id}/collections/{collection_id}/documents", response_model=CollectionResponse)
+async def add_collection_documents(
+    workspace_id: str,
+    collection_id: str,
+    body: CollectionDocumentsUpdate,
+    workspace: Workspace = Depends(check_workspace_access),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign documents to a collection (workspace owner or collection creator).
+
+    BUG-18. A document belongs to at most one collection (`Document.collection_id`
+    is a single FK), so assigning here moves it out of any other collection it
+    was already in.
+    """
+    result = await db.execute(
+        select(Collection).where(Collection.id == collection_id, Collection.workspace_id == workspace_id)
+    )
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise NotFoundException("Collection", collection_id)
+
+    if workspace.owner_id != current_user.id and collection.created_by != current_user.id:
+        raise ForbiddenException("Only workspace owner or collection creator can add documents")
+
+    docs_result = await db.execute(
+        select(Document).where(Document.id.in_(body.document_ids), Document.workspace_id == workspace_id)
+    )
+    docs = docs_result.scalars().all()
+    found_ids = {d.id for d in docs}
+    missing = [doc_id for doc_id in body.document_ids if doc_id not in found_ids]
+    if missing:
+        raise NotFoundException("Document", missing[0])
+
+    for doc in docs:
+        doc.collection_id = collection_id
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="collection.documents_add",
+        resource_type="collection",
+        resource_id=collection_id,
+        details=json.dumps({"document_ids": sorted(found_ids)}),
+    ))
+
+    await db.flush()
+    await db.refresh(collection)
+
+    doc_count = await db.execute(
+        select(func.count(Document.id)).where(Document.collection_id == collection_id)
+    )
+
+    return CollectionResponse(
+        id=collection.id,
+        workspace_id=collection.workspace_id,
+        name=collection.name,
+        description=collection.description,
+        created_by=collection.created_by,
+        document_count=doc_count.scalar() or 0,
+        created_at=collection.created_at,
+        updated_at=collection.updated_at,
+    )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/collections/{collection_id}/documents/{document_id}", status_code=204
+)
+async def remove_collection_document(
+    workspace_id: str,
+    collection_id: str,
+    document_id: str,
+    workspace: Workspace = Depends(check_workspace_access),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unassign one document from a collection (workspace owner or collection creator)."""
+    result = await db.execute(
+        select(Collection).where(Collection.id == collection_id, Collection.workspace_id == workspace_id)
+    )
+    collection = result.scalar_one_or_none()
+    if not collection:
+        raise NotFoundException("Collection", collection_id)
+
+    if workspace.owner_id != current_user.id and collection.created_by != current_user.id:
+        raise ForbiddenException("Only workspace owner or collection creator can remove documents")
+
+    doc_result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.workspace_id == workspace_id,
+            Document.collection_id == collection_id,
+        )
+    )
+    doc = doc_result.scalar_one_or_none()
+    if not doc:
+        raise NotFoundException("Document", document_id)
+
+    doc.collection_id = None
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="collection.documents_remove",
+        resource_type="collection",
+        resource_id=collection_id,
+        details=json.dumps({"document_id": document_id}),
+    ))

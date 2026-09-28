@@ -30,6 +30,11 @@ class Workspace(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     comparisons = relationship("Comparison", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     query_pins = relationship("QueryPin", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
     annotations = relationship("Annotation", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    receipts = relationship("Receipt", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    radar_scans = relationship("RadarScan", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan")
+    contradictions = relationship(
+        "Contradiction", back_populates="workspace", lazy="selectin", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name={self.name})>"

@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends
 
 from app.core.deps import check_workspace_access, check_workspace_owner, get_current_user, get_db
-from app.core.exceptions import ConflictException, ForbiddenException, InvalidInputException, NotFoundException
+from app.core.exceptions import (
+    AppException,
+    ConflictException,
+    ForbiddenException,
+    InvalidInputException,
+    NotFoundException,
+)
 from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.query import Query
@@ -236,7 +242,8 @@ async def add_member(
         result = await db.execute(select(User).where(User.email == body.email))
         user = result.scalar_one_or_none()
         if not user:
-            raise NotFoundException("User", body.email)
+            # C2 contract: exact message the email-invite UI matches on.
+            raise AppException("NOT_FOUND", "No user with that email", status_code=404)
         user_id = user.id
 
     # Check user exists
@@ -305,9 +312,18 @@ async def update_member_role(
     if member.role == "owner":
         raise ForbiddenException("Cannot change owner's role")
 
+    old_role = member.role
     member.role = body.role
     await db.flush()
     await db.refresh(member)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="workspace.member_role_update",
+        resource_type="workspace_member",
+        resource_id=member.id,
+        details=json.dumps({"user_id": user_id, "old_role": old_role, "new_role": body.role}),
+    ))
 
     # Get user info
     user_result = await db.execute(select(User).where(User.id == user_id))

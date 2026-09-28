@@ -345,7 +345,11 @@ async def list_quarantined_chunks(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List chunks quarantined at ingestion time for a workspace (editor role).
+    """List chunks quarantined at ingestion time for a workspace.
+
+    C4: any workspace member (including a viewer) may READ this list —
+    `check_workspace_access` above already enforces membership. Only the
+    release/dismiss mutations below require editor.
 
     Joins `Document.original_filename` explicitly rather than walking the
     `ChunkQuarantine.document` relationship (which is `lazy="raise"`) —
@@ -353,7 +357,6 @@ async def list_quarantined_chunks(
     objects here would eagerly pull every full chunk body for every listed
     document's source document.
     """
-    await require_workspace_editor(workspace=workspace, current_user=current_user, db=db)
     page_size = max(MIN_PAGE_SIZE, min(page_size, MAX_PAGE_SIZE))
 
     filters = [ChunkQuarantine.workspace_id == workspace.id]

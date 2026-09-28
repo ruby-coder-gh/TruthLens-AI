@@ -686,3 +686,20 @@ class TestGenerateNodePromptPinning:
         assert out["prompt_version"] == "hash-from-generator"
         assert out["token_count"] == 9
         assert out["prompt_tokens"] == 77
+
+
+async def test_query_graph_guardrail_node_carries_truth_lens_claims(monkeypatch):
+    """The compare re-run persists claims, so the graph state has to keep them."""
+    from app.generation.guardrail import GuardrailResult
+    from app.graph import query_graph
+
+    claims = [{"text": "Revenue grew 12%.", "verdict": "supported"}]
+
+    async def fake_check(answer, contexts):
+        return GuardrailResult(passed=True, score=0.9, claims=claims)
+
+    monkeypatch.setattr(query_graph, "guardrail_check", fake_check)
+
+    out = await query_graph._guardrail_node({"response_text": "Revenue grew 12%.", "contexts": [{"content": "x"}]})
+
+    assert out["guardrail_result"]["claims"] == claims
