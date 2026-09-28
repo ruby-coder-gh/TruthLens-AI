@@ -31,7 +31,7 @@ from app.core.exceptions import (
     TooLargeException,
     UnsupportedTypeException,
 )
-from app.ingestion.locate import locate_in_pdf
+from app.ingestion.locate import find_text_offsets, locate_in_pdf
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
 from app.models.contradiction import Contradiction
@@ -46,6 +46,7 @@ from app.schemas.document import (
     DocumentDetailResponse,
     DocumentResponse,
     DocumentStatusResponse,
+    TextHighlight,
 )
 from app.query_cache import bump_workspace_document_version
 from app.utils.logger import logger
@@ -629,6 +630,15 @@ async def locate_chunk(
     )
     next_chunk = next_result.scalar_one_or_none()
 
+    # K2: text mode + `?text=` — mark only that span inside `content`
+    # (whitespace-insensitive), instead of the whole chunk (BUG-17).
+    highlight = None
+    narrow_text = text.strip() if text else ""
+    if narrow_text:
+        offsets = find_text_offsets(chunk.content, narrow_text)
+        if offsets is not None:
+            highlight = TextHighlight(start=offsets[0], end=offsets[1])
+
     return ChunkLocateResponse(
         mode="text",
         page_number=None,
@@ -639,6 +649,7 @@ async def locate_chunk(
         content=chunk.content,
         context_before=prev_chunk.content[-CONTEXT_CHARS:] if prev_chunk else None,
         context_after=next_chunk.content[:CONTEXT_CHARS] if next_chunk else None,
+        highlight=highlight,
     )
 
 

@@ -91,6 +91,23 @@ def _search_page(page: Any, content: str) -> list[list[float]]:
     return _merge_overlapping(rects)
 
 
+def find_text_offsets(content: str, text: str) -> tuple[int, int] | None:
+    """Character offsets of `text` inside `content` (text mode locate, K2).
+
+    Whitespace-insensitive: runs of whitespace in `text` match any run of
+    whitespace in `content` (a stored chunk may wrap/collapse newlines
+    differently than the sentence a claim or Radar pair quotes), but the
+    returned offsets index into `content` unmodified. Returns None if `text`
+    is empty or not found.
+    """
+    words = text.split()
+    if not words:
+        return None
+    pattern = r"\s+".join(re.escape(w) for w in words)
+    match = re.search(pattern, content)
+    return (match.start(), match.end()) if match else None
+
+
 def locate_in_pdf(file_path: Path, page_number_hint: int | None, content: str) -> dict[str, Any]:
     """Find where `content` sits in the PDF at `file_path`.
 

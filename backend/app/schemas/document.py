@@ -138,6 +138,13 @@ class BulkDocumentResponse(BaseModel):
 # ─── Source viewer (L7/L8) ────────────────────────────────────────────────────
 
 
+class TextHighlight(BaseModel):
+    """Character offsets of a matched span inside `ChunkLocateResponse.content`."""
+
+    start: int
+    end: int
+
+
 class ChunkLocateResponse(BaseModel):
     """Where a chunk's text lives in its source document, for the viewer."""
 
@@ -150,3 +157,6 @@ class ChunkLocateResponse(BaseModel):
     content: str
     context_before: str | None = None
     context_after: str | None = None
+    # K2: text mode + `?text=` — offsets of that text inside `content`. None
+    # in PDF mode (page rects carry the highlight there) or when unmatched.
+    highlight: TextHighlight | None = None
