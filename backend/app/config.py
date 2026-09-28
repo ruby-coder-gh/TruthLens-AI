@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # ─── App ───────────────────────────────────
-    APP_NAME: str = "VeritasRAG"
+    APP_NAME: str = "TruthLens AI"
     APP_VERSION: str = "0.1.0"
     APP_ENV: Literal["development", "production"] = "development"
     APP_SECRET_KEY: str
