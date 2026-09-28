@@ -136,6 +136,33 @@ describe('GlobalSearch', () => {
     expect(screen.queryByText(/application\/vnd/i)).not.toBeInTheDocument();
   });
 
+  it('cleans up the real "filename · mime · status" combined snippet, not just a bare MIME string (BUG-53 residual)', async () => {
+    mockSearch.mockResolvedValue({
+      data: [{
+        id: 'd-2',
+        resource_type: 'document',
+        workspace_id: 'ws-1',
+        workspace_name: 'Northwind Renewables',
+        title: 'Board Memorandum: Aurora Offshore Wind Project Update.docx',
+        snippet:
+          'Board Memorandum: Aurora Offshore Wind Project Update.docx · application/vnd.openxmlformats-officedocument.wordprocessingml.document · ready',
+        score: 0.8,
+      }],
+      meta: { page: 1, page_size: 50, total: 1, workspace_count: 1 },
+    });
+    const user = userEvent.setup();
+    renderHarness();
+
+    await user.click(screen.getByRole('button', { name: /search all accessible workspaces/i }));
+    await user.type(screen.getByPlaceholderText(/search questions/i), 'memorandum');
+
+    expect(await screen.findByText('DOCX document · ready')).toBeInTheDocument();
+    expect(screen.queryByText(/application\/vnd/i)).not.toBeInTheDocument();
+    // The filename is already the result's own title — it shouldn't repeat
+    // a second time inside the snippet.
+    expect(screen.queryByText(/Board Memorandum.*docx · DOCX document/i)).not.toBeInTheDocument();
+  });
+
   it('strips raw [source:N] markers from result snippets (BUG-9)', async () => {
     mockSearch.mockResolvedValue({
       data: [{
