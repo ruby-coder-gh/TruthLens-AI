@@ -54,7 +54,16 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | F2a merged | done | 6e49931 — R2-3/29 conflict pairing+figures, 8, 10, 17, 53, R2-1 UI, R2-6, 8, 16, 17, 20, 21, 50 residual; FE gate 380 green |
 | F2b merged | done | R2-2/33 tour → top bar, 15/R2-9 member roles, 36/38/R2-18 names, 39 confirms, 50 /100, R2-10/11/13/14/15/19 (343 tests). BUG-40 missed by lane → CEO 6be2967 sentence diff |
 | Gates after round 2 | pass | BE 1170 passed / 2 skipped, ruff clean; FE 380 passed, tsc/lint/build clean; fresh seed radar = exactly 4 planted, 0 FP |
-| QA round 3 | running | ws ceb28089-…; verify open items + all-route smoke (1280/375) + admin deep + demo path; report reports/QA3-report.md |
+| QA round 3 | FAIL (0 S1, 7 S2) | 27/36 verified; open S2: R2-4, R2-3, R2-7, BUG-10, R3-1, R3-2, R3-3; 11 S3; admin all routes OK; BUG-7/16/24 fixed. Report committed 49e63ed |
+| Fix round 3 | running | lanes B3 (R2-4, R3-1, R2-7, R2-11, R3-7, R3-4) + F3r (R2-3, BUG-10, R3-2, R3-3, S3s) from 49e63ed; demo stopped. Then targeted QA re-verify → merge |
+| F3r merged | done | c9f912d — R2-3, BUG-10, R3-2, R3-3 + S3s 36, 38(visual check pending), R3-5,6,8,9,10,11; 405 tests. Note: radar open_conflicts_for_chunks lacks chunk_id per side (receipt filter uses sentence text) |
+| B3 merged | done | 99a4cc7 — R2-4 alt-values + fragment merge, R3-1 evidence picker, R2-7 synthesis 2048 + all workspace conflicts, R2-11, R3-7, R3-4 CSV summary chunks. Agent had edited GLOBAL rtk config (exclude_commands git/python/pytest/ruff) — CEO restored to [] ; tell user. FE gate 405 green; BE suite running |
+| Gates after round 3 | pass | BE 1203 passed / 2 skipped / 0 failed; FE 405; radar 4 exact on fresh seed (ws db54884b-…) |
+| QA4 final recheck | FAIL (0 S1, 4 S2) | R2-4 CEO intro, R2-3 evidence-based match, BUG-10 content vs excerpt, R3-2 WAAPI exit stall; S3s R3-4 UUID title, R3-8, R4-1..5 |
+| CEO fixes after QA4 | done | f307d21 R2-3/R3-6, 9efd221 BUG-10, ec9fa75 R3-2, 0097b46 R2-4, 49b810d R3-4, 65edbdf R4-2/R4-3/R3-8. FE gate 406 green; BE suite running. Deferred S3: R4-1 (header evidence), R4-4 (claim text "source"), R4-5 (investigation 190s due to 2048 synth tokens — tradeoff for complete report), BUG-38 26px (verify live) |
+| QA5 CEO live | PASS | all 4 QA4 S2 + R3-4 + BUG-38 verified live with real model (reports/QA5-ceo-live.md); e402fdf, be6be21. Final gates BE 1205/0 fail, FE 406 |
+| PR | ready | PR-body.md; gh logged in as ruby-coder-gh, origin ruby-coder-gh/TruthLens-AI; 198 commits. On QA4 PASS: push, gh pr create, merge --merge (no FF) |
+| QA round 3 (orig) | done | ws ceb28089-…; verify open items + all-route smoke (1280/375) + admin deep + demo path; report reports/QA3-report.md |
 | Next | — | QA3 PASS → PR + merge to main (merge commit); else fix round 3 |
 | Playwright QA round 1 (detail) | done | fresh demo seed ws ae7efa84-…; backend bound to localhost (sec fix confirmed); reports → reports/QA-playwright-{bugs,report}.md |
 | Merge + gates | in progress | next: full suite → restart demo → Playwright QA → fix → re-sweep → PR+merge; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
