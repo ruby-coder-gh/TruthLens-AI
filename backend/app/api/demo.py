@@ -7,6 +7,7 @@ Routes: `GET /api/health/ready` (public), `POST /api/auth/demo-login`,
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -100,6 +101,8 @@ async def demo_login(
     user = result.scalar_one_or_none()
     if not user:
         raise UnauthorizedException("Demo user not seeded — run `python -m app.demo seed`")
+
+    user.last_login_at = datetime.now(timezone.utc)
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = await issue_refresh_token(db, user_id=user.id)
