@@ -16,6 +16,10 @@ export interface SourceTarget {
   chunkId: string;
   documentName?: string;
   pageNumber?: number | null;
+  /** C1 (fix round 1): the specific sentence to locate within the chunk —
+   *  `GET .../locate?text=` — so the drawer highlights just the cited
+   *  passage instead of the whole chunk. Ledger rows pass `claim.evidence`. */
+  highlightText?: string;
 }
 
 interface SourceViewerContextValue {
