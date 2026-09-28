@@ -87,13 +87,25 @@ async def test_create_receipt_other_user_gets_404_not_403(client: AsyncClient, t
 
 
 @pytest.mark.asyncio
-async def test_create_receipt_viewer_member_is_allowed(client: AsyncClient, test_db: AsyncSession, owner_and_query):
+async def test_create_receipt_viewer_member_is_forbidden(client: AsyncClient, test_db: AsyncSession, owner_and_query):
+    """A viewer can read the query but must not be able to publish a public receipt of it."""
     _, ws_id, q_id = owner_and_query
     viewer = await _make_user(test_db, email="viewer@example.com")
     test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
     await test_db.commit()
 
     resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(viewer))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_receipt_editor_member_is_allowed(client: AsyncClient, test_db: AsyncSession, owner_and_query):
+    _, ws_id, q_id = owner_and_query
+    editor = await _make_user(test_db, email="editor@example.com")
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=editor.id, role="editor"))
+    await test_db.commit()
+
+    resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(editor))
     assert resp.status_code == 201
 
 
@@ -220,16 +232,31 @@ async def test_creator_can_revoke_and_then_public_view_returns_410(client: Async
 
 
 @pytest.mark.asyncio
-async def test_workspace_owner_can_revoke_receipt_created_by_a_viewer(client: AsyncClient, test_db: AsyncSession, owner_and_query):
+async def test_workspace_owner_can_revoke_receipt_created_by_an_editor(client: AsyncClient, test_db: AsyncSession, owner_and_query):
     owner, ws_id, q_id = owner_and_query
-    viewer = await _make_user(test_db, email="viewer2@example.com")
-    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=viewer.id, role="viewer"))
+    editor = await _make_user(test_db, email="editor2@example.com")
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=editor.id, role="editor"))
     await test_db.commit()
 
-    create_resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(viewer))
+    create_resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(editor))
     token = create_resp.json()["token"]
 
     del_resp = await client.delete(f"/api/receipts/{token}", headers=_headers(owner))
+    assert del_resp.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_editor_can_revoke_receipt_they_did_not_create(client: AsyncClient, test_db: AsyncSession, owner_and_query):
+    """A workspace editor who didn't seal the receipt can still revoke it — not just the owner/admin/creator."""
+    owner, ws_id, q_id = owner_and_query
+    editor = await _make_user(test_db, email="editor3@example.com")
+    test_db.add(WorkspaceMember(workspace_id=ws_id, user_id=editor.id, role="editor"))
+    await test_db.commit()
+
+    create_resp = await client.post(f"/api/queries/{q_id}/receipts", headers=_headers(owner))
+    token = create_resp.json()["token"]
+
+    del_resp = await client.delete(f"/api/receipts/{token}", headers=_headers(editor))
     assert del_resp.status_code == 204
 
 
