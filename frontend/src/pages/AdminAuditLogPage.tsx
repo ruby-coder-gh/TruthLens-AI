@@ -393,8 +393,10 @@ export default function AdminAuditLogPage() {
                             {formatTimestamp(entry.created_at)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 font-mono text-xs text-text-muted">
-                          {truncateId(entry.user_id, 16)}
+                        {/* K3/BUG-36: a resolved username instead of the
+                            raw, truncated user id. */}
+                        <td className="px-4 py-3 text-xs text-text-muted">
+                          {entry.user_name ?? <span className="font-mono">{truncateId(entry.user_id, 16)}</span>}
                         </td>
                         <td className="px-4 py-3">
                           <Badge color={actionBadgeColor(entry.action)}>{entry.action}</Badge>

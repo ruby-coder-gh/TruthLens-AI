@@ -80,4 +80,25 @@ describe('AdminDocumentDetailPage', () => {
     renderPage();
     expect(await screen.findByText('CSV')).toBeInTheDocument();
   });
+
+  // K3: prefers the resolved name over the raw uploader id once the backend
+  // sends it.
+  it('shows uploaded_by_name over the raw id when the backend sends it', async () => {
+    listAll.mockResolvedValue({ data: [{ ...LIST_DOC, uploaded_by_name: 'demo_editor' }] });
+    renderPage();
+    expect(await screen.findByText('demo_editor')).toBeInTheDocument();
+    expect(screen.queryByText('u-editor')).not.toBeInTheDocument();
+  });
+
+  // R2-10: a `ready` document used to render every timeline step grey
+  // because `STATUS_ORDER` never contained any real backend status.
+  it('marks every step complete (not grey) for a ready document', async () => {
+    renderPage();
+    await screen.findByText('Processing Timeline');
+    // The "done" text class is `text-text`; a not-done step stays `text-text-dim`.
+    expect(screen.getByText('Pending')).toHaveClass('text-text');
+    expect(screen.getByText('Processing')).toHaveClass('text-text');
+    expect(screen.getByText('Ready')).toHaveClass('text-text');
+    expect(screen.getByText('Pending')).not.toHaveClass('text-text-dim');
+  });
 });

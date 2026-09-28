@@ -417,7 +417,14 @@ export default function AdminDocumentsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-text-muted text-xs">{doc.uploaded_by}</td>
+                  {/* K3/BUG-36/BUG-38: a name, not the raw uploader UUID —
+                      also shrinks this column enough that the table stops
+                      scrolling horizontally at 1280px. */}
+                  <td className="px-4 py-3 text-text-muted text-xs">
+                    <span className="block max-w-[140px] truncate" title={doc.uploaded_by}>
+                      {doc.uploaded_by_name ?? doc.uploaded_by}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-text-dim text-xs whitespace-nowrap">
                     <span className="flex items-center gap-1">
                       <Clock size={11} />

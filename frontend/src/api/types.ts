@@ -72,6 +72,9 @@ export interface Document {
   status: string;
   error_message?: string;
   uploaded_by: string;
+  /** K3. Username, else email, of the uploader — absent on responses from a
+   *  backend build that predates the field; callers fall back to `uploaded_by`. */
+  uploaded_by_name?: string;
   created_at: string;
   updated_at: string;
   tags: string[];
@@ -309,6 +312,9 @@ export interface AdminStats {
 export interface AuditLogEntry {
   id: string;
   user_id: string | null;
+  /** K3. Username of `user_id`, when resolvable — absent on responses from a
+   *  backend build that predates the field; callers fall back to `user_id`. */
+  user_name?: string | null;
   action: string;
   resource_type: string;
   resource_id: string | null;
@@ -732,6 +738,9 @@ export interface GoldenEntryResponse {
   source: 'builtin' | 'promoted';
   source_query_id?: string | null;
   workspace_id?: string | null;
+  /** K3. Name of `workspace_id`, when resolvable — absent on responses from
+   *  a backend build that predates the field; callers fall back to `workspace_id`. */
+  workspace_name?: string | null;
   created_by?: string | null;
   created_at?: string | null;
   status: GoldenApprovalStatus;
