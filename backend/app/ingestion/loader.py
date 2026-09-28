@@ -148,6 +148,53 @@ def _load_markdown(path: Path) -> list[dict[str, Any]]:
     }]
 
 
+# R3-4: only columns cheap enough to summarize as a handful of named groups.
+_CSV_SUMMARY_MAX_DISTINCT = 8
+# Below this many rows, top-k retrieval already sees the whole table -- skip
+# the rollup (and keep small/toy CSVs summary-free).
+_CSV_SUMMARY_MIN_ROWS = 5
+
+
+def _csv_title(path: Path) -> str:
+    return path.stem.replace("-", " ").replace("_", " ").title()
+
+
+def _humanize_csv_value(value: str) -> str:
+    return value.replace("_", " ").replace("-", " ").strip().capitalize()
+
+
+def _csv_summary_pages(path: Path, headers: list[str], rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """R3-4: one extra chunk per low-cardinality column (<= 8 distinct
+    values), e.g. "Project Pipeline — status = Construction: Aurora, Ashford
+    Solar, …". An aggregation question ("which projects are under
+    construction?") only reaches the top reranked *row* chunks, so rows past
+    that cutoff are silently missing from the answer even though the corpus
+    has them -- this rollup keeps the whole group in one retrievable chunk.
+    """
+    if len(headers) < 2:
+        return []
+    id_col = headers[0]
+    title = _csv_title(path)
+    pages: list[dict[str, Any]] = []
+    for col in headers[1:]:
+        groups: dict[str, list[str]] = {}
+        for row in rows:
+            value = (row.get(col) or "").strip()
+            name = (row.get(id_col) or "").strip()
+            if not value or not name:
+                continue
+            groups.setdefault(value, []).append(name)
+        if not groups or len(groups) > _CSV_SUMMARY_MAX_DISTINCT:
+            continue
+        for value, names in groups.items():
+            pages.append({
+                "text": f"{title} — {col} = {_humanize_csv_value(value)}: {', '.join(names)}",
+                "page_number": None,
+                "metadata": {"source": path.name, "summary_column": col, "summary_value": value},
+            })
+    return pages
+
+
 def _load_csv(path: Path) -> list[dict[str, Any]]:
     # C7: one page per data row (chunker below turns each page into its own
     # chunk), header repeated as "Column: value; …" text on every row so a
@@ -177,6 +224,7 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
         description = f"Table with columns: {', '.join(headers)}." if headers else ""
     prefix = f"{path.name}. {description}\n" if description else f"{path.name}.\n"
 
+    rows: list[dict[str, str]] = []
     for i, row in enumerate(reader):
         fields = "; ".join(f"{h}: {(row.get(h) or '').strip()}" for h in headers)
         if not fields.strip():
@@ -186,8 +234,12 @@ def _load_csv(path: Path) -> list[dict[str, Any]]:
             "page_number": None,
             "metadata": {"source": path.name, "row_index": i},
         })
+        rows.append(row)
 
-    logger.info("csv_loaded", rows=len(pages), path=str(path))
+    if len(rows) >= _CSV_SUMMARY_MIN_ROWS:
+        pages.extend(_csv_summary_pages(path, headers, rows))
+
+    logger.info("csv_loaded", rows=len(rows), path=str(path))
     return pages
 
 
