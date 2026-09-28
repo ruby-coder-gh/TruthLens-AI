@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import WorkspaceDetailPage from './WorkspaceDetailPage';
 import type { Workspace, WorkspaceMember, User, RadarState } from '../api/types';
@@ -105,6 +105,28 @@ describe('WorkspaceDetailPage — Radar tab', () => {
     // instead — the header's own stats query legitimately fetches the same
     // document list regardless of which tab is active (BUG-30).
     expect(screen.queryByLabelText(/Upload document/i)).not.toBeInTheDocument();
+  });
+
+  it('puts every tab in the URL, not just Radar (BUG-54)', async () => {
+    const testUser = userEvent.setup();
+    vi.mocked(radarApi.get).mockResolvedValue(radarState());
+
+    function LocationProbe() {
+      return <p data-testid="search">{useLocation().search}</p>;
+    }
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/workspaces/:id" element={<><WorkspaceDetailPage /><LocationProbe /></>} />
+      </Routes>,
+      { route: '/workspaces/ws-1', authValue: { user, isAuthenticated: true } },
+    );
+    await screen.findByText('No documents yet');
+
+    await testUser.click(screen.getByRole('tab', { name: /^Members$/i }));
+
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('?tab=members'));
+    expect(screen.getByRole('tab', { name: /^Members$/i })).toHaveAttribute('aria-selected', 'true');
   });
 });
 

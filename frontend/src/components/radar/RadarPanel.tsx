@@ -103,7 +103,10 @@ export default function RadarPanel({ workspaceId, canModerate }: { workspaceId: 
       addToast(err instanceof Error ? err.message : 'Could not update this contradiction.', 'error');
     },
     onSuccess: (_result, { status }) => {
-      addToast(status === 'dismissed' ? 'Contradiction dismissed.' : 'Marked resolved.', 'success');
+      addToast(
+        status === 'dismissed' ? 'Contradiction dismissed.' : status === 'resolved' ? 'Marked resolved.' : 'Reopened.',
+        'success',
+      );
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['radar', workspaceId] });
@@ -243,12 +246,15 @@ export default function RadarPanel({ workspaceId, canModerate }: { workspaceId: 
               canModerate={canModerate}
               updating={
                 busyId === c.id
-                  ? (statusMutation.variables?.status === 'dismissed' ? 'dismiss' : 'resolve')
+                  ? (statusMutation.variables?.status === 'dismissed' ? 'dismiss'
+                    : statusMutation.variables?.status === 'resolved' ? 'resolve'
+                    : 'reopen')
                   : null
               }
               onView={handleView}
               onDismiss={() => statusMutation.mutate({ id: c.id, status: 'dismissed' })}
               onResolve={() => statusMutation.mutate({ id: c.id, status: 'resolved' })}
+              onReopen={() => statusMutation.mutate({ id: c.id, status: 'open' })}
             />
           ))}
         </ul>

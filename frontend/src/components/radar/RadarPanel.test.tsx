@@ -136,6 +136,35 @@ describe('RadarPanel', () => {
     expect(vi.mocked(radarApi.get).mock.calls.length).toBeGreaterThan(callsBefore);
   });
 
+  it('reopens a dismissed contradiction from its own filter tab (BUG-62)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(radarApi.get).mockImplementation((_wid: string, status?: ContradictionStatus) =>
+      Promise.resolve(
+        status === 'dismissed'
+          ? radarState({
+              contradictions: [makeContradiction({ status: 'dismissed' })],
+              counts: { open: 0, dismissed: 1, resolved: 0 },
+            })
+          : radarState({ counts: { open: 0, dismissed: 1, resolved: 0 } }),
+      ),
+    );
+    vi.mocked(radarApi.setStatus).mockReturnValue(new Promise(() => {}));
+
+    renderPanel();
+    await user.click(screen.getByRole('tab', { name: /Dismissed/i }));
+    expect(await screen.findByText('Policy A')).toBeInTheDocument();
+
+    // Only a Reopen action is offered for a non-open item — no Dismiss/Resolve.
+    expect(screen.queryByRole('button', { name: /^Dismiss$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mark resolved/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Reopen/i }));
+
+    expect(radarApi.setStatus).toHaveBeenCalledWith('ws-1', 'c1', 'open');
+    // Optimistic removal from the Dismissed view, same as dismiss/resolve.
+    await waitFor(() => expect(screen.queryByText('Policy A')).not.toBeInTheDocument());
+  });
+
   it('hides moderation actions for a viewer', async () => {
     vi.mocked(radarApi.get).mockResolvedValue(
       radarState({ contradictions: [makeContradiction()], counts: { open: 1, dismissed: 0, resolved: 0 } }),

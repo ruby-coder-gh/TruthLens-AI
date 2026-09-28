@@ -386,11 +386,20 @@ export default function WorkspaceDetailPage() {
   const workspaceId = id!;
   const navigate = useNavigate();
   const { user } = useAuth();
-  // `?tab=radar` deep-links straight into the Radar tab (e.g. from a
-  // notification or a shared link) — read once on mount, then the tab is
-  // ordinary local state so switching tabs never touches the URL.
-  const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(() => (searchParams.get('tab') === 'radar' ? 'radar' : 'documents'));
+  // BUG-54: every tab deep-links via `?tab=`, not just Radar — the active
+  // tab lives in the URL itself (replace, not push, so switching tabs
+  // doesn't spam the back button) rather than local state the URL never saw.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const VALID_TABS = ['documents', 'activity', 'radar', 'members', 'settings'];
+  const tabParam = searchParams.get('tab');
+  const activeTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : 'documents';
+  const setActiveTab = (tab: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', tab);
+      return next;
+    }, { replace: true });
+  };
 
   // ─── Fetch workspace ──────────────────────────────────────────────────────
   const {

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { diffWordsWithSpace, type Change } from 'diff';
-import { FileText, Eye, X, Check } from 'lucide-react';
+import { FileText, Eye, X, Check, RotateCcw } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Button, Card, Badge, type BadgeColor } from '../ui';
 import type { Contradiction, ContradictionSide, ContradictionStatus } from '../../api/types';
@@ -72,14 +72,20 @@ export default function ConflictCard({
   onView,
   onDismiss,
   onResolve,
+  onReopen,
 }: {
   contradiction: Contradiction;
   canModerate: boolean;
   /** Which mutation is in flight for *this* card, if any — drives per-button spinners. */
-  updating: 'dismiss' | 'resolve' | null;
+  updating: 'dismiss' | 'resolve' | 'reopen' | null;
   onView: (side: ContradictionSide) => void;
   onDismiss: () => void;
   onResolve: () => void;
+  /** BUG-62: dismissed/resolved items had no way back except the API — a
+   *  persistent action here (rather than a toast, which auto-dismisses in
+   *  3-5s and would make "undo" unreliable) works from the Dismissed/
+   *  Resolved filter tabs at any time. */
+  onReopen: () => void;
 }) {
   const { a, b } = contradiction;
   const parts = useMemo(() => diffWordsWithSpace(a.sentence, b.sentence), [a.sentence, b.sentence]);
@@ -123,6 +129,13 @@ export default function ConflictCard({
             </Button>
             <Button size="sm" disabled={busy} loading={updating === 'resolve'} onClick={onResolve}>
               <Check size={14} /> Mark resolved
+            </Button>
+          </div>
+        )}
+        {canModerate && contradiction.status !== 'open' && (
+          <div className="flex justify-end border-t border-border pt-3">
+            <Button size="sm" variant="secondary" disabled={busy} loading={updating === 'reopen'} onClick={onReopen}>
+              <RotateCcw size={14} /> Reopen
             </Button>
           </div>
         )}
