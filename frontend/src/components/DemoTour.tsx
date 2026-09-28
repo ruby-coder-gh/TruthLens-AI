@@ -1,8 +1,13 @@
-// Owning lane: L10 (Demo FE). Mounted unconditionally in Layout (see
-// Layout.tsx) — renders nothing unless this deployment is in demo mode and
-// the viewer is signed in. Two independent pieces:
-//   1. A warm-up toast while the models are still loading.
-//   2. A collapsible 5-step presenter checklist, persisted in localStorage.
+// Owning lane: L10 (Demo FE), reworked in fix-round-2 (R2-2). Two
+// independent pieces, both gated to demo-mode deployments:
+//   1. `DemoTourWarmup` — a warm-up toast while the models are still
+//      loading, for any authenticated user.
+//   2. `DemoTourButton` — a "Tour n/5" trigger meant to be mounted inside
+//      the app's top bar (see Layout.tsx), opening a popover checklist.
+//      R2-2: it used to be a `fixed` pill floating over the page, which sat
+//      on top of every page's own header action buttons (Refresh, Upload
+//      Document, ...). Anchoring it inside the top bar instead means it can
+//      never again collide with a page's header row.
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,21 +20,22 @@ import type { ModelWarmState, User } from '../api/types';
 const STORAGE_KEY = 'truthlens-demo-tour-v1';
 const STEP_COUNT = 5;
 
-// BUG-33: the tour is presenter chrome for the seeded demo personas — a
-// regular signed-in user on a deployment that merely *has* demo mode
-// enabled (e.g. a QA account) isn't running the demo and shouldn't see it.
-// Matches how `app/demo/seed.py` provisions the accounts: @truthlens.dev
-// email, demo_-prefixed username.
+// R2-2/BUG-33: the tour is presenter chrome for the two seeded demo
+// personas only (`app/demo/seed.py`) — any other @truthlens.dev address
+// (e.g. a QA account invited on a demo-mode deployment) isn't running the
+// demo and shouldn't see it.
+const DEMO_ACCOUNT_EMAILS = new Set(['analyst@truthlens.dev', 'admin@truthlens.dev']);
+
 function isDemoAccount(user: User | null): boolean {
-  if (!user) return false;
-  return user.email?.endsWith('@truthlens.dev') || user.username?.startsWith('demo_');
+  if (!user?.email) return false;
+  return DEMO_ACCOUNT_EMAILS.has(user.email);
 }
 
 interface TourState {
   checked: boolean[];
-  // BUG-33: no separate "hidden forever" state — Hide/collapse always leaves
-  // the pill itself on screen, so the tour is always re-openable rather than
-  // a dead end once dismissed.
+  // No separate "hidden forever" state — Hide/collapse always leaves the
+  // trigger button itself on screen, so the tour is always re-openable
+  // rather than a dead end once dismissed.
   collapsed: boolean;
 }
 
@@ -68,10 +74,7 @@ const modelStateColor: Record<ModelWarmState, BadgeColor> = {
   error: 'red',
 };
 
-/** Warm-up toast — shows per-model load state; disappears once `warm`. */
-function WarmupToast({ ready }: { ready: UseReadyResult }) {
-  if (ready.warm) return null;
-
+function WarmupToastContent({ ready }: { ready: UseReadyResult }) {
   const llmState: ModelWarmState = !ready.ollama
     ? 'loading'
     : !ready.ollama.reachable
@@ -109,38 +112,65 @@ function WarmupToast({ ready }: { ready: UseReadyResult }) {
   );
 }
 
+/** Warm-up toast — shows per-model load state; disappears once `warm`. For
+ *  any authenticated user on a demo-mode deployment, not just the demo
+ *  personas. Mount anywhere; it's `fixed` and self-positions. */
+export function DemoTourWarmup() {
+  const ready = useReady();
+  const { isAuthenticated } = useAuth();
+
+  if (ready.isLoading || !ready.demoMode || !isAuthenticated || ready.warm) return null;
+
+  return <WarmupToastContent ready={ready} />;
+}
+
 interface Step {
   id: string;
   label: string;
   to: string;
 }
 
-/** Collapsible presenter checklist — top-right, below the header, so an
- * expanded panel never sits over the sidebar's account row (BUG-21) or the
- * chat composer at the bottom of the screen on mobile. */
-function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) {
+/** "Tour n/5" trigger + popover checklist. Meant to be mounted inline inside
+ *  the app's top bar (`Layout.tsx`'s header), not `fixed` — the popover
+ *  anchors below the button and closes on "Go", Esc, or an outside click. */
+export function DemoTourButton() {
+  const ready = useReady();
+  const { isAuthenticated, user } = useAuth();
   const [state, setState] = useState<TourState>(() => loadState());
+  const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     saveState(state);
   }, [state]);
 
-  // BUG-33: Esc closes the expanded panel, same as any other popover, and
-  // returns focus to the toggle that opened it.
+  // R2-9/BUG-33 pattern: Esc and a click outside the trigger+panel both
+  // close it — no full-screen blocking backdrop, so the rest of the top bar
+  // stays clickable while the panel is open. Only attached while open.
   useEffect(() => {
     if (state.collapsed) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setState((prev) => ({ ...prev, collapsed: true }));
+      }
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setState((prev) => ({ ...prev, collapsed: true }));
       toggleRef.current?.focus();
     };
+    document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [state.collapsed]);
 
-  const chatPath = demoWorkspaceId ? `/workspaces/${demoWorkspaceId}/chat` : '/workspaces';
-  const radarPath = demoWorkspaceId ? `/workspaces/${demoWorkspaceId}?tab=radar` : '/workspaces';
+  if (ready.isLoading || !ready.demoMode || !isAuthenticated || !isDemoAccount(user)) return null;
+
+  const chatPath = ready.demoWorkspaceId ? `/workspaces/${ready.demoWorkspaceId}/chat` : '/workspaces';
+  const radarPath = ready.demoWorkspaceId ? `/workspaces/${ready.demoWorkspaceId}?tab=radar` : '/workspaces';
 
   // BUG-20: step 2 named a "Truth Lens toggle" that the Claim Ledger
   // redesign replaced — claims and their verdicts now render inline.
@@ -166,22 +196,21 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
   const toggleCollapsed = () => setState((prev) => ({ ...prev, collapsed: !prev.collapsed }));
 
   return (
-    <div className="fixed right-4 top-[4.5rem] z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end sm:max-w-xs">
+    <div ref={containerRef} className="relative">
       <button
         ref={toggleRef}
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!state.collapsed}
         aria-controls="demo-tour-panel"
-        className="flex items-center gap-2 rounded-full border border-border bg-glass px-3.5 py-2 text-xs font-semibold text-text shadow-e1 backdrop-blur-xl transition-colors hover:bg-card-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+        className="flex items-center gap-1.5 rounded-control border border-border bg-card-2 px-2.5 py-1.5 text-xs font-semibold text-text transition-colors hover:bg-card-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
-        Demo tour {doneCount}/{STEP_COUNT}
-        {state.collapsed ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronUp size={14} aria-hidden="true" />}
+        Tour {doneCount}/{STEP_COUNT}
+        {state.collapsed ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronUp size={13} aria-hidden="true" />}
       </button>
 
-      {/* Opens downward below the pill — this widget now anchors to the top
-          of the viewport (BUG-21), so an upward-opening panel would run off
-          the top of the screen. */}
+      {/* Opens downward, anchored to the trigger — never the viewport — so
+          it can't drift over a page's own header controls. */}
       <AnimatePresence>
         {!state.collapsed && (
           <motion.div
@@ -190,13 +219,13 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="mt-2 w-full rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl sm:w-80"
+            className="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-text">Presenter tour</p>
-              {/* BUG-33: collapses rather than hiding forever — the pill
-                  below always stays on screen, so the tour is always
-                  re-openable, never a dead end. */}
+              {/* Collapses rather than hiding forever — the trigger above
+                  always stays on screen, so the tour is always re-openable,
+                  never a dead end. */}
               <button
                 type="button"
                 onClick={collapse}
@@ -223,8 +252,8 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
                   >
                     {index + 1}. {step.label}
                   </label>
-                  {/* BUG-33: "Go" also collapses the panel — it used to stay
-                      open, floating over the page it just navigated to. */}
+                  {/* "Go" also collapses the panel — it used to stay open,
+                      floating over the page it just navigated to. */}
                   <Link
                     to={step.to}
                     onClick={collapse}
@@ -240,22 +269,5 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-export function DemoTour() {
-  const ready = useReady();
-  const { isAuthenticated, user } = useAuth();
-
-  if (ready.isLoading || !ready.demoMode || !isAuthenticated) return null;
-
-  return (
-    <>
-      <WarmupToast ready={ready} />
-      {/* BUG-33: the presenter checklist is for the seeded demo personas
-          only — a QA/test account signed into a demo-mode deployment isn't
-          running the demo. The warm-up status above stays for everyone. */}
-      {isDemoAccount(user) && <TourChecklist demoWorkspaceId={ready.demoWorkspaceId} />}
-    </>
   );
 }
