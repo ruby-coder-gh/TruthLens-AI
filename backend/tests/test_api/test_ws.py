@@ -369,6 +369,113 @@ class TestSaveQueryReplacesQueryId:
         assert "q-old-3" in ids
 
 
+class TestDisagreementPostcheck:
+    """BUG-24: the WS pipeline runs append_missing_disagreement_figures on the
+    full generated answer before guardrail-checking and saving it, so an
+    answer that cites both sides of an open Radar pair but states only one
+    figure gets the other appended instead of silently picking a side."""
+
+    async def test_appends_the_missing_figure_before_saving(
+        self, monkeypatch, test_db, ws_session_factory, ws_workspace
+    ):
+        import sys
+        import types
+        from types import SimpleNamespace
+
+        from app.api import ws as ws_api
+        from app.models.contradiction import Contradiction
+        from app.models.document import Document
+
+        workspace, user = ws_workspace
+        doc_a = Document(
+            workspace_id=workspace.id, filename="srv-a.pdf", original_filename="annual-report.pdf",
+            mime_type="application/pdf", file_size=1, status="ready",
+        )
+        doc_b = Document(
+            workspace_id=workspace.id, filename="srv-b.pdf", original_filename="press-release.pdf",
+            mime_type="application/pdf", file_size=1, status="ready",
+        )
+        test_db.add_all([doc_a, doc_b])
+        await test_db.commit()
+        test_db.add(Contradiction(
+            workspace_id=workspace.id, pair_key="k1",
+            doc_a_id=doc_a.id, chunk_a_id="chunk-a", sentence_a="Revenue was €412 million.",
+            doc_b_id=doc_b.id, chunk_b_id="chunk-b", sentence_b="Revenue was €398 million.",
+            score=0.9, similarity=0.8, status="open",
+        ))
+        await test_db.commit()
+
+        async def fake_rewrite(query):
+            return query
+
+        async def fake_hybrid_search(query, workspace_id, top_k, filters=None):
+            return [
+                SimpleNamespace(
+                    chunk_id="chunk-a", document_id=doc_a.id, content="c", score=0.9,
+                    final_score=0.9, rerank_score=0.9, metadata={"document_name": "annual-report.pdf"},
+                ),
+                SimpleNamespace(
+                    chunk_id="chunk-b", document_id=doc_b.id, content="c", score=0.9,
+                    final_score=0.9, rerank_score=0.9, metadata={"document_name": "press-release.pdf"},
+                ),
+            ]
+
+        async def fake_rerank(query, results, top_k):
+            return list(results)
+
+        async def fake_stream_tokens(gen_input, query_id, token_sender):
+            return "Revenue in 2025 was €412 million [source:1][source:2].", 1, "mock-model", None, "hash"
+
+        async def fake_guardrail_check(answer, contexts):
+            return SimpleNamespace(passed=True, score=0.9, details="ok", claims=[])
+
+        async def fake_compute_trust(*args, **kwargs):
+            return SimpleNamespace(
+                overall=0.9, retrieval_quality=0.9, faithfulness=0.9, relevance=0.9, source_authority=0.8,
+            )
+
+        captured: dict = {}
+
+        async def fake_save_query(**kwargs):
+            captured["save_kwargs"] = kwargs
+
+        async def fake_document_version(*args, **kwargs):
+            return 0
+
+        async def fake_cache_lookup(*args, **kwargs):
+            return None
+
+        for name, attr, fn in (
+            ("app.retrieval.query_rewrite", "rewrite", fake_rewrite),
+            ("app.retrieval.hybrid_search", "hybrid_search", fake_hybrid_search),
+            ("app.retrieval.reranker", "rerank", fake_rerank),
+            ("app.generation.streamer", "stream_tokens", fake_stream_tokens),
+            ("app.generation.guardrail", "check", fake_guardrail_check),
+            ("app.evaluation.trust_score", "compute_trust", fake_compute_trust),
+        ):
+            module = types.ModuleType(name)
+            setattr(module, attr, fn)
+            monkeypatch.setitem(sys.modules, name, module)
+
+        monkeypatch.setattr(ws_api, "_save_query", fake_save_query)
+        monkeypatch.setattr(ws_api, "get_workspace_document_version", fake_document_version)
+        monkeypatch.setattr(ws_api, "lookup_cached_query", fake_cache_lookup)
+
+        await ws_api._run_query_pipeline(
+            query_text="What was 2025 revenue?",
+            workspace_id=workspace.id,
+            user_id=user.id,
+            query_id="query-postcheck",
+            top_k=5,
+            filters=None,
+            sink=_pipeline_sink(lambda msg: _noop(), query_id="query-postcheck"),
+        )
+
+        assert captured["save_kwargs"]["response_text"] == (
+            "Revenue in 2025 was €412 million [source:1][source:2]. Revenue was €398 million. [source:2]"
+        )
+
+
 class TestPipelineResolvesActivePrompt:
     """The WS pipeline threads the registry's active prompt through generation."""
 

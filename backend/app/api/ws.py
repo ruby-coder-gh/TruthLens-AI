@@ -29,7 +29,7 @@ from app.models.workspace import Workspace, WorkspaceMember
 from app.models.document import Document
 from app.models.comparison import Comparison, ComparisonResult
 from app.prompts.registry import get_active as get_active_prompt
-from app.radar import conflict_counts
+from app.radar import append_missing_disagreement_figures, conflict_counts
 from app.query_cache import (
     cached_query_sources,
     get_workspace_document_version,
@@ -408,6 +408,18 @@ async def _run_query_pipeline(
                 },
             )
             return
+
+        # BUG-24 cheap post-check: the disagreement instruction can still slip
+        # (a live answer named only one side's figure despite it). If the
+        # answer cites both sides of an open Radar pair but states only one
+        # side's number, append the other with its own citation before this
+        # answer is scored and saved. A Radar hiccup must never block a
+        # finished answer from being saved.
+        try:
+            async with async_session_factory() as db:
+                full_text = await append_missing_disagreement_figures(db, workspace_id, full_text, contexts)
+        except Exception as e:
+            logger.warning("disagreement_postcheck_failed", query_id=query_id, error=str(e))
 
         # 7. Guardrail check
         await sink.emit(
