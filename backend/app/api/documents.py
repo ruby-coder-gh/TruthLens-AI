@@ -7,7 +7,7 @@ import json
 import uuid
 from pathlib import Path
 
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, UploadFile, File
@@ -23,6 +23,7 @@ from app.core.deps import (
 from app.core.exceptions import ForbiddenException, NotFoundException, TooLargeException, UnsupportedTypeException
 from app.models.audit_log import AuditLog
 from app.models.chunk import Chunk
+from app.models.contradiction import Contradiction
 from app.models.document import Document
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
@@ -346,6 +347,8 @@ async def delete_document(
         resource_id=doc_id,
     ))
     await bump_workspace_document_version(db, workspace_id)
+    # SQLite runs without `PRAGMA foreign_keys=ON`, so the FK cascade is not enforced.
+    await db.execute(delete(Contradiction).where(or_(Contradiction.doc_a_id == doc_id, Contradiction.doc_b_id == doc_id)))
     await db.delete(doc)
 
 
@@ -543,6 +546,7 @@ async def process_document_background(
     )
 
     # Update document status
+    auto_scan = False
     async with async_session_factory() as session:
         doc_result = await session.execute(select(Document).where(Document.id == document_id))
         doc = doc_result.scalar_one_or_none()
@@ -593,6 +597,7 @@ async def process_document_background(
             if ingest_result["status"] == "success":
                 doc.status = "ready"
                 doc.chunk_count = ingest_result["chunk_count"]
+                auto_scan = settings.RADAR_AUTO_SCAN and doc.chunk_count > 0
                 if doc.chunk_count == 0 and quarantined_items:
                     # Every chunk was quarantined: not a pipeline failure
                     # (nothing crashed) but the document has zero
@@ -608,6 +613,15 @@ async def process_document_background(
                 doc.status = "failed"
                 doc.error_message = ingest_result.get("error", "Unknown error")
             await session.commit()
+
+    if auto_scan:
+        # Contradiction Radar: scan the new document against the workspace.
+        # Best effort — a radar failure must never surface as an ingestion one.
+        try:
+            from app.radar.scan import request_auto_scan
+            await request_auto_scan(workspace_id, [document_id])
+        except Exception as e:
+            logger.warning("radar_auto_scan_failed", document_id=document_id, error=str(e))
 
     logger.info(
         "background_ingestion_complete",

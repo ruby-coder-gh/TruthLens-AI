@@ -14,6 +14,8 @@ from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 os.environ.setdefault("APP_SECRET_KEY", f"test-{uuid.uuid4().hex}{uuid.uuid4().hex}")
+# Ingestion tests must not spawn background Contradiction Radar scans; radar tests opt in.
+os.environ.setdefault("RADAR_AUTO_SCAN", "false")
 
 from app.core.auth import hash_password
 from app.core.deps import get_db
