@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ try:
     import fitz  # PyMuPDF
 except ImportError:
     fitz = None  # type: ignore[assignment]
+
+_LINE_END_HYPHEN = re.compile(r"(?<=[a-z])-\n(?=[a-z])")
 
 
 async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
@@ -56,7 +59,11 @@ def _load_pdf(path: Path) -> list[dict[str, Any]]:
         # compatibility decomposition reverses exactly that substitution,
         # keeping BM25 tokenization and citation excerpts matching the plain
         # ASCII the document actually says.
-        text = unicodedata.normalize("NFKC", page.get_text()).strip()
+        # One paragraph per text block, blocks split by blank lines: plain
+        # `get_text()` hard-breaks every rendered line, which glued headings
+        # and table cells onto the next prose sentence.
+        paragraphs = [_block_paragraph(block[4]) for block in page.get_text("blocks") if block[6] == 0]
+        text = "\n\n".join(p for p in paragraphs if p)
         if text:
             pages.append({
                 "text": text,
@@ -69,6 +76,15 @@ def _load_pdf(path: Path) -> list[dict[str, Any]]:
     doc.close()
     logger.info("pdf_loaded", pages=len(pages), path=str(path))
     return pages
+
+
+def _block_paragraph(block_text: str) -> str:
+    """A PDF text block's lines as one paragraph: NFKC, line-end hyphens rejoined, whitespace collapsed."""
+    text = unicodedata.normalize("NFKC", block_text)
+    # ponytail: "fabri-\ncation" -> "fabrication" also turns a compound split
+    # at its hyphen ("gas-\nbacked") into "gasbacked"; needs a dictionary to tell apart.
+    text = _LINE_END_HYPHEN.sub("", text)
+    return " ".join(text.split())
 
 
 def _load_docx(path: Path) -> list[dict[str, Any]]:
