@@ -14,7 +14,7 @@ import {
   Check,
   AlertCircle,
 } from 'lucide-react';
-import { Button, Card, Badge } from '../components/ui';
+import { Button, Card, Badge, buttonClassName } from '../components/ui';
 import Logo from '../components/Logo';
 import { useReady } from '../hooks/useReady';
 import { useAuth } from '../context/auth-context';
@@ -154,11 +154,11 @@ export default function LandingPage() {
             <Link to="/login" className="text-sm font-medium text-text-muted transition-colors hover:text-text">
               Sign in
             </Link>
-            <Link to="/register">
-              <Button size="sm">
-                Get Started
-                <ArrowRight size={14} />
-              </Button>
+            {/* BUG-58: a styled Link, not <Link><Button>… — an <a> can't
+                contain interactive content like a <button>. */}
+            <Link to="/register" className={buttonClassName('primary', 'sm')}>
+              Get Started
+              <ArrowRight size={14} />
             </Link>
           </div>
 
@@ -209,8 +209,12 @@ export default function LandingPage() {
             >
               Sign in
             </Link>
-            <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
-              <Button size="sm" className="mt-1 w-full">Get Started</Button>
+            <Link
+              to="/register"
+              onClick={() => setMobileMenuOpen(false)}
+              className={buttonClassName('primary', 'sm', 'mt-1 w-full')}
+            >
+              Get Started
             </Link>
           </div>
         </motion.div>
@@ -242,18 +246,14 @@ export default function LandingPage() {
                   <ArrowRight size={18} />
                 </Button>
               ) : (
-                <Link to="/register">
-                  <Button size="lg">
-                    Launch Workspace
-                    <ArrowRight size={18} />
-                  </Button>
+                <Link to="/register" className={buttonClassName('primary', 'lg')}>
+                  Launch Workspace
+                  <ArrowRight size={18} />
                 </Link>
               )}
               {demoMode && (
-                <Link to="/register">
-                  <Button variant="secondary" size="lg" className="w-full sm:w-auto">
-                    Launch Workspace
-                  </Button>
+                <Link to="/register" className={buttonClassName('secondary', 'lg', 'w-full sm:w-auto')}>
+                  Launch Workspace
                 </Link>
               )}
               <Button
@@ -428,15 +428,11 @@ export default function LandingPage() {
               Move from opaque chatbot answers to source-backed responses with confidence scoring and audit trails.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <Link to="/register">
-                <Button size="lg">
-                  Get Started
-                  <ArrowRight size={18} />
-                </Button>
+              <Link to="/register" className={buttonClassName('primary', 'lg')}>
+                Get Started
+                <ArrowRight size={18} />
               </Link>
-              <Link to="/login">
-                <Button variant="secondary" size="lg">Sign in</Button>
-              </Link>
+              <Link to="/login" className={buttonClassName('secondary', 'lg')}>Sign in</Link>
             </div>
           </motion.div>
         </section>

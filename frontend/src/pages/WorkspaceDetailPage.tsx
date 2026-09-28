@@ -35,6 +35,7 @@ import { PageShell } from '../components/PageWrappers';
 import {
   workspaceApi,
   documentApi,
+  queryApi,
   radarApi,
 } from '../api/client';
 import { useAuth } from '../context/auth-context';
@@ -189,13 +190,26 @@ function WorkspaceAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
 //  DASHBOARD STATS CARDS
 // ═════════════════════════════════════════════════════════════════════════════
 
-function DashboardStats({ workspace }: { workspace: Workspace }) {
+function DashboardStats({
+  documentCount,
+  memberCount,
+  queryCount,
+  storageBytes,
+}: {
+  documentCount: number;
+  memberCount: number;
+  queryCount: number;
+  storageBytes: number;
+}) {
   // Figures in ink on flat surfaces — status hues are reserved for status.
+  // BUG-30: all four now come from live, invalidatable queries instead of
+  // the workspace object's snapshot fields (stale after upload/member add)
+  // or a hard-coded "—".
   const stats = [
-    { label: 'Documents', value: workspace.document_count ?? 0, icon: <FileText size={18} /> },
-    { label: 'Members', value: workspace.member_count ?? 1, icon: <Users size={18} /> },
-    { label: 'AI Queries', value: '—', icon: <Brain size={18} /> },
-    { label: 'Storage Used', value: '—', icon: <HardDrive size={18} /> },
+    { label: 'Documents', value: documentCount, icon: <FileText size={18} /> },
+    { label: 'Members', value: memberCount, icon: <Users size={18} /> },
+    { label: 'AI Queries', value: queryCount, icon: <Brain size={18} /> },
+    { label: 'Storage Used', value: formatFileSize(storageBytes), icon: <HardDrive size={18} /> },
   ];
 
   return (
@@ -237,6 +251,9 @@ function WorkspaceHeader({
   setActiveTab,
   memberCount,
   radarOpenCount,
+  documentCount,
+  queryCount,
+  storageBytes,
 }: {
   workspace: Workspace;
   isOwner: boolean;
@@ -245,6 +262,9 @@ function WorkspaceHeader({
   setActiveTab: (tab: string) => void;
   memberCount: number;
   radarOpenCount: number;
+  documentCount: number;
+  queryCount: number;
+  storageBytes: number;
 }) {
   // Tab labels are plain strings (Tab.label: string), so the open-conflict
   // badge is rendered as "Radar (N)" text rather than a separate pill —
@@ -316,7 +336,7 @@ function WorkspaceHeader({
               </span>
               <span className="flex items-center gap-1.5">
                 <FileText size={12} />
-                {workspace.document_count ?? 0} documents
+                {documentCount} {documentCount === 1 ? 'document' : 'documents'}
               </span>
               <span className="flex items-center gap-1.5">
                 <Calendar size={12} />
@@ -334,7 +354,12 @@ function WorkspaceHeader({
       </div>
 
       {/* Dashboard Stats */}
-      <DashboardStats workspace={workspace} />
+      <DashboardStats
+        documentCount={documentCount}
+        memberCount={memberCount}
+        queryCount={queryCount}
+        storageBytes={storageBytes}
+      />
 
       {/* Tabs — Segmented control style */}
       <motion.div
@@ -391,6 +416,9 @@ export default function WorkspaceDetailPage() {
   const isOwner = workspace?.owner_id === user?.id;
   const myRole = members.find((m) => m.user_id === user?.id)?.role;
   const canModerateRadar = isOwner || myRole === 'editor';
+  // BUG-14: the server already rejects a viewer's upload (403), but the tab
+  // still offered the control — only owners/editors may add documents.
+  const canUpload = isOwner || myRole === 'editor';
 
   // Light, unfiltered fetch just for the tab badge — the panel itself fetches
   // its own (filtered, polling) copy under the same query-key prefix so a
@@ -401,6 +429,24 @@ export default function WorkspaceDetailPage() {
     enabled: !!workspaceId,
   });
   const radarOpenCount = radarSummary?.counts.open ?? 0;
+
+  // BUG-30: "AI Queries" and "Storage Used" were hard-coded "—". Both are
+  // cheap to derive from data the API already exposes — the same
+  // `['documents', workspaceId]` key DocumentsTab uses, so this doesn't add
+  // a second in-flight request once that tab has fetched it.
+  const { data: docsForStats } = useQuery({
+    queryKey: ['documents', workspaceId],
+    queryFn: () => documentApi.list(workspaceId),
+    enabled: !!workspaceId,
+  });
+  const storageBytes = (docsForStats?.data ?? []).reduce((sum, doc) => sum + (doc.file_size ?? 0), 0);
+
+  const { data: queryStats } = useQuery({
+    queryKey: ['workspace', workspaceId, 'query-count'],
+    queryFn: () => queryApi.list(workspaceId, { page_size: 1 }),
+    enabled: !!workspaceId,
+  });
+  const queryCount = queryStats?.meta.total ?? 0;
 
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (wsLoading) {
@@ -518,6 +564,9 @@ export default function WorkspaceDetailPage() {
             setActiveTab={setActiveTab}
             memberCount={members.length}
             radarOpenCount={radarOpenCount}
+            documentCount={docsForStats?.data.length ?? workspace.document_count ?? 0}
+            queryCount={queryCount}
+            storageBytes={storageBytes}
           />
 
           {/* Tab content */}
@@ -531,7 +580,7 @@ export default function WorkspaceDetailPage() {
                 exit="exit"
               >
                 {activeTab === 'documents' && (
-                  <DocumentsTab workspaceId={workspaceId} />
+                  <DocumentsTab workspaceId={workspaceId} canUpload={canUpload} />
                 )}
                 {activeTab === 'activity' && (
                   <ActivityTab workspaceId={workspaceId} />
@@ -636,7 +685,7 @@ function ActivityTab({ workspaceId }: { workspaceId: string }) {
 //  DOCUMENTS TAB (Redesigned)
 // ═════════════════════════════════════════════════════════════════════════════
 
-function DocumentsTab({ workspaceId }: { workspaceId: string }) {
+function DocumentsTab({ workspaceId, canUpload }: { workspaceId: string; canUpload: boolean }) {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -793,56 +842,65 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
   if (documents.length === 0 && !uploading) {
     return (
       <motion.div variants={fadeIn} initial="initial" animate="animate">
-        {/* Drop zone */}
-        <motion.div
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
-            dragOver
-              ? 'border-primary bg-primary/10'
-              : 'border-border hover:border-primary/40 hover:bg-card-2'
-          }`}
-          whileHover={{ scale: 1.003 }}
-          animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
-          onClick={() => fileInputRef.current?.click()}
-        >
+        {/* Drop zone — viewers can't upload (server rejects with 403 anyway),
+            so the control isn't offered at all rather than failing on click. */}
+        {canUpload && (
           <motion.div
-            animate={dragOver ? { y: -6, scale: 1.1 } : { y: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glass text-primary"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`relative mb-6 cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-all duration-300 ${
+              dragOver
+                ? 'border-primary bg-primary/10'
+                : 'border-border hover:border-primary/40 hover:bg-card-2'
+            }`}
+            whileHover={{ scale: 1.003 }}
+            animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <UploadCloud size={28} />
+            <motion.div
+              animate={dragOver ? { y: -6, scale: 1.1 } : { y: 0, scale: 1 }}
+              transition={{ type: 'spring', damping: 15 }}
+              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glass text-primary"
+            >
+              <UploadCloud size={28} />
+            </motion.div>
+            <p className="text-sm font-medium text-text">
+              {/* Singular: this dropzone uploads one file at a time (the input
+                  has no `multiple` and `handleDrop` reads `files[0]`), so the
+                  plural copy promised a multi-select that fails (QA S3-6).
+                  /admin/documents/upload is the multi-file queue. */}
+              {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
+            </p>
+            <p className="mt-1 text-xs text-text-muted">
+              PDF, DOCX, TXT, MD, CSV up to 50MB
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+              className="hidden"
+              onChange={handleFileChange}
+              aria-label="Upload document"
+            />
           </motion.div>
-          <p className="text-sm font-medium text-text">
-            {/* Singular: this dropzone uploads one file at a time (the input
-                has no `multiple` and `handleDrop` reads `files[0]`), so the
-                plural copy promised a multi-select that fails (QA S3-6).
-                /admin/documents/upload is the multi-file queue. */}
-            {dragOver ? 'Drop a file to upload' : 'Drop a file here or click to browse'}
-          </p>
-          <p className="mt-1 text-xs text-text-muted">
-            PDF, DOCX, TXT, MD, CSV up to 50MB
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
-            className="hidden"
-            onChange={handleFileChange}
-            aria-label="Upload document"
-          />
-        </motion.div>
+        )}
 
         <EmptyState
           icon={<FileText size={28} />}
           title="No documents yet"
-          description="Upload PDF, DOCX, TXT, MD, or CSV files to start querying your data."
+          description={
+            canUpload
+              ? 'Upload PDF, DOCX, TXT, MD, or CSV files to start querying your data.'
+              : 'Ask a workspace editor or the owner to upload documents.'
+          }
           action={
-            <Button onClick={() => fileInputRef.current?.click()}>
-              <Upload size={16} />
-              Upload document
-            </Button>
+            canUpload ? (
+              <Button onClick={() => fileInputRef.current?.click()}>
+                <Upload size={16} />
+                Upload document
+              </Button>
+            ) : undefined
           }
         />
       </motion.div>
@@ -852,40 +910,42 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
   // Documents list
   return (
     <motion.div variants={fadeIn} initial="initial" animate="animate">
-      {/* Drop zone compact */}
-      <motion.div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
-          dragOver
-            ? 'border-primary bg-primary/10'
-            : 'border-border hover:border-primary/30 hover:bg-card-2'
-        }`}
-        whileHover={{ scale: 1.003 }}
-        animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <div className="flex items-center justify-center gap-3">
-          <motion.div
-            animate={dragOver ? { y: -3, scale: 1.1 } : { y: 0, scale: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-          >
-            <UploadCloud size={20} className="text-primary" />
-          </motion.div>
-          <p className="text-sm text-text-muted">
-            {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
-          </p>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
-          className="hidden"
-          onChange={handleFileChange}
-          aria-label="Upload document"
-        />
-      </motion.div>
+      {/* Drop zone compact — viewers can't upload, so it's not offered. */}
+      {canUpload && (
+        <motion.div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`relative mb-5 cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all duration-300 ${
+            dragOver
+              ? 'border-primary bg-primary/10'
+              : 'border-border hover:border-primary/30 hover:bg-card-2'
+          }`}
+          whileHover={{ scale: 1.003 }}
+          animate={dragOver ? { scale: 1.01 } : { scale: 1 }}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <div className="flex items-center justify-center gap-3">
+            <motion.div
+              animate={dragOver ? { y: -3, scale: 1.1 } : { y: 0, scale: 1 }}
+              transition={{ type: 'spring', damping: 15 }}
+            >
+              <UploadCloud size={20} className="text-primary" />
+            </motion.div>
+            <p className="text-sm text-text-muted">
+              {dragOver ? 'Drop a file to upload' : 'Drop a file or click to add another document'}
+            </p>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+            className="hidden"
+            onChange={handleFileChange}
+            aria-label="Upload document"
+          />
+        </motion.div>
+      )}
 
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
@@ -893,10 +953,12 @@ function DocumentsTab({ workspaceId }: { workspaceId: string }) {
           <span className="text-text font-medium">{documents.length}</span>{' '}
           {documents.length === 1 ? 'document' : 'documents'}
         </p>
-        <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          <Upload size={14} />
-          Upload
-        </Button>
+        {canUpload && (
+          <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Upload size={14} />
+            Upload
+          </Button>
+        )}
       </div>
 
       <AnimatePresence>
@@ -1058,7 +1120,7 @@ function MembersTab({
   const { addToast } = useToast();
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
-  const [newUserId, setNewUserId] = useState('');
+  const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('editor');
   const [addError, setAddError] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
@@ -1068,7 +1130,7 @@ function MembersTab({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const addMemberMutation = useMutation({
-    mutationFn: (data: { user_id: string; role?: string }) =>
+    mutationFn: (data: { email: string; role?: string }) =>
       workspaceApi.addMember(workspaceId, data),
     onSuccess: () => {
       addToast('Member added', 'success');
@@ -1094,7 +1156,7 @@ function MembersTab({
 
   function handleAddClose() {
     setAddOpen(false);
-    setNewUserId('');
+    setNewEmail('');
     setNewRole('editor');
     setAddError('');
   }
@@ -1102,11 +1164,16 @@ function MembersTab({
   function handleAddSubmit(e: FormEvent) {
     e.preventDefault();
     setAddError('');
-    if (!newUserId.trim()) {
-      setAddError('User ID is required');
+    const email = newEmail.trim();
+    if (!email) {
+      setAddError('Email is required');
       return;
     }
-    addMemberMutation.mutate({ user_id: newUserId.trim(), role: newRole });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setAddError('Enter a valid email address');
+      return;
+    }
+    addMemberMutation.mutate({ email, role: newRole });
   }
 
   function handleCopyUserId(userId: string) {
@@ -1150,8 +1217,8 @@ function MembersTab({
         <AddMemberModal
           addOpen={addOpen}
           addError={addError}
-          newUserId={newUserId}
-          setNewUserId={setNewUserId}
+          newEmail={newEmail}
+          setNewEmail={setNewEmail}
           newRole={newRole}
           setNewRole={setNewRole}
           addMemberMutation={addMemberMutation}
@@ -1298,8 +1365,8 @@ function MembersTab({
       <AddMemberModal
         addOpen={addOpen}
         addError={addError}
-        newUserId={newUserId}
-        setNewUserId={setNewUserId}
+        newEmail={newEmail}
+        setNewEmail={setNewEmail}
         newRole={newRole}
         setNewRole={setNewRole}
         addMemberMutation={addMemberMutation}
@@ -1314,8 +1381,8 @@ function MembersTab({
 function AddMemberModal({
   addOpen,
   addError,
-  newUserId,
-  setNewUserId,
+  newEmail,
+  setNewEmail,
   newRole,
   setNewRole,
   addMemberMutation,
@@ -1324,8 +1391,8 @@ function AddMemberModal({
 }: {
   addOpen: boolean;
   addError: string;
-  newUserId: string;
-  setNewUserId: (v: string) => void;
+  newEmail: string;
+  setNewEmail: (v: string) => void;
   newRole: string;
   setNewRole: (v: string) => void;
   addMemberMutation: { isPending: boolean };
@@ -1357,10 +1424,11 @@ function AddMemberModal({
                 )}
               </AnimatePresence>
               <Input
-                label="User ID"
-                placeholder="Enter the user's ID"
-                value={newUserId}
-                onChange={(e) => setNewUserId(e.target.value)}
+                label="Email"
+                type="email"
+                placeholder="Enter the member's email address"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
                 autoFocus
               />
               <Select

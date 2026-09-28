@@ -28,6 +28,13 @@ import { useAuth } from '../context/auth-context';
 import { useToast } from '../components/toast-context';
 import { getTrustBadgeColor } from '../utils/relevance';
 
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces
+// (this page has no citation-chip renderer) — show the same bracketed
+// number the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const CATEGORY_OPTIONS: { value: GoldenCategory; label: string }[] = [
@@ -171,7 +178,9 @@ function PromoteGoldenModal({
   // than bake it in. Start the field empty and make the reviewer write one.
   const isAbstention = Boolean(item.edge_case);
   const [category, setCategory] = useState<GoldenCategory>('answerable');
-  const [referenceAnswer, setReferenceAnswer] = useState(isAbstention ? '' : item.response_text ?? '');
+  const [referenceAnswer, setReferenceAnswer] = useState(
+    isAbstention ? '' : stripCitationMarkers(item.response_text ?? ''),
+  );
   const [difficulty, setDifficulty] = useState('1');
   const [notes, setNotes] = useState('');
   const [touched, setTouched] = useState(false);
@@ -315,8 +324,9 @@ export default function ReviewQueuePage() {
     };
   }, [workspaceId]);
 
-  // Quarantine is its own request so a 403 (viewer role) or a disabled scanner
-  // never blanks the main review queue.
+  // Quarantine is its own request so a disabled scanner (or any other
+  // failure) never blanks the main review queue. Viewers can read this list
+  // (C4) — only the release/dismiss mutations below are editor-only.
   useEffect(() => {
     if (!workspaceId) return undefined;
     let cancelled = false;
@@ -547,7 +557,7 @@ export default function ReviewQueuePage() {
                         </span>
                       </div>
                       <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-text-muted">
-                        {item.response_text || 'No answer text was persisted.'}
+                        {item.response_text ? stripCitationMarkers(item.response_text) : 'No answer text was persisted.'}
                       </p>
                       <TrustBreakdown item={item} />
                     </div>

@@ -531,7 +531,10 @@ export interface UpdateWorkspaceRequest {
 }
 
 export interface AddMemberRequest {
-  user_id: string;
+  // C2: the backend accepts either identifier — the Members tab (owners have
+  // no way to look up another user's UUID) sends `email`.
+  user_id?: string;
+  email?: string;
   role?: string;
 }
 

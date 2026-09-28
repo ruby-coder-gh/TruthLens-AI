@@ -58,6 +58,28 @@ const sizeStyles: Record<ButtonSize, string> = {
   lg: 'h-11 rounded-control px-6 text-[15px] gap-2',
 };
 
+// Shared with any non-`<button>` element that needs to *look* like a Button
+// without nesting inside one — e.g. a react-router `<Link>` styled as a CTA.
+// A `<Link>` already renders an `<a>`, and an `<a><button>…</button></a>`
+// (interactive content inside interactive content) is invalid HTML and
+// confuses screen readers (BUG-58), so those call sites use this on the
+// anchor directly instead of wrapping a real `<Button>`.
+export function buttonClassName(variant: ButtonVariant = 'primary', size: ButtonSize = 'md', className?: string): string {
+  return clsx(
+    'inline-flex items-center justify-center whitespace-nowrap font-semibold',
+    'transition-[background-color,border-color,color,box-shadow] duration-150',
+    // Two-tone ring: `ring-focus-halo` paints the outline-offset gap, so
+    // the outline stays legible on a filled primary button where the ring
+    // and the fill are otherwise the same indigo (QA S3-5).
+    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
+    'focus-visible:ring-2 focus-visible:ring-focus-halo',
+    'disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
+    variantStyles[variant],
+    sizeStyles[size],
+    className,
+  );
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = 'primary', size = 'md', loading = false, disabled, className, children, ...props }, ref) => {
     const isDisabled = disabled || loading;
@@ -67,19 +89,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         whileHover={{ scale: isDisabled ? 1 : 1.02 }}
         whileTap={{ scale: isDisabled ? 1 : 0.98 }}
-        className={clsx(
-          'inline-flex items-center justify-center whitespace-nowrap font-semibold',
-          'transition-[background-color,border-color,color,box-shadow] duration-150',
-          // Two-tone ring: `ring-focus-halo` paints the outline-offset gap, so
-          // the outline stays legible on a filled primary button where the ring
-          // and the fill are otherwise the same indigo (QA S3-5).
-          'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring',
-          'focus-visible:ring-2 focus-visible:ring-focus-halo',
-          'disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none',
-          variantStyles[variant],
-          sizeStyles[size],
-          className,
-        )}
+        className={buttonClassName(variant, size, className)}
         {...(props as HTMLMotionProps<'button'>)}
       >
         {loading && <Loader2 size={size === 'sm' ? 14 : 16} className="animate-spin" />}
