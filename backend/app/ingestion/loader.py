@@ -19,6 +19,7 @@ except ImportError:
     fitz = None  # type: ignore[assignment]
 
 _LINE_END_HYPHEN = re.compile(r"(?<=[a-z])-\n(?=[a-z])")
+_LINE_END_COMPOUND = re.compile(r"(?<=\w)-\s*\n\s*(?=[A-Z0-9])")
 
 
 async def load(path: Path, mime_type: str) -> list[dict[str, Any]]:
@@ -84,6 +85,8 @@ def _block_paragraph(block_text: str) -> str:
     # ponytail: "fabri-\ncation" -> "fabrication" also turns a compound split
     # at its hyphen ("gas-\nbacked") into "gasbacked"; needs a dictionary to tell apart.
     text = _LINE_END_HYPHEN.sub("", text)
+    # "Fourth-\nQuarter" is a real compound: keep the hyphen, drop the break.
+    text = _LINE_END_COMPOUND.sub("-", text)
     return " ".join(text.split())
 
 
