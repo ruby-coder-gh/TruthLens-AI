@@ -328,6 +328,11 @@ export default function WorkspacesPage() {
           // Determine current user's role
           const isOwner = ws.owner_id === user?.id;
           const role = isOwner ? 'owner' : 'member';
+          // BUG-25: a grid item's min-width defaults to its content's
+          // intrinsic size unless given min-w-0 — without it, a long
+          // workspace name forced the whole card (and the grid) wider than
+          // the viewport at 375px, and the inner `truncate` never got a
+          // chance to engage.
           return (
             <motion.div
               key={ws.id}
@@ -336,7 +341,7 @@ export default function WorkspacesPage() {
               whileHover={{ y: -6, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] as const }}
-              className="group relative cursor-pointer"
+              className="group relative min-w-0 cursor-pointer"
               onClick={() => navigate(`/workspaces/${ws.id}`)}
               role="button"
               tabIndex={0}
