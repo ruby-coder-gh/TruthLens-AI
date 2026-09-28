@@ -20,15 +20,20 @@ interface UploadFile {
   error?: string;
 }
 
+// BUG-23. Matches `SUPPORTED_MIME_TYPES` in `backend/app/api/documents.py`
+// exactly — xlsx was accepted here but rejected by the server (never in
+// `SUPPORTED_MIME_TYPES`), while csv/json were rejected here despite the
+// server, the workspace upload, and the landing page all supporting them.
 const ALLOWED_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/plain',
   'text/markdown',
+  'text/csv',
+  'application/json',
 ];
 
-const ACCEPT_STRING = '.pdf,.docx,.xlsx,.txt,.md';
+const ACCEPT_STRING = '.pdf,.docx,.txt,.md,.csv,.json';
 
 // ─── Ingestion Tracker ─────────────────────────────────────────────────────────
 
@@ -175,7 +180,7 @@ export default function AdminUploadPage() {
   function addFiles(newFiles: FileList | File[]) {
     const valid: UploadFile[] = [];
     for (const f of Array.from(newFiles)) {
-      if (!ALLOWED_TYPES.includes(f.type) && !f.name.match(/\.(pdf|docx|xlsx|txt|md)$/i)) {
+      if (!ALLOWED_TYPES.includes(f.type) && !f.name.match(/\.(pdf|docx|txt|md|csv|json)$/i)) {
         addToast(`Unsupported file type: ${f.name}`, 'error');
         continue;
       }
@@ -278,7 +283,7 @@ export default function AdminUploadPage() {
         </button>
         <PageHeader
           title="Upload Documents"
-          description="Upload PDF, DOCX, XLSX, TXT, or MD files."
+          description="Upload PDF, DOCX, TXT, MD, CSV, or JSON files."
         />
       </div>
 
@@ -350,7 +355,7 @@ export default function AdminUploadPage() {
               Browse Files
             </Button>
           </label>
-          <p className="text-xs text-text-dim">PDF, DOCX, XLSX, TXT, MD — max 50MB</p>
+          <p className="text-xs text-text-dim">PDF, DOCX, TXT, MD, CSV, JSON — max 50MB</p>
         </div>
       </motion.div>
 
