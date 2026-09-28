@@ -1,8 +1,11 @@
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -77,19 +80,39 @@ function CircularGauge({ score }: { score: number }) {
   );
 }
 
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces —
+// this report has no citation-chip renderer, so show the bracketed number
+// the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
+
+// BUG-10: the old hand-rolled line-by-line renderer only recognised a
+// heading/list/paragraph at the *start* of a line — `**bold**`, `---` rules,
+// and every other inline/block markdown construct rendered as literal
+// characters. Real markdown parsing (already a project dependency, used the
+// same way by the Claim Ledger's ProseAnswer) fixes all of it at once;
+// Tailwind's preflight strips default heading/list styling, so each element
+// gets an explicit class to keep the report's existing look.
+const reportMarkdownComponents: Components = {
+  h1: ({ children }) => <h3 className="mt-6 mb-2 text-lg font-bold text-text">{children}</h3>,
+  h2: ({ children }) => <h3 className="mt-5 mb-2 text-base font-semibold text-text">{children}</h3>,
+  h3: ({ children }) => <h3 className="mt-4 mb-1 text-sm font-semibold text-text">{children}</h3>,
+  p: ({ children }) => <p className="text-sm leading-relaxed text-text-muted">{children}</p>,
+  ul: ({ children }) => <ul className="ml-5 list-disc space-y-1 text-sm leading-relaxed text-text-muted">{children}</ul>,
+  ol: ({ children }) => <ol className="ml-5 list-decimal space-y-1 text-sm leading-relaxed text-text-muted">{children}</ol>,
+  li: ({ children }) => <li>{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-text">{children}</strong>,
+  hr: () => <hr className="my-4 border-border" />,
+  a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-primary-soft underline underline-offset-2 hover:text-primary">{children}</a>,
+};
+
 function renderReportText(text: string): React.ReactNode {
-  return text.split('\n').map((line, index) => {
-    const trimmed = line.trim();
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const className = heading[1].length === 1 ? 'mt-6 mb-2 text-lg font-bold text-text' : heading[1].length === 2 ? 'mt-5 mb-2 text-base font-semibold text-text' : 'mt-4 mb-1 text-sm font-semibold text-text';
-      return <h3 key={index} className={className}>{heading[2]}</h3>;
-    }
-    if (trimmed.match(/^[-*]\s+/)) return <li key={index} className="ml-5 list-disc text-sm leading-relaxed text-text-muted">{trimmed.replace(/^[-*]\s+/, '')}</li>;
-    if (trimmed.match(/^\d+\.\s+/)) return <li key={index} className="ml-5 list-decimal text-sm leading-relaxed text-text-muted">{trimmed.replace(/^\d+\.\s+/, '')}</li>;
-    if (!trimmed) return <div key={index} className="h-2" />;
-    return <p key={index} className="text-sm leading-relaxed text-text-muted">{trimmed}</p>;
-  });
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={reportMarkdownComponents}>
+      {stripCitationMarkers(text)}
+    </ReactMarkdown>
+  );
 }
 
 export default function InvestigationPage() {
@@ -127,6 +150,22 @@ export default function InvestigationPage() {
   });
 
   const isLoading = runMutation.isPending;
+
+  // BUG-10: the run has no per-step progress the frontend can show (a single
+  // REST call, no streaming), and a run can take several minutes — a fake,
+  // endlessly-looping progress bar with no other signal reads as frozen.
+  // Elapsed time is the one honest, purely-client-side signal available.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const elapsedTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!isLoading) {
+      window.clearInterval(elapsedTimerRef.current);
+      return undefined;
+    }
+    setElapsedSeconds(0);
+    elapsedTimerRef.current = window.setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(elapsedTimerRef.current);
+  }, [isLoading]);
   const citations = useMemo(() => (result?.sub_questions ?? []).flatMap((subQuestion, subQuestionIndex) =>
     (subQuestion.citations ?? []).map((citation, citationIndex) => ({ citation, subQuestion, subQuestionIndex, citationIndex })),
   ), [result]);
@@ -142,7 +181,7 @@ export default function InvestigationPage() {
   const copyReport = async () => {
     if (!result) return;
     try {
-      await navigator.clipboard.writeText(result.final_report);
+      await navigator.clipboard.writeText(stripCitationMarkers(result.final_report));
       addToast('Report copied to clipboard.', 'success');
     } catch {
       addToast('Could not copy the report. Check browser permissions.', 'error');
@@ -152,7 +191,7 @@ export default function InvestigationPage() {
   const exportReport = () => {
     if (!result) return;
     const evidence = citations.map(({ citation, subQuestion }, index) => `- [${index + 1}] ${citation.text || 'Cited passage'}\n  Sub-question: ${subQuestion.question}\n  Chunk: ${citation.chunk_id}`).join('\n');
-    const content = [`# Investigation Case File`, '', `**Question:** ${result.query}`, `**Case ID:** ${result.id}`, `**Review status:** ${reviewLabel(result.review_status)}`, `**Trust score:** ${result.trust_score != null ? `${(result.trust_score * 100).toFixed(0)}%` : 'Unavailable'}`, '', '## Report', result.final_report, '', '## Evidence Register', evidence || 'No source spans were returned for this case.'].join('\n');
+    const content = [`# Investigation Case File`, '', `**Question:** ${result.query}`, `**Case ID:** ${result.id}`, `**Review status:** ${reviewLabel(result.review_status)}`, `**Trust score:** ${result.trust_score != null ? `${(result.trust_score * 100).toFixed(0)}%` : 'Unavailable'}`, '', '## Report', stripCitationMarkers(result.final_report), '', '## Evidence Register', evidence || 'No source spans were returned for this case.'].join('\n');
     const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
@@ -214,7 +253,7 @@ export default function InvestigationPage() {
           </motion.div>
 
           <AnimatePresence mode="wait">
-            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit" className="space-y-4"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file</p><p className="text-xs text-text-muted">Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card><ReasoningTimeline isLoading /></motion.div>}
+            {isLoading && <motion.div key="loading" variants={fadeIn} initial="initial" animate="animate" exit="exit" className="space-y-4"><Card className="space-y-4 p-6"><div className="flex items-center gap-3"><Loader2 size={20} className="animate-spin text-primary-soft" /><div><p className="text-sm font-medium text-text">Building your case file{elapsedSeconds > 0 ? ` — ${formatLatency(elapsedSeconds * 1000)} elapsed` : ''}</p><p className="text-xs text-text-muted">{elapsedSeconds < 30 ? 'Decomposing the question, retrieving evidence, evaluating claims, and preserving the result.' : 'Still working — deep, multi-step research can take a few minutes for large document sets.'}</p></div></div><div className="h-2 overflow-hidden rounded-full bg-card-2"><motion.div className="h-full w-2/3 rounded-full bg-primary" initial={{ x: '-100%' }} animate={{ x: '160%' }} transition={{ duration: 1.8, repeat: Infinity, ease: 'linear' }} /></div></Card><ReasoningTimeline isLoading /></motion.div>}
           </AnimatePresence>
 
           {runError && <Card className="border-red/30 bg-red/5 p-5"><p className="text-sm font-medium text-red">Investigation failed</p><p className="mt-1 text-sm text-text-muted">{runError}</p><Button className="mt-4" variant="secondary" size="sm" onClick={() => runMutation.mutate()}><Search size={14} /> Retry investigation</Button></Card>}
