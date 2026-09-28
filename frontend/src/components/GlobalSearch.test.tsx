@@ -112,4 +112,47 @@ describe('GlobalSearch', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
+
+  it('shows a friendly file type instead of a raw MIME snippet for document results (BUG-53)', async () => {
+    mockSearch.mockResolvedValue({
+      data: [{
+        id: 'd-1',
+        resource_type: 'document',
+        workspace_id: 'ws-1',
+        workspace_name: 'Northwind Renewables',
+        title: 'Annual Report 2025.docx',
+        snippet: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        score: 0.8,
+      }],
+      meta: { page: 1, page_size: 50, total: 1, workspace_count: 1 },
+    });
+    const user = userEvent.setup();
+    renderHarness();
+
+    await user.click(screen.getByRole('button', { name: /search all accessible workspaces/i }));
+    await user.type(screen.getByPlaceholderText(/search questions/i), 'annual');
+
+    expect(await screen.findByText('DOCX document')).toBeInTheDocument();
+    expect(screen.queryByText(/application\/vnd/i)).not.toBeInTheDocument();
+  });
+
+  it('strips raw [source:N] markers from result snippets (BUG-9)', async () => {
+    mockSearch.mockResolvedValue({
+      data: [{
+        ...result,
+        snippet: 'Revenue was €412 million [source:2].',
+      }],
+      meta: { page: 1, page_size: 50, total: 1, workspace_count: 1 },
+    });
+    const user = userEvent.setup();
+    renderHarness();
+
+    await user.click(screen.getByRole('button', { name: /search all accessible workspaces/i }));
+    // A query that doesn't match the snippet text, so `highlight()` doesn't
+    // split it into multiple nodes and the assertion below stays simple.
+    await user.type(screen.getByPlaceholderText(/search questions/i), 'workspace');
+
+    expect(await screen.findByText('Revenue was €412 million [2].')).toBeInTheDocument();
+    expect(screen.queryByText(/\[source:2\]/)).not.toBeInTheDocument();
+  });
 });

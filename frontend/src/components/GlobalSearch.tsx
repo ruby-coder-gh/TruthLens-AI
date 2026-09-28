@@ -5,6 +5,36 @@ import { Input, Modal, Skeleton, EmptyState, Badge } from './ui';
 import { searchApi } from '../api/client';
 import type { SearchResult } from '../api/types';
 
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces —
+// this snippet has no citation-chip renderer, so show the bracketed number
+// the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
+
+const MIME_LIKE = /^[\w.+-]+\/[\w.+-]+$/;
+
+// BUG-53: a document result's snippet is sometimes just its raw MIME type
+// ("application/vnd.openxmlformats-officedocument…") rather than an excerpt.
+// Show a short, human file-type label instead — same mapping DocumentsBrowsePage
+// uses for the same purpose.
+function friendlySnippet(result: SearchResult): string {
+  const snippet = stripCitationMarkers(result.snippet);
+  if (result.resource_type !== 'document' || !MIME_LIKE.test(snippet)) return snippet;
+  const mime = snippet;
+  const extension = result.title.split('.').pop()?.toUpperCase();
+  if (extension && ['PDF', 'DOCX', 'TXT', 'MD', 'CSV', 'JSON', 'XLSX'].includes(extension)) {
+    return `${extension} document`;
+  }
+  if (mime.includes('pdf')) return 'PDF document';
+  if (mime.includes('wordprocessingml') || mime.includes('msword')) return 'Word document';
+  if (mime.includes('spreadsheetml') || mime.includes('excel') || mime.includes('csv')) return 'Spreadsheet';
+  if (mime.includes('markdown')) return 'Markdown document';
+  if (mime.includes('json')) return 'JSON document';
+  if (mime.includes('text')) return 'Text document';
+  return 'Document';
+}
+
 function highlight(text: string, query: string) {
   if (!query.trim()) return text;
   const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig'));
@@ -121,7 +151,7 @@ export default function GlobalSearch() {
                   const Icon = result.resource_type === 'query' ? MessageSquare : FileText;
                   return <button key={`${result.resource_type}-${result.id}`} type="button" onClick={() => openResult(result)} className="flex w-full items-start gap-3 rounded-xl border border-border bg-bg-soft p-3 text-left transition-colors hover:border-primary/35 hover:bg-primary/5">
                     <span className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary-soft"><Icon size={15} /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-text">{highlight(result.title, query)}</span><span className="mt-1 block text-xs leading-relaxed text-text-muted">{highlight(result.snippet, query)}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-text">{highlight(result.title, query)}</span><span className="mt-1 block text-xs leading-relaxed text-text-muted">{highlight(friendlySnippet(result), query)}</span></span>
                     <Badge color="gray">{result.resource_type}</Badge>
                   </button>;
                 })}
