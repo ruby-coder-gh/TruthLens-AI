@@ -29,6 +29,7 @@ from app.evaluation.golden_store import (
     list_promoted_entries,
 )
 from app.models.audit_log import AuditLog
+from app.models.chunk import Chunk
 from app.models.chunk_quarantine import ChunkQuarantine
 from app.models.document import Document
 from app.models.eval_run import EvalRun
@@ -178,9 +179,9 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
 
     counts = await asyncio.gather(
         _count(User), _count(Workspace), _count(Document),
-        _count(Query), _count(Feedback),
+        _count(Query), _count(Feedback), _count(Chunk),
     )
-    total_users, total_workspaces, total_documents, total_queries, total_feedback = counts
+    total_users, total_workspaces, total_documents, total_queries, total_feedback, total_chunks = counts
 
     trust_r, rating_r, cache_hits_r = await asyncio.gather(
         db.execute(select(func.avg(Query.trust_score)).where(Query.trust_score.isnot(None))),
@@ -197,7 +198,7 @@ async def get_admin_stats(db: AsyncSession = Depends(get_db)):
         total_workspaces=total_workspaces,
         total_documents=total_documents,
         total_queries=total_queries,
-        total_chunks=0,
+        total_chunks=total_chunks,
         avg_trust_score=round(float(avg_trust), 4) if avg_trust else None,
         avg_rating=round(float(avg_rating), 2) if avg_rating else None,
         total_feedback=total_feedback,
@@ -1227,8 +1228,12 @@ async def get_admin_settings():
     return AdminSettingsResponse(
         app_name=settings.APP_NAME,
         app_version=settings.APP_VERSION,
-        max_upload_size_mb=settings.SERVER_MAX_UPLOAD_SIZE // 1024 // 1024,
-        trust_score_high_threshold=settings.GUARDRAIL_THRESHOLD,
+        max_upload_size_mb=_settings_overrides.get(
+            "max_upload_size_mb", settings.SERVER_MAX_UPLOAD_SIZE // 1024 // 1024
+        ),
+        trust_score_high_threshold=_settings_overrides.get(
+            "trust_score_high_threshold", settings.GUARDRAIL_THRESHOLD
+        ),
         trust_score_low_threshold=_settings_overrides.get("trust_score_low_threshold", TRUST_SCORE_LOW_THRESHOLD),
         rate_limit_enabled=_settings_overrides.get("rate_limit_enabled", settings.RATE_LIMIT_ENABLED),
         rate_limit_requests=_settings_overrides.get("rate_limit_requests", settings.RATE_LIMIT_REQUESTS),
