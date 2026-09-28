@@ -350,6 +350,12 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
     const panel = panelRef.current;
     const focusFirst = () => {
+      // BUG-13: an `autoFocus` child (e.g. a search input) already claims
+      // focus natively on mount, before this rAF runs. Stealing it back to
+      // "the first focusable element" always grabs the header's Close
+      // button instead, since it's earlier in the DOM than the content.
+      // Only fall back to that default when nothing in the panel has focus.
+      if (panel && document.activeElement && panel.contains(document.activeElement)) return;
       const focusable = panel?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
       (focusable && focusable.length > 0 ? focusable[0] : panel)?.focus();
     };

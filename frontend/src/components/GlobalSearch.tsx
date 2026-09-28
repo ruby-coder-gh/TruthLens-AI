@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { startTransition, useEffect, useMemo, useState } from 'react';
 import { FileText, MessageSquare, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Input, Modal, Skeleton, EmptyState, Badge } from './ui';
@@ -72,10 +72,17 @@ export default function GlobalSearch() {
   const openResult = (result: SearchResult) => {
     setOpen(false);
     setQuery('');
-    navigate(result.resource_type === 'query'
+    const path = result.resource_type === 'query'
       ? `/workspaces/${result.workspace_id}/queries/${result.id}`
-      : `/workspaces/${result.workspace_id}/documents/${result.id}`,
-    );
+      : `/workspaces/${result.workspace_id}/documents/${result.id}`;
+    // BUG-3: closing the modal and navigating in the same tick let React's
+    // Suspense boundary (the target route's lazy chunk) revert the whole
+    // tree — including this closing modal — to its fallback mid-exit, which
+    // orphans the AnimatePresence exit animation: the scrim never finishes
+    // unmounting and blocks every click until reload. A transition keeps the
+    // current page (with the modal already closed) on screen until the next
+    // route is ready, so the close always completes normally.
+    startTransition(() => navigate(path));
   };
 
   return (
