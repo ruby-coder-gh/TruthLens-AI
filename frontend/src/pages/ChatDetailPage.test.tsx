@@ -7,10 +7,15 @@ import ChatDetailPage from './ChatDetailPage';
 import { __resetAnswerViewForTests } from '../components/ledger/useAnswerView';
 import type { QueryDetail, Claim } from '../api/types';
 
-const { getAnywhere } = vi.hoisted(() => ({ getAnywhere: vi.fn() }));
+const { getAnywhere, exportMarkdown, feedbackSubmit } = vi.hoisted(() => ({
+  getAnywhere: vi.fn(),
+  exportMarkdown: vi.fn().mockResolvedValue({ blob: new Blob(['#']), filename: 'a.md' }),
+  feedbackSubmit: vi.fn().mockResolvedValue({}),
+}));
 
 vi.mock('../api/client', () => ({
-  queryApi: { getAnywhere },
+  queryApi: { getAnywhere, exportMarkdown, compare: vi.fn() },
+  feedbackApi: { submit: feedbackSubmit },
   radarApi: { get: vi.fn().mockResolvedValue({ latest_scan: null, contradictions: [], counts: { open: 0, dismissed: 0, resolved: 0 } }) },
   receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
   // ChatDetailPage mounts <AnnotationThread>, which counts annotations on mount.
@@ -67,7 +72,45 @@ function renderDetail(queryId = 'q-1') {
 describe('ChatDetailPage', () => {
   beforeEach(() => {
     getAnywhere.mockReset();
+    exportMarkdown.mockClear();
+    feedbackSubmit.mockClear();
+    // The Markdown export clicks a generated <a download>; jsdom can't
+    // navigate and logs "Not implemented" for it.
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     __resetAnswerViewForTests();
+  });
+
+  it('shows the claim-summary tally chips and a Copy/Export/feedback action bar, same as the live chat (BUG-22)', async () => {
+    const user = userEvent.setup();
+    getAnywhere.mockResolvedValue(
+      makeQuery({
+        response_text: 'Revenue grew 12%.',
+        response_sources: [],
+        claims: [makeClaim({ verdict: 'supported' })],
+      }),
+    );
+
+    renderDetail();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '1 verified' })).toBeInTheDocument());
+
+    await user.click(screen.getByLabelText('Export as Markdown'));
+    expect(exportMarkdown).toHaveBeenCalledWith('q-1');
+
+    await user.click(screen.getByLabelText('Good answer'));
+    expect(feedbackSubmit).toHaveBeenCalledWith('q-1', { rating: 5 });
+
+    // BUG-31: Regenerate belongs on every complete answer here too.
+    expect(screen.getByLabelText('Regenerate with fresh retrieval')).toBeInTheDocument();
+  });
+
+  it('says "Guardrail failed" instead of "Answer verified" for a stored answer whose guardrail did not pass (BUG-6)', async () => {
+    getAnywhere.mockResolvedValue(makeQuery({ guardrail_passed: false, response_sources: [] }));
+
+    renderDetail();
+
+    await waitFor(() => expect(screen.getByText('Guardrail failed')).toBeInTheDocument());
+    expect(screen.queryByText('How this answer was verified')).not.toBeInTheDocument();
   });
 
   it('renders the answer as prose with resolved citations, not raw [source:N] markers', async () => {

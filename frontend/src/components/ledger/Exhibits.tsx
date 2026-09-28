@@ -6,7 +6,7 @@ import { clsx } from 'clsx';
 import { useSourceViewer } from '../../context/SourceViewerContext';
 import { shortDocTitle } from '../../utils/docTitle';
 import { relevancePercent } from '../../utils/relevance';
-import type { Source } from '../../api/types';
+import type { Claim, Source } from '../../api/types';
 
 export interface ExhibitsProps {
   sources: Source[];
@@ -15,9 +15,15 @@ export interface ExhibitsProps {
   allDocNames: string[];
   workspaceId?: string;
   loading?: boolean;
+  /** Claims in this answer — backfills a source's page number when it wasn't
+   *  set on the source itself (BUG-8: a freshly generated, non-cached
+   *  answer's WS `sources` event never carried `page_number`, only a cached
+   *  replay's did; the guardrail's claims always have it for the same
+   *  chunk). */
+  claims?: Claim[] | null;
 }
 
-export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, loading = false }: ExhibitsProps) {
+export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, loading = false, claims }: ExhibitsProps) {
   const { open: openViewer } = useSourceViewer();
 
   if (loading) {
@@ -60,6 +66,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
           const cited = citedIndices.has(n);
           const rel = relevancePercent(source.relevance_score);
           const title = shortDocTitle(source.document_name, allDocNames);
+          const pageNumber = source.page_number ?? claims?.find((c) => c.chunk_id && c.chunk_id === source.chunk_id)?.page_number ?? null;
           return (
             <li key={source.chunk_id || i}>
               <button
@@ -71,7 +78,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
                     documentId: source.document_id,
                     chunkId: source.chunk_id,
                     documentName: source.document_name,
-                    pageNumber: source.page_number,
+                    pageNumber,
                   })
                 }
                 title={source.document_name}
@@ -79,7 +86,7 @@ export function Exhibits({ sources, citedIndices, allDocNames, workspaceId, load
               >
                 <span className="w-7 shrink-0 font-mono text-xs text-text-dim">[{n}]</span>
                 <span className="min-w-0 flex-1 truncate font-medium text-text">{title}</span>
-                {source.page_number != null && <span className="hidden shrink-0 text-xs text-text-muted sm:inline">page {source.page_number}</span>}
+                {pageNumber != null && <span className="hidden shrink-0 text-xs text-text-muted sm:inline">page {pageNumber}</span>}
                 {(source.conflicts ?? 0) > 0 ? (
                   <span className="hidden shrink-0 items-center gap-1 text-xs font-medium text-conflict sm:flex">
                     <Scale size={13} aria-hidden="true" />

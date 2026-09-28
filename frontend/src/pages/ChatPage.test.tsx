@@ -124,14 +124,19 @@ function guardrailPayload(claims: Claim[]) {
   return { passed: true, score: 1, details: '', claims, unsupportedClaims: [] };
 }
 
-function renderChatPage() {
+function renderChatPage(username?: string) {
   return renderWithProviders(
     <SourceViewerProvider>
       <Routes>
         <Route path="/workspaces/:id/chat" element={<ChatPage />} />
       </Routes>
     </SourceViewerProvider>,
-    { route: '/workspaces/ws-1/chat' },
+    {
+      route: '/workspaces/ws-1/chat',
+      authValue: username
+        ? { user: { id: 'u1', email: 'demo@x.com', username, role: 'analyst', is_active: true, created_at: '', updated_at: '' }, isAuthenticated: true }
+        : undefined,
+    },
   );
 }
 
@@ -210,6 +215,81 @@ describe('ChatPage', () => {
 
     await user.click(screen.getByLabelText('Export as Markdown'));
     expect(queryApi.exportMarkdown).toHaveBeenCalledWith('q-1');
+  });
+
+  it('copies the answer with [source:N] markers replaced by [N], and offers Regenerate on a non-cached answer (BUG-9, BUG-31)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+    act(() => {
+      callbacks.onToken?.('Revenue was €412M [source:1].');
+      callbacks.onComplete?.({ query_id: 'q-fresh', latency_ms: 500, model_used: 'qwen3:4b', token_count: 9, from_cache: false });
+    });
+
+    // Regenerate shows up on a fresh (non-cached) complete answer, not just a
+    // cached one (BUG-31).
+    const regenerate = screen.getByLabelText('Regenerate with fresh retrieval');
+    expect(regenerate).toBeInTheDocument();
+    await user.click(regenerate);
+    expect(instances).toHaveLength(2);
+    expect(instances[1].forceRefresh).toBe(true);
+
+    await user.click(screen.getByLabelText('Copy response'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Revenue was €412M [1].');
+  });
+
+  it('shows the sidebar-consistent two-word initials on the question avatar (BUG-32)', async () => {
+    const user = userEvent.setup();
+    renderChatPage('demo_analyst');
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Hi there');
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByText('DA')).toBeInTheDocument();
+    expect(screen.queryByText('DE')).not.toBeInTheDocument();
+  });
+
+  it('says "Guardrail failed" instead of "Answer verified" when the guardrail did not pass (BUG-6)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Emissions this year?');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+    act(() => {
+      callbacks.onToken?.('Emissions fell.');
+      callbacks.onGuardrail?.({ passed: false, score: 0.38, details: '', claims: [makeClaim({ verdict: 'unsupported' })], unsupportedClaims: [] });
+      callbacks.onComplete?.({ query_id: 'q-fail', latency_ms: 500, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    expect(screen.getByText('Guardrail failed')).toBeInTheDocument();
+    expect(screen.queryByText('How this answer was verified')).not.toBeInTheDocument();
+  });
+
+  it('backfills an exhibit page number from a claim citing the same chunk (BUG-8: fresh answers omit Source.page_number)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+    act(() => {
+      callbacks.onToken?.('Revenue grew 12%.');
+      // A fresh (non-cached) source with no page_number — the live WS path
+      // never sends one — but a claim citing the same chunk carries it.
+      callbacks.onSource?.(makeSource());
+      callbacks.onGuardrail?.(guardrailPayload([makeClaim({ verdict: 'supported', page_number: 5 })]));
+      callbacks.onComplete?.({ query_id: 'q-page', latency_ms: 500, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    expect(screen.getAllByText('page 5', { exact: false }).length).toBeGreaterThan(0);
   });
 
   it('shows an error and a Retry action when onError fires', async () => {
@@ -581,6 +661,9 @@ describe('ChatPage', () => {
       chunkId: 'chunk-1',
       documentName: 'Alpha Report',
       pageNumber: 3,
+      // C1: the ledger row passes the claim's own evidence sentence so the
+      // viewer can locate just the cited passage, not the whole chunk.
+      highlightText: 'Revenue increased by 12 percent year over year.',
     });
   });
 
