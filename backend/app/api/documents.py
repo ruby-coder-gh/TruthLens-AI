@@ -565,10 +565,18 @@ async def locate_chunk(
     workspace_id: str,
     doc_id: str,
     chunk_id: str,
+    text: str | None = None,
     workspace: Workspace = Depends(check_workspace_access_or_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Locate a chunk's passage in its source document, for the source viewer."""
+    """Locate a chunk's passage in its source document, for the source viewer.
+
+    C1: when `text` is given (a specific evidence sentence, e.g. from the
+    Truth Lens ledger or the Radar), search its fragments first so the
+    highlight sits on just that sentence rather than the whole (often
+    page-sized) chunk; falls back to the whole-chunk search if `text`
+    doesn't match anywhere.
+    """
     doc_result = await db.execute(
         select(Document).where(Document.id == doc_id, Document.workspace_id == workspace_id)
     )
@@ -586,7 +594,14 @@ async def locate_chunk(
     file_path = settings.upload_path / doc.filename
     if doc.mime_type == "application/pdf" and file_path.exists():
         page_number_hint = _lookup_chroma_page_number(workspace_id, doc_id, chunk.index)
-        located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, chunk.content)
+        located = None
+        narrow_text = text.strip() if text else ""
+        if narrow_text:
+            located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, narrow_text)
+            if not located["rects"]:
+                located = None
+        if located is None:
+            located = await asyncio.to_thread(locate_in_pdf, file_path, page_number_hint, chunk.content)
         return ChunkLocateResponse(
             mode="pdf",
             page_number=located["page_number"],

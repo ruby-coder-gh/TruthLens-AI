@@ -297,6 +297,110 @@ async def test_locate_pdf_mode_returns_page_and_rects(client: AsyncClient, auth_
 
 
 @pytest.mark.asyncio
+async def test_locate_pdf_with_text_param_narrows_to_that_sentence(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """C1: when `text` is given, search its fragments first — the returned
+    rects sit only where that sentence is, not the whole (page-sized) chunk."""
+    import fitz
+
+    pdf_path_name = "locate-narrow.pdf"
+    tmp_target = settings.upload_path / pdf_path_name
+    settings.upload_path.mkdir(parents=True, exist_ok=True)
+
+    sentence_a = "Alpha bravo charlie delta echo foxtrot golf hotel."
+    sentence_b = "Zulu yankee xray whiskey victor uniform tango sierra."
+    doc_pdf = fitz.open()
+    page = doc_pdf.new_page()
+    page.insert_text((72, 100), sentence_a, fontsize=11)
+    page.insert_text((72, 400), sentence_b, fontsize=11)
+    doc_pdf.save(tmp_target)
+    doc_pdf.close()
+
+    doc = Document(
+        workspace_id=workspace_id,
+        filename=pdf_path_name,
+        original_filename="locate-narrow.pdf",
+        mime_type="application/pdf",
+        file_size=tmp_target.stat().st_size,
+        status="ready",
+    )
+    test_db.add(doc)
+    await test_db.commit()
+    await test_db.refresh(doc)
+
+    chunk = Chunk(document_id=doc.id, index=0, content=f"{sentence_a} {sentence_b}", token_count=20)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    with patch("app.api.documents._lookup_chroma_page_number", return_value=1):
+        whole = await client.get(
+            f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+            headers=auth_headers,
+        )
+        narrowed = await client.get(
+            f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+            params={"text": sentence_b},
+            headers=auth_headers,
+        )
+    assert whole.status_code == 200
+    assert narrowed.status_code == 200
+
+    whole_rects = whole.json()["rects"]
+    narrowed_rects = narrowed.json()["rects"]
+    assert len(whole_rects) >= 1
+    assert len(narrowed_rects) >= 1
+
+    # The whole-chunk search covers both sentence_a's line (~y=100) and
+    # sentence_b's line (~y=400); the narrowed search only covers sentence_b.
+    whole_min_y = min(r[1] for r in whole_rects)
+    narrowed_min_y = min(r[1] for r in narrowed_rects)
+    assert whole_min_y < narrowed_min_y
+
+
+@pytest.mark.asyncio
+async def test_locate_pdf_text_param_no_match_falls_back_to_whole_chunk(
+    client: AsyncClient, auth_headers, workspace_id, test_db
+):
+    """C1 fallback: `text` that isn't found anywhere still returns the
+    whole-chunk rects, not an empty highlight."""
+    pdf_path_name = "locate-fallback.pdf"
+    tmp_target = settings.upload_path / pdf_path_name
+    settings.upload_path.mkdir(parents=True, exist_ok=True)
+    page1_text, page2_text = _build_two_page_pdf(tmp_target)
+
+    doc = Document(
+        workspace_id=workspace_id,
+        filename=pdf_path_name,
+        original_filename="locate-fallback.pdf",
+        mime_type="application/pdf",
+        file_size=tmp_target.stat().st_size,
+        status="ready",
+    )
+    test_db.add(doc)
+    await test_db.commit()
+    await test_db.refresh(doc)
+
+    chunk = Chunk(document_id=doc.id, index=1, content=page2_text, token_count=10)
+    test_db.add(chunk)
+    await test_db.commit()
+    await test_db.refresh(chunk)
+
+    with patch("app.api.documents._lookup_chroma_page_number", return_value=2):
+        resp = await client.get(
+            f"/api/workspaces/{workspace_id}/documents/{doc.id}/chunks/{chunk.id}/locate",
+            params={"text": "this exact sentence appears nowhere in the pdf"},
+            headers=auth_headers,
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "pdf"
+    assert body["page_number"] == 2
+    assert len(body["rects"]) > 0
+
+
+@pytest.mark.asyncio
 async def test_locate_pdf_fallback_searches_every_page(client: AsyncClient, auth_headers, workspace_id, test_db):
     """A wrong/stale page hint still finds the passage via the full-document fallback."""
     pdf_path_name = "locate-2.pdf"
