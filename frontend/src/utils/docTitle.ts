@@ -8,6 +8,13 @@ const EXT_RE = /\.[a-z0-9]{1,5}$/i;
 // stripped off the front of a name (an em/en dash, colon or hyphen, plus
 // whatever whitespace surrounds it).
 const LEADING_SEP_RE = /^[\s:–—-]+/;
+// Whitespace then an actual separator char right after the shared prefix —
+// stripping is only safe when the name structurally separates the shared
+// part from its own subtitle (BUG-8 round 2: "Northwind Renewables Reports
+// Fourth-Quarter…" has no separator after "Northwind Renewables", so
+// stripping it left the verb-first, subject-less "Reports Fourth-Quarter
+// and Full-Year 2025 Results" — worse than the full title it started as).
+const SEPARATOR_AFTER_PREFIX_RE = /^\s*[:–—-]/;
 
 function stripExt(name: string): string {
   return name.replace(EXT_RE, '').trim();
@@ -58,8 +65,16 @@ export function shortDocTitle(name: string | null | undefined, allNames?: string
 
   const prefix = sharedPrefix(allNames.map(stripExt));
   if (prefix && stripped.startsWith(prefix)) {
-    const rest = stripped.slice(prefix.length).replace(LEADING_SEP_RE, '').trim();
-    if (rest) return rest;
+    const remainder = stripped.slice(prefix.length);
+    // The separator can end up on either side of the cut: it's part of the
+    // shared prefix itself when every name that matters carries it (e.g.
+    // "Northwind Renewables —"), or still sitting at the front of the
+    // remainder when the prefix stopped short of it to match more names.
+    const prefixEndsWithSeparator = /[:–—-]\s*$/.test(prefix);
+    if (prefixEndsWithSeparator || SEPARATOR_AFTER_PREFIX_RE.test(remainder)) {
+      const rest = remainder.replace(LEADING_SEP_RE, '').trim();
+      if (rest) return rest;
+    }
   }
   return stripped || name.trim();
 }

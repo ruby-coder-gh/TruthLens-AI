@@ -18,13 +18,14 @@ describe('shortDocTitle', () => {
     expect(shortDocTitle(CORPUS[2], siblings)).toBe('2025 Sustainability Report');
   });
 
-  it('strips a word-prefix shared by most siblings even without a common separator (BUG-8)', () => {
-    // CORPUS[1] has no " — " (it uses a different construction), but it still
-    // starts with the "Northwind Renewables" words the other two share, so
-    // that much comes off — it no longer reads identically to the others
-    // once truncated ("Northwind Renewab…") the way it did before the fix.
+  it('keeps the full title when stripping the shared prefix would leave no separator (BUG-8 R2)', () => {
+    // CORPUS[1] has no " — " after "Northwind Renewables" (it uses a
+    // different, verb-first construction) — blindly stripping the shared
+    // words left a subject-less fragment, "Reports Fourth-Quarter and
+    // Full-Year 2025 Results", that reads like a grammar error. Since there's
+    // no separator to cut at, the whole title is kept instead.
     expect(shortDocTitle(CORPUS[1], CORPUS)).toBe(
-      'Reports Fourth-Quarter and Full-Year 2025 Results',
+      'Northwind Renewables Reports Fourth-Quarter and Full-Year 2025 Results',
     );
   });
 

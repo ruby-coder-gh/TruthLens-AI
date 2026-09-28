@@ -127,6 +127,11 @@ describe('ClaimLedger', () => {
     expect(screen.queryByText('0.02')).not.toBeInTheDocument();
   });
 
+  it('falls back to the matched source\'s page number when the claim has none yet (K1/BUG-8 live answers)', () => {
+    renderWithProviders(<ClaimLedger claims={[claim({ page_number: null })]} sources={sources} allDocNames={allDocNames} />);
+    expect(screen.getByText(/\[1\] Annual Report 2025, page 3/)).toBeInTheDocument();
+  });
+
   it('fills the score bar with the verdict colour via bg-current, not a runtime-built class (BUG-28)', () => {
     const { container } = renderWithProviders(<ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} />);
     const fill = container.querySelector('.bg-current');
