@@ -71,4 +71,27 @@ describe('AdminUserDetailPage', () => {
 
     await waitFor(() => expect(updateUserRole).toHaveBeenCalledWith('u-1', 'admin'));
   });
+
+  // R2-11: `PUT .../role` returns `UserResponse`, which has no
+  // `last_login_at` — replacing the whole user object with that response
+  // flipped "Last Login" to "Never" until the next reload.
+  it('keeps last_login_at after a role change, even though the PUT response omits it', async () => {
+    const user = userEvent.setup();
+    // The role-update response is the slimmer shape — no last_login_at key.
+    updateUserRole.mockResolvedValue({
+      id: 'u-1', username: 'demo_analyst', email: 'analyst@truthlens.dev', role: 'admin', is_active: true, created_at: '2026-01-01T00:00:00Z',
+    });
+    renderPage();
+
+    expect(await screen.findByText(/Sep 20, 2026/)).toBeInTheDocument();
+
+    const roleSelect = await screen.findByLabelText('Change user role');
+    await user.selectOptions(roleSelect, 'admin');
+    const dialog = await screen.findByRole('dialog', { name: /change role/i });
+    await user.click(within(dialog).getByRole('button', { name: /^change role$/i }));
+
+    await waitFor(() => expect(updateUserRole).toHaveBeenCalled());
+    expect(screen.getByText(/Sep 20, 2026/)).toBeInTheDocument();
+    expect(screen.queryByText('Never')).not.toBeInTheDocument();
+  });
 });
