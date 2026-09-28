@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api import auth, users, workspaces, documents, admin_documents, queries, feedback, admin, admin_prompts, ws, collections, comparisons, investigations, search, review_queue, annotations
+from app.api import auth, users, workspaces, documents, admin_documents, queries, feedback, admin, admin_prompts, ws, collections, comparisons, investigations, search, review_queue, annotations, receipts, radar, demo
 
 api_router = APIRouter(prefix="/api")
 
@@ -24,6 +24,9 @@ api_router.include_router(investigations.router)
 api_router.include_router(search.router)
 api_router.include_router(review_queue.router)
 api_router.include_router(annotations.router)
+api_router.include_router(receipts.router)
+api_router.include_router(radar.router)
+api_router.include_router(demo.router)
 
 # WebSocket router (no prefix — path is /ws/query)
 api_router.include_router(ws.router)

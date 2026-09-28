@@ -199,6 +199,31 @@ class Settings(BaseSettings):
     PII_REDACTION_ENABLED: bool = True
     PII_ENTITIES: str = "EMAIL,PHONE,SSN,CREDIT_CARD,ADDRESS"
 
+    # ─── Demo Mode ─────────────────────────────
+    # A self-contained, seeded demo (fictional corpus + one-click login) for
+    # showing the app without a real workspace. Refused outside DEMO_MODE.
+    DEMO_MODE: bool = False
+    DEMO_WARMUP: bool = True
+    DEMO_PASSWORD: str = ""
+
+    # ─── Ollama Runtime Tuning ─────────────────
+    # Keeps the local model resident between demo queries instead of the
+    # Ollama default unload, and disables qwen3's <think> reasoning block
+    # (which otherwise burns the token budget and can leak into the answer).
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_THINK: bool = False
+
+    # ─── Truth Receipts ────────────────────────
+    RECEIPTS_ENABLED: bool = True
+
+    # ─── Contradiction Radar ───────────────────
+    RADAR_AUTO_SCAN: bool = True
+    RADAR_NEIGHBOURS: int = 4
+    RADAR_MIN_SIMILARITY: float = 0.55
+    RADAR_MIN_CONTRADICTION: float = 0.8
+    RADAR_MAX_CHUNKS: int = 1500
+    RADAR_SENTENCE_PAIRS: int = 3
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.APP_CORS_ORIGINS.split(",") if o.strip()]

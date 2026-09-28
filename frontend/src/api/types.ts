@@ -158,6 +158,8 @@ export interface QueryDetail {
   reviewed_at?: string;
   created_at: string;
   edge_case?: QueryEdgeCase | null;
+  /** Truth Lens (L1) — per-claim verdicts. Null/absent on rows predating the feature. */
+  claims?: Claim[] | null;
 }
 
 export interface Source {
@@ -173,6 +175,26 @@ export interface Source {
   explanation?: string;
   updated_at?: string;
   file_type?: string;
+  /** Contradiction Radar (L5) — count of open contradictions touching this source's document. */
+  conflicts?: number;
+}
+
+// ─── Truth Lens (L1/L2) ──────────────────────────────────────────────────────
+export type ClaimVerdict = 'supported' | 'partial' | 'unsupported' | 'contradicted';
+
+export interface Claim {
+  text: string;
+  start: number;
+  end: number;
+  verdict: ClaimVerdict;
+  entailment: number;
+  contradiction: number;
+  source_index: number | null;
+  chunk_id: string | null;
+  document_id: string | null;
+  document_name: string | null;
+  page_number: number | null;
+  evidence: string | null;
 }
 
 // ─── Feedback ───────────────────────────────────────────────────────────────
@@ -878,3 +900,121 @@ export interface PromptGateFailure {
   thresholds?: EvalThresholds;
   scores?: Record<string, number | null>;
 }
+
+// ─── Truth Receipt (L3/L4) ──────────────────────────────────────────────────
+export interface ReceiptCreated {
+  token: string;
+  url_path: string;
+  seal: string;
+  created_at: string;
+}
+
+export interface ReceiptSummary {
+  token: string;
+  url_path: string;
+  seal: string;
+  created_at: string;
+  revoked_at: string | null;
+  view_count: number;
+}
+
+/** Canonical, signed snapshot of an answer — the payload a receipt seals. */
+export interface ReceiptPayload {
+  version: string;
+  question: string;
+  answer: string;
+  claims: Claim[];
+  sources: Array<{
+    index: number;
+    document_name: string;
+    page_number: number | null;
+    excerpt: string;
+    content_sha256: string;
+  }>;
+  trust: { score: number | null; components: Record<string, number> | null };
+  guardrail: { passed: boolean | null; score: number | null };
+  model_used: string | null;
+  prompt_version: string | null;
+  workspace_name: string | null;
+  asked_at: string | null;
+  issued_at: string;
+  issuer: string;
+}
+
+export interface ReceiptView {
+  payload: ReceiptPayload;
+  canonical: string;
+  seal: string;
+  seal_valid: boolean;
+  signature_valid: boolean;
+  issued_at: string;
+  revoked: boolean;
+}
+
+// ─── Contradiction Radar (L5/L6) ────────────────────────────────────────────
+export type RadarScanStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface RadarScan {
+  id: string;
+  status: RadarScanStatus;
+  scope: string[] | null;
+  chunks_scanned: number;
+  pairs_checked: number;
+  found: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export type ContradictionStatus = 'open' | 'dismissed' | 'resolved';
+
+export interface ContradictionSide {
+  document_id: string;
+  document_name: string;
+  chunk_id: string;
+  page_number: number | null;
+  sentence: string;
+}
+
+export interface Contradiction {
+  id: string;
+  score: number;
+  similarity: number;
+  status: ContradictionStatus;
+  created_at: string;
+  a: ContradictionSide;
+  b: ContradictionSide;
+}
+
+export interface RadarState {
+  latest_scan: RadarScan | null;
+  contradictions: Contradiction[];
+  counts: { open: number; dismissed: number; resolved: number };
+}
+
+// ─── Source viewer (L7/L8) ──────────────────────────────────────────────────
+export interface ChunkLocation {
+  mode: 'pdf' | 'text';
+  page_number: number | null;
+  page_count: number | null;
+  page_width: number | null;
+  page_height: number | null;
+  rects: Array<[number, number, number, number]>;
+  content: string;
+  context_before: string | null;
+  context_after: string | null;
+}
+
+// ─── Demo mode (L9/L10) ──────────────────────────────────────────────────────
+export type ModelWarmState = 'cold' | 'loading' | 'warm' | 'error';
+
+export interface ReadyStatus {
+  status: string;
+  demo_mode: boolean;
+  warm: boolean;
+  ollama: { reachable: boolean; model: string; model_present: boolean };
+  models: { embedder: ModelWarmState; reranker: ModelWarmState; nli: ModelWarmState };
+}
+
+export type DemoPersona = 'analyst' | 'admin';

@@ -55,6 +55,16 @@ import type {
   PromptDiffResponse,
   PromptEvalQueued,
   ActivePrompt,
+  ReceiptCreated,
+  ReceiptSummary,
+  ReceiptView,
+  RadarState,
+  RadarScanStatus,
+  Contradiction,
+  ContradictionStatus,
+  ChunkLocation,
+  ReadyStatus,
+  DemoPersona,
 } from './types';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -214,7 +224,18 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/auth/register',
   '/auth/forgot-password',
   '/auth/reset-password',
+  '/auth/demo-login',
+  '/health/ready',
 ]);
+
+// Prefix-matched public paths — `/receipts/{token}` carries a variable path
+// segment, so it can't live in the exact-match Set above; any token (valid,
+// revoked, or unknown) must skip the refresh-and-redirect dance.
+const PUBLIC_AUTH_PATH_PREFIXES = ['/receipts/'];
+
+function isPublicAuthPath(path: string): boolean {
+  return PUBLIC_AUTH_PATHS.has(path) || PUBLIC_AUTH_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 // ─── Core request function (JSON) ───────────────────────────────────────────
 async function request<T>(
@@ -231,7 +252,7 @@ async function request<T>(
 
   // Auto-refresh on 401 for authenticated flows only.
   // Keep the backend's real 401 message for public/unauthenticated auth endpoints.
-  if (res.status === 401 && !PUBLIC_AUTH_PATHS.has(path)) {
+  if (res.status === 401 && !isPublicAuthPath(path)) {
     const refreshed = await attemptTokenRefresh();
     if (refreshed) {
       res = await fetch(`${API_BASE}${path}`, {
@@ -377,6 +398,15 @@ export const documentApi = {
       method: 'POST',
       body: JSON.stringify({ action, document_ids: documentIds, ...(tags ? { tags } : {}) }),
     }),
+
+  // ─── Source viewer (L7/L8) ────────────────────────────────────────────────
+  // Not a `request()` call — PDF.js fetches this URL directly (with
+  // credentials) to load page bytes, so callers need the raw URL, not a parsed body.
+  fileUrl: (workspaceId: string, documentId: string): string =>
+    `${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/file`,
+
+  locate: (workspaceId: string, documentId: string, chunkId: string): Promise<ChunkLocation> =>
+    request(`/workspaces/${workspaceId}/documents/${documentId}/chunks/${chunkId}/locate`),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
@@ -707,6 +737,50 @@ export const investigationApi = {
   },
 };
 
+// ─── Truth Receipt API (L3/L4) ──────────────────────────────────────────────
+export const receiptApi = {
+  create: (queryId: string): Promise<ReceiptCreated> =>
+    request(`/queries/${queryId}/receipts`, { method: 'POST' }),
+
+  listForQuery: (queryId: string): Promise<ReceiptSummary[]> =>
+    request(`/queries/${queryId}/receipts`),
+
+  // PUBLIC — no session required; served to anyone holding the token.
+  get: (token: string): Promise<ReceiptView> =>
+    request(`/receipts/${token}`),
+
+  revoke: (token: string): Promise<void> =>
+    request(`/receipts/${token}`, { method: 'DELETE' }),
+};
+
+// ─── Contradiction Radar API (L5/L6) ────────────────────────────────────────
+export const radarApi = {
+  get: (workspaceId: string, status?: ContradictionStatus): Promise<RadarState> =>
+    request(`/workspaces/${workspaceId}/radar${buildQuery(status ? { status } : undefined)}`),
+
+  scan: (workspaceId: string): Promise<{ scan_id: string; status: RadarScanStatus }> =>
+    request(`/workspaces/${workspaceId}/radar/scans`, { method: 'POST' }),
+
+  setStatus: (workspaceId: string, contradictionId: string, status: ContradictionStatus): Promise<Contradiction> =>
+    request(`/workspaces/${workspaceId}/radar/contradictions/${contradictionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+};
+
+// ─── Demo mode API (L9/L10) ─────────────────────────────────────────────────
+export const demoApi = {
+  // PUBLIC — polled before login to drive the header warm-up pill.
+  ready: (): Promise<ReadyStatus> =>
+    request('/health/ready'),
+
+  login: (persona: DemoPersona): Promise<AuthResponse> =>
+    request('/auth/demo-login', { method: 'POST', body: JSON.stringify({ persona }) }),
+
+  suggestions: (workspaceId: string): Promise<{ questions: string[] }> =>
+    request(`/workspaces/${workspaceId}/suggestions`),
+};
+
 // ─── Unified API object ─────────────────────────────────────────────────────
 export const api = {
   auth: authApi,
@@ -721,4 +795,7 @@ export const api = {
   search: searchApi,
   reviewQueue: reviewQueueApi,
   annotations: annotationApi,
+  receipts: receiptApi,
+  radar: radarApi,
+  demo: demoApi,
 };

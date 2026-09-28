@@ -44,6 +44,7 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'))
 const TermsPage = lazy(() => import('./pages/TermsPage'))
 const ContactPage = lazy(() => import('./pages/ContactPage'))
+const ReceiptPage = lazy(() => import('./pages/ReceiptPage'))
 
 // ─── HOC helpers ────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -75,6 +76,7 @@ function AppRoutes() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/r/:token" element={<ReceiptPage />} />
 
       {/* ── PROTECTED (with Layout) — user + admin pages ──────────────────── */}
       <Route

@@ -32,6 +32,8 @@ import { useTheme } from '../context/theme-context';
 import Logo from './Logo';
 import GlobalSearch from './GlobalSearch';
 import { reviewQueueApi } from '../api/client';
+import { SourceViewerProvider } from '../context/SourceViewerContext';
+import { DemoTour } from './DemoTour';
 
 // ─── Ambient Background ───────────────────────────────────────────────────────
 function AmbientBackground() {
@@ -196,6 +198,8 @@ export default function Layout() {
   if (!isAuthenticated) return <Outlet />;
 
   return (
+    <SourceViewerProvider>
+    <DemoTour />
     <div className="relative flex h-screen overflow-hidden bg-bg">
       {/* Animated background (fixed) */}
       <AmbientBackground />
@@ -375,5 +379,6 @@ export default function Layout() {
         </main>
       </div>
     </div>
+    </SourceViewerProvider>
   );
 }

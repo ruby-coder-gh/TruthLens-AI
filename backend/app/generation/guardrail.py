@@ -69,29 +69,65 @@ def _softmax(logits: list[float]) -> list[float]:
     return [e / total for e in exps]
 
 
-def _nli_infer(model: Any, premise: str, hypothesis: str) -> tuple[float, float, float]:
-    """Run NLI inference. Returns (entailment, neutral, contradiction) probabilities.
-    
+_UNIFORM_NLI_SCORE: tuple[float, float, float] = (0.33, 0.34, 0.33)
+
+
+def _reorder(logits: list[float]) -> tuple[float, float, float]:
+    """Softmax raw 3-class logits and reorder to (entailment, neutral, contradiction).
+
     Model output order: [contradiction(0), entailment(1), neutral(2)].
-    We reorder to (entailment, neutral, contradiction).
     """
+    scores = _softmax(logits)
+    return scores[1], scores[2], scores[0]
+
+
+def _nli_infer(model: Any, premise: str, hypothesis: str) -> tuple[float, float, float]:
+    """Run NLI inference. Returns (entailment, neutral, contradiction) probabilities."""
     try:
         pair = [premise, hypothesis]
         result = model.predict([pair])
         if len(result.shape) == 1 and result.shape[0] == 3:
-            scores = _softmax(result.tolist())
-            return scores[1], scores[2], scores[0]  # reorder
+            return _reorder(result.tolist())
         elif len(result.shape) == 2 and result.shape[1] == 3:
-            scores = _softmax(result[0].tolist())
-            return scores[1], scores[2], scores[0]  # reorder
+            return _reorder(result[0].tolist())
         else:
-            scores = _softmax(result.flatten().tolist())
+            scores = result.flatten().tolist()
             if len(scores) >= 3:
-                return scores[1], scores[2], scores[0]  # reorder
+                return _reorder(scores)
     except Exception as e:
         logger.warning("nli_inference_failed", error=str(e))
 
-    return 0.33, 0.34, 0.33  # Uniform on failure
+    return _UNIFORM_NLI_SCORE  # Uniform on failure
+
+
+def nli_batch(pairs: list[tuple[str, str]]) -> list[tuple[float, float, float]]:
+    """Batch NLI inference over premise/hypothesis pairs.
+
+    Unlike `_nli_infer` (one pair per `model.predict` call), this issues a
+    single `model.predict` call for the whole batch, then softmaxes and
+    reorders each row's logits into (entailment, neutral, contradiction) —
+    same convention as `_nli_infer`.
+
+    Sync — callers must wrap in `asyncio.to_thread`.
+
+    Returns `[]` for empty input. Falls back to a uniform
+    `(0.33, 0.34, 0.33)` per pair (and logs a warning) if the model isn't
+    loaded or `predict` raises.
+    """
+    if not pairs:
+        return []
+
+    model = _load_nli_model()
+    if model is None:
+        logger.warning("nli_batch_model_unavailable", pair_count=len(pairs))
+        return [_UNIFORM_NLI_SCORE] * len(pairs)
+
+    try:
+        rows = model.predict([[premise, hypothesis] for premise, hypothesis in pairs])
+        return [_reorder(row.tolist() if hasattr(row, "tolist") else list(row)) for row in rows]
+    except Exception as e:
+        logger.warning("nli_batch_inference_failed", error=str(e), pair_count=len(pairs))
+        return [_UNIFORM_NLI_SCORE] * len(pairs)
 
 
 async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:

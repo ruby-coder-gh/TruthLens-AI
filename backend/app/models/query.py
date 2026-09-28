@@ -69,6 +69,10 @@ class Query(UUIDPkMixin, TimestampMixin, DeclarativeBase):
     feedback = relationship("Feedback", back_populates="query", lazy="selectin", cascade="all, delete-orphan")
     pins = relationship("QueryPin", back_populates="query", lazy="selectin", cascade="all, delete-orphan")
     annotations = relationship("Annotation", back_populates="query", lazy="selectin")
+    query_claims = relationship(
+        "QueryClaims", back_populates="query", uselist=False, lazy="selectin", cascade="all, delete-orphan"
+    )
+    receipts = relationship("Receipt", back_populates="query", lazy="selectin", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_queries_workspace", "workspace_id"),
