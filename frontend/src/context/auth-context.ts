@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { User } from '../api/types';
+import type { User, DemoPersona } from '../api/types';
 
 // Auth context + hook live in a dedicated (non-component) module so `AuthProvider`
 // can be co-located in AuthContext.tsx without tripping react-refresh's
@@ -12,6 +12,8 @@ export interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Owning lane: L10 (Demo FE). One-click sign-in as a seeded demo persona. */
+  loginDemo: (persona: DemoPersona) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

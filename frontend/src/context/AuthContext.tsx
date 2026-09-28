@@ -4,7 +4,7 @@ import {
   useCallback,
   type ReactNode,
 } from 'react';
-import type { User } from '../api/types';
+import type { User, DemoPersona } from '../api/types';
 import {
   api,
   clearStoredTokens,
@@ -58,6 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const loginDemo = useCallback(async (persona: DemoPersona) => {
+    const res = await api.demo.login(persona);
+    setUser(res.user);
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.auth.logout();
@@ -75,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     register,
     logout,
+    loginDemo,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
