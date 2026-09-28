@@ -1,9 +1,11 @@
 // Owning lane: L4 (Receipt FE).
 import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Stamp, Copy, ExternalLink, Trash2, ShieldCheck, Eye } from 'lucide-react';
 import { Button, Modal } from './ui';
 import { useToast } from './toast-context';
-import { receiptApi } from '../api/client';
+import { useAuth } from '../context/auth-context';
+import { receiptApi, workspaceApi } from '../api/client';
 import type { ReceiptCreated, ReceiptSummary } from '../api/types';
 import { QrCode } from './receipt/QrCode';
 
@@ -22,14 +24,45 @@ function shortSeal(seal: string): string {
   return seal.slice(0, 12);
 }
 
-export function SealReceiptButton({ queryId, className }: { queryId: string; className?: string }) {
+export function SealReceiptButton({
+  queryId,
+  /** R2-6: when given, the button hides for a viewer (mirrors the Upload
+   *  button's BUG-14 precedent) instead of opening a dialog whose Create
+   *  can only 403. Omit it (older callers, tests) to always show. */
+  workspaceId,
+  className,
+}: {
+  queryId: string;
+  workspaceId?: string;
+  className?: string;
+}) {
   const { addToast } = useToast();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<ReceiptCreated | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ReceiptSummary[]>([]);
   const [revokingToken, setRevokingToken] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<ReceiptSummary | null>(null);
+
+  // Shared react-query cache key — many SealReceiptButtons can be on screen
+  // at once (one per chat turn), so this dedupes to a single request instead
+  // of one workspace+members fetch per button.
+  const { data: role } = useQuery({
+    queryKey: ['workspace-role', workspaceId],
+    queryFn: async () => {
+      const [workspace, members] = await Promise.all([
+        workspaceApi.get(workspaceId!),
+        workspaceApi.listMembers(workspaceId!),
+      ]);
+      const myRole = members.data.find((m) => m.user_id === user?.id)?.role;
+      return { isOwner: workspace.owner_id === user?.id, myRole };
+    },
+    enabled: Boolean(workspaceId && user),
+    staleTime: 60_000,
+  });
+  const canSeal = !workspaceId || role?.isOwner || role?.myRole === 'editor';
 
   const loadExisting = useCallback(() => {
     receiptApi
@@ -61,8 +94,11 @@ export function SealReceiptButton({ queryId, className }: { queryId: string; cla
     }
   }, [queryId, addToast]);
 
+  // R2-17: revoking is irreversible (the public link dies immediately), so
+  // Trash2 opens a confirm step instead of revoking on the first click.
   const handleRevoke = useCallback(
     async (token: string) => {
+      setRevokeTarget(null);
       setRevokingToken(token);
       try {
         await receiptApi.revoke(token);
@@ -92,13 +128,15 @@ export function SealReceiptButton({ queryId, className }: { queryId: string; cla
   const fullLink = created ? `${window.location.origin}${created.url_path}` : null;
   const activeExisting = existing.filter((r) => r.token !== created?.token);
 
+  if (!canSeal) return null;
+
   return (
     <>
       <Button variant="secondary" size="sm" onClick={() => setOpen(true)} className={className}>
         <Stamp size={14} /> Seal receipt
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Seal a Truth Receipt" className="max-w-md">
+      <Modal open={open} onClose={() => { setOpen(false); setRevokeTarget(null); }} title="Seal a Truth Receipt" className="max-w-md">
         <div className="space-y-4">
           {!created && (
             <>
@@ -191,17 +229,35 @@ export function SealReceiptButton({ queryId, className }: { queryId: string; cla
                           </span>
                         </div>
                       </div>
-                      {!revoked && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label="Revoke this receipt"
-                          onClick={() => void handleRevoke(r.token)}
-                          loading={revokingToken === r.token}
-                        >
-                          {revokingToken !== r.token && <Trash2 size={13} />}
-                        </Button>
+                      {!revoked && revokeTarget?.token === r.token ? (
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className="text-[11px] font-medium text-red">Revoke?</span>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setRevokeTarget(null)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            onClick={() => void handleRevoke(r.token)}
+                            loading={revokingToken === r.token}
+                          >
+                            Confirm
+                          </Button>
+                        </div>
+                      ) : (
+                        !revoked && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label="Revoke this receipt"
+                            onClick={() => setRevokeTarget(r)}
+                            loading={revokingToken === r.token}
+                          >
+                            {revokingToken !== r.token && <Trash2 size={13} />}
+                          </Button>
+                        )
                       )}
                     </li>
                   );

@@ -101,6 +101,8 @@ interface StartQueryOptions {
   topK?: number;
   forceRefresh?: boolean;
   replaceAssistantId?: string;
+  /** K4: query id this run replaces once it saves (Regenerate — R2-21). */
+  replacesQueryId?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -201,7 +203,7 @@ function ChatPageForConversation() {
   // ─── Start query via WebSocket ─────────────────────────────────────────────
   const startQuery = useCallback(
     (queryText: string, options: StartQueryOptions = {}) => {
-      const { topK, forceRefresh = false, replaceAssistantId } = options;
+      const { topK, forceRefresh = false, replaceAssistantId, replacesQueryId } = options;
       if (!workspaceId || !queryText.trim() || isStreaming) return;
 
       wsRef.current?.disconnect();
@@ -370,7 +372,7 @@ function ChatPageForConversation() {
             ),
           );
         },
-      }, convId, topK, forceRefresh);
+      }, convId, topK, forceRefresh, replacesQueryId);
 
       wsRef.current = ws;
       ws.connect();
@@ -439,7 +441,15 @@ function ChatPageForConversation() {
       if (idx <= 0 || isStreaming) return;
       const precedingUser = [...messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
       if (!precedingUser) return;
-      startQuery(precedingUser.content, { forceRefresh: true });
+      // R2-21: replace this turn in place (same as Retry) instead of
+      // appending a second copy — and tell the backend which saved query
+      // this run replaces (K4) so /chats and the sidebar don't end up with
+      // a duplicate entry per regeneration.
+      startQuery(precedingUser.content, {
+        forceRefresh: true,
+        replaceAssistantId: assistantMsgId,
+        replacesQueryId: messages[idx].queryId ?? undefined,
+      });
     },
     [isStreaming, messages, startQuery],
   );
@@ -474,43 +484,46 @@ function ChatPageForConversation() {
     onError: () => addToast('Failed to submit feedback', 'error'),
   });
 
+  // R2-8: `<main>` (Layout.tsx, not this lane's file) already scrolls the
+  // page — this used to *also* scroll internally (`#chat-scroll` +
+  // `h-full flex-col`), drawing two nested scrollbars. Now there's a single
+  // scroll container (`<main>`); the composer sticks to its bottom edge
+  // instead of being pinned by a flex-1/h-full split.
   return (
-    <div className="-m-4 flex h-full flex-col lg:-m-6">
-      <div className="min-h-0 flex-1 overflow-y-auto" id="chat-scroll">
-        <div className="mx-auto max-w-[880px] px-4 py-8 sm:px-6">
-          {messages.length === 0 ? (
-            <EmptyChatState workspaceId={workspaceId} workspace={workspace} onPick={(q) => startQuery(q)} />
-          ) : (
-            <div className="space-y-10">
-              <AnimatePresence initial={false}>
-                {messages.map((msg) =>
-                  msg.role === 'user' ? (
-                    <UserTurn key={msg.id} message={msg} username={user?.username} />
-                  ) : (
-                    <AnswerTurn
-                      key={msg.id}
-                      message={msg}
-                      workspaceId={workspaceId}
-                      documentCount={workspace?.document_count ?? null}
-                      contradictions={contradictions}
-                      onCopy={handleCopy}
-                      onExport={() => msg.queryId && handleExport(msg.queryId)}
-                      onFeedback={(rating) => msg.queryId && feedbackMutation.mutate({ queryId: msg.queryId, rating })}
-                      onRetry={() => handleRetry(msg.id)}
-                      onRegenerate={() => handleRegenerate(msg.id)}
-                      onRephrase={handleRephrase}
-                    />
-                  ),
-                )}
-              </AnimatePresence>
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
+    <div className="-m-4 lg:-m-6">
+      <div className="mx-auto max-w-[880px] px-4 py-8 sm:px-6" id="chat-scroll">
+        {messages.length === 0 ? (
+          <EmptyChatState workspaceId={workspaceId} workspace={workspace} onPick={(q) => startQuery(q)} />
+        ) : (
+          <div className="space-y-10">
+            <AnimatePresence initial={false}>
+              {messages.map((msg) =>
+                msg.role === 'user' ? (
+                  <UserTurn key={msg.id} message={msg} username={user?.username} />
+                ) : (
+                  <AnswerTurn
+                    key={msg.id}
+                    message={msg}
+                    workspaceId={workspaceId}
+                    documentCount={workspace?.document_count ?? null}
+                    contradictions={contradictions}
+                    onCopy={handleCopy}
+                    onExport={() => msg.queryId && handleExport(msg.queryId)}
+                    onFeedback={(rating) => msg.queryId && feedbackMutation.mutate({ queryId: msg.queryId, rating })}
+                    onRetry={() => handleRetry(msg.id)}
+                    onRegenerate={() => handleRegenerate(msg.id)}
+                    onRephrase={handleRephrase}
+                  />
+                ),
+              )}
+            </AnimatePresence>
+            <div ref={messagesEndRef} />
+          </div>
+        )}
       </div>
 
       {/* ─── Composer ────────────────────────────────────────────────────── */}
-      <div className="flex-none px-4 pb-4 pt-2 sm:px-6">
+      <div className="sticky bottom-0 z-10 bg-bg px-4 pb-4 pt-2 sm:px-6">
         <form onSubmit={handleSubmit} className="mx-auto max-w-[832px] rounded-panel border border-border-strong bg-solid shadow-e1 transition-colors focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--color-primary-tint)]">
           <label htmlFor="ask" className="sr-only">Ask a question about this workspace</label>
           <textarea
@@ -700,9 +713,16 @@ const AnswerTurn = memo(function AnswerTurn({
           running={isRunning}
           stopped={isCancelled}
           phase={message.phase}
-          foundCount={message.foundCount}
-          keptCount={message.keptCount}
-          wordsCount={message.wordsCount}
+          // BUG-50 residual: a cached replay's WS protocol only re-sends
+          // sources/token/guardrail, never progress, so found/kept/words stay
+          // null forever and every step in the (correctly 4/4 "done") trail
+          // showed an empty detail. Once the answer is settled, fall back to
+          // what the client already knows from the frames it did receive —
+          // the sources list and the answer's own word count — instead of
+          // leaving those steps blank.
+          foundCount={message.foundCount ?? (isComplete ? message.sources.length : null)}
+          keptCount={message.keptCount ?? (isComplete ? message.sources.length : null)}
+          wordsCount={message.wordsCount ?? (isComplete ? liveWordCount(message.content) : null)}
           liveWordCount={liveWordCount(message.content)}
           documentsSearched={documentCount}
           claimsTally={tally}
@@ -783,7 +803,7 @@ const AnswerTurn = memo(function AnswerTurn({
           {message.trustScore !== null && <TrustTotals score={message.trustScore} components={message.trustComponents} />}
 
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            {message.queryId && <SealReceiptButton queryId={message.queryId} />}
+            {message.queryId && <SealReceiptButton queryId={message.queryId} workspaceId={workspaceId} />}
             <AnswerActionBar
               content={message.content}
               onCopy={onCopy}

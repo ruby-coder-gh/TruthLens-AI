@@ -87,4 +87,27 @@ describe('SourceViewerDrawer', () => {
     expect(await screen.findByText(/the full chunk text, from the top\./i)).toBeInTheDocument();
     expect(mockLocate).toHaveBeenCalledWith('ws-1', 'doc-1', 'chunk-1');
   });
+
+  // BUG-17: text-mode used to <mark> the entire chunk regardless of what was
+  // asked for. K2's `highlight` span means only the cited sentence is marked.
+  it('marks only the K2 highlight span in text mode, not the whole chunk', async () => {
+    const content = 'Intro sentence. Aurora is now expected to commission in the first quarter of 2028. Trailing sentence.';
+    const start = content.indexOf('Aurora');
+    const end = start + 'Aurora is now expected to commission in the first quarter of 2028.'.length;
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ...textLocation(content), highlight: { start, end } }), { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const target: SourceTarget = { ...baseTarget, highlightText: 'Aurora is now expected to commission in the first quarter of 2028.' };
+    const { container } = render(<SourceViewerDrawer target={target} onClose={vi.fn()} />);
+
+    const mark = await screen.findByText(/aurora is now expected to commission/i);
+    expect(mark.tagName).toBe('MARK');
+    expect(mark.textContent).toBe('Aurora is now expected to commission in the first quarter of 2028.');
+    // The rest of the chunk is present but plain (not inside the <mark>).
+    expect(container.textContent).toContain('Intro sentence.');
+    expect(container.textContent).toContain('Trailing sentence.');
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+  });
 });

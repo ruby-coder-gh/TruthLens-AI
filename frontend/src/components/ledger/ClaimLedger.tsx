@@ -116,6 +116,10 @@ function ClaimRow({
   const source = claim.source_index != null ? sources[claim.source_index - 1] : undefined;
   const canView = Boolean(workspaceId && claim.document_id && claim.chunk_id);
   const shortTitle = claim.document_name ? shortDocTitle(claim.document_name, allDocNames) : null;
+  // K1/BUG-8: a live (streaming) answer's guardrail frame can land before the
+  // per-claim page number does, while the matching Source already has it —
+  // fall back to the source's own page rather than showing no page at all.
+  const pageNumber = claim.page_number ?? source?.page_number ?? null;
 
   const handleView = useCallback(() => {
     if (!canView || !workspaceId || !claim.document_id || !claim.chunk_id) return;
@@ -124,10 +128,10 @@ function ClaimRow({
       documentId: claim.document_id,
       chunkId: claim.chunk_id,
       documentName: claim.document_name ?? undefined,
-      pageNumber: claim.page_number ?? undefined,
+      pageNumber: pageNumber ?? undefined,
       highlightText: claim.evidence ?? undefined,
     });
-  }, [canView, workspaceId, claim, openViewer]);
+  }, [canView, workspaceId, claim, pageNumber, openViewer]);
 
   // BUG-26: the verdict is driven by the support *ratio*, not the single
   // best entailment score, so a "Partial" claim can legitimately carry a
@@ -201,7 +205,7 @@ function ClaimRow({
               title={claim.document_name ?? undefined}
               className="mt-1 inline-flex min-h-6 items-center gap-1 rounded px-1 text-xs font-medium text-primary-soft hover:bg-primary/10 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent [@media(pointer:coarse)]:min-h-11"
             >
-              [{claim.source_index}] {shortTitle}{claim.page_number ? `, page ${claim.page_number}` : ''}
+              [{claim.source_index}] {shortTitle}{pageNumber ? `, page ${pageNumber}` : ''}
             </button>
           )}
         </div>
@@ -230,7 +234,7 @@ function ClaimRow({
                 className="inline-flex min-h-8 items-center gap-1.5 rounded-control border border-border-strong px-2.5 text-xs font-medium text-text hover:bg-card-2 [@media(pointer:coarse)]:min-h-11"
               >
                 <ExternalLink size={13} aria-hidden="true" />
-                View in document{claim.page_number ? `, page ${claim.page_number}` : ''}
+                View in document{pageNumber ? `, page ${pageNumber}` : ''}
               </button>
             )}
           </div>
@@ -242,14 +246,16 @@ function ClaimRow({
 
 function DiscrepancyRow({ pair, number, claims, allDocNames, workspaceId }: { pair: ConflictPair; number: number; claims: Claim[]; allDocNames: string[]; workspaceId?: string }) {
   const { open: openViewer } = useSourceViewer();
-  // Either side may be an uncited chunk (BUG-5) — fall back to the radar's
-  // own sentence/doc data, which every `Contradiction` side carries
-  // regardless of whether a claim in this answer happens to cite it.
+  // R2-3: diff and highlight the radar's own evidence sentences, not the
+  // model's claim wording — a claim can paraphrase or lead with an unrelated
+  // number (BUG-29's "2,025 pts" came from diffing claim prose), while
+  // `contradiction.a/b.sentence` is always the verbatim source sentence.
+  // claimA/claimB are only used for the "Cn vs Cm" row labels below.
   const claimA = pair.claimAIndex !== -1 ? claims[pair.claimAIndex] : undefined;
   const claimB = pair.claimBIndex !== -1 ? claims[pair.claimBIndex] : undefined;
-  const textA = claimA?.text ?? pair.contradiction.a.sentence;
-  const textB = claimB?.text ?? pair.contradiction.b.sentence;
-  const diff = figureDiff(textA, textB);
+  const sentenceA = pair.contradiction.a.sentence;
+  const sentenceB = pair.contradiction.b.sentence;
+  const diff = figureDiff(sentenceA, sentenceB);
   const titleA = shortDocTitle(pair.contradiction.a.document_name, allDocNames);
   const titleB = shortDocTitle(pair.contradiction.b.document_name, allDocNames);
   const rowLabelA = claimA ? `C${pair.claimAIndex + 1}` : titleA;
@@ -263,9 +269,9 @@ function DiscrepancyRow({ pair, number, claims, allDocNames, workspaceId }: { pa
       chunkId: pair.contradiction.a.chunk_id,
       documentName: pair.contradiction.a.document_name,
       pageNumber: pair.contradiction.a.page_number ?? undefined,
-      highlightText: textA,
+      highlightText: sentenceA,
     });
-  }, [workspaceId, pair, textA, openViewer]);
+  }, [workspaceId, pair, sentenceA, openViewer]);
 
   return (
     <li id={`row-D-${pair.contradiction.id}`} className="border-b border-border bg-conflict-tint px-2 py-4 last:border-b-0">

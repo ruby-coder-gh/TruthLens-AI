@@ -1,7 +1,7 @@
 // Owning lane: L4 (Receipt FE). Public "Ledger and Seal" view — no Layout, no
 // auth required. Renders against `receiptApi.get(token)` and re-derives the
 // seal client-side via WebCrypto so "verified" is never just the server's word.
-import { useCallback, useEffect, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -18,10 +18,7 @@ import {
   WifiOff,
   FileText,
   Hash,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  HelpCircle,
+  Scale,
 } from 'lucide-react';
 import { Card, Badge, Button, Skeleton, EmptyState, ProgressBar, type BadgeColor } from '../components/ui';
 import { useToast } from '../components/toast-context';
@@ -31,14 +28,19 @@ import { QrCode } from '../components/receipt/QrCode';
 import { TrustGauge } from '../components/receipt/TrustGauge';
 import { receiptApi } from '../api/client';
 import type { ReceiptView, ClaimVerdict } from '../api/types';
+// R2-16: same verdict names as the chat's Claim Ledger — this page used to
+// have its own "Supported"/"Partially supported" labels that read as a
+// different vocabulary for the same thing ("Verified"/"Partial" there).
+import { VERDICT_META as LEDGER_VERDICT_META } from '../components/ledger/verdict';
+import { figureDiff, formatFigureDiff } from '../components/ledger/conflicts';
 
 type PageState = 'loading' | 'loaded' | 'not_found' | 'revoked' | 'error';
 
-const VERDICT_META: Record<ClaimVerdict, { label: string; color: BadgeColor; Icon: ComponentType<{ size?: number }> }> = {
-  supported: { label: 'Supported', color: 'green', Icon: CheckCircle2 },
-  partial: { label: 'Partially supported', color: 'orange', Icon: AlertTriangle },
-  unsupported: { label: 'Unsupported', color: 'gray', Icon: HelpCircle },
-  contradicted: { label: 'Contradicted', color: 'red', Icon: XCircle },
+const VERDICT_COLOR: Record<ClaimVerdict, BadgeColor> = {
+  supported: 'green',
+  partial: 'orange',
+  unsupported: 'gray',
+  contradicted: 'red',
 };
 
 function formatDateTime(iso: string | null): string {
@@ -263,7 +265,11 @@ export default function ReceiptPage() {
           <div className="flex items-center gap-2.5">
             <Logo size={26} className="text-primary" />
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">Verified Answer Receipt</p>
+              {/* R2-16: this eyebrow used to say "Verified" unconditionally,
+                  even right above a "Guardrail failed" badge. */}
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">
+                {payload.guardrail.passed === false ? 'Unverified Answer Receipt' : 'Verified Answer Receipt'}
+              </p>
               <p className="text-[17px] font-semibold tracking-[-0.01em] text-text">TruthLens</p>
             </div>
           </div>
@@ -324,12 +330,12 @@ export default function ReceiptPage() {
             <p className="text-[10px] font-semibold uppercase tracking-widest text-text-dim">Claim ledger</p>
             <ul className="space-y-2.5">
               {payload.claims.map((claim, i) => {
-                const meta = VERDICT_META[claim.verdict];
-                const Icon = meta.Icon;
+                const meta = LEDGER_VERDICT_META[claim.verdict];
+                const Icon = meta.icon;
                 return (
                   <li key={i} className="rounded-control border border-border bg-card-2 p-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge color={meta.color}>
+                      <Badge color={VERDICT_COLOR[claim.verdict]}>
                         <Icon size={11} /> {meta.label}
                       </Badge>
                       {claim.source_index !== null && (
@@ -342,6 +348,37 @@ export default function ReceiptPage() {
                     <p className="mt-1.5 text-[13px] leading-relaxed text-text">{claim.text}</p>
                     {claim.evidence && (
                       <p className="font-quote mt-1.5 text-[13px] italic leading-relaxed text-text-muted">&ldquo;{claim.evidence}&rdquo;</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        )}
+
+        {/* K5: open Radar contradictions touching this answer's own cited
+            sources — a public reader must learn the sources disagree, not
+            just whoever saw the "N conflict" tally in the live chat (R2-16). */}
+        {payload.conflicts && payload.conflicts.length > 0 && (
+          <Card className="space-y-3 border-conflict/30 bg-conflict-tint p-5 break-inside-avoid">
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-conflict">
+              <Scale size={12} /> Sources disagree
+            </p>
+            <ul className="space-y-2.5">
+              {payload.conflicts.map((conflict, i) => {
+                const diff = figureDiff(conflict.a.sentence, conflict.b.sentence);
+                return (
+                  <li key={i} className="rounded-control border border-border bg-card-2 p-3">
+                    <p className="text-[13px] leading-relaxed text-text">
+                      <strong className="font-semibold">{conflict.a.document_name}</strong>
+                      {conflict.a.page_number !== null ? `, p. ${conflict.a.page_number}` : ''}: &ldquo;{conflict.a.sentence}&rdquo;
+                    </p>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-text">
+                      <strong className="font-semibold">{conflict.b.document_name}</strong>
+                      {conflict.b.page_number !== null ? `, p. ${conflict.b.page_number}` : ''}: &ldquo;{conflict.b.sentence}&rdquo;
+                    </p>
+                    {diff && (
+                      <p className="mt-1.5 text-[12px] font-semibold text-conflict">Difference: {formatFigureDiff(diff)}</p>
                     )}
                   </li>
                 );

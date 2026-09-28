@@ -214,4 +214,70 @@ describe('ReceiptPage', () => {
     expect(paragraph?.textContent).toContain('Revenue grew to €412M in 2025');
     expect(paragraph?.textContent).toContain('However, the prior estimate was €398M');
   });
+
+  // ─── R2-16 ──────────────────────────────────────────────────────────────
+
+  it('uses the same verdict label as the chat Claim Ledger ("Verified", not "Supported")', async () => {
+    const view = await makeView();
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    expect(await screen.findByText('Verified')).toBeInTheDocument();
+    expect(screen.queryByText('Supported')).not.toBeInTheDocument();
+  });
+
+  it('drops "Verified" from the header when the guardrail failed', async () => {
+    const payload = { ...makePayload(), guardrail: { passed: false, score: 0.3 } };
+    const view = await makeView({ payload });
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    await screen.findByText(view.payload.question);
+    expect(screen.getByText('Unverified Answer Receipt')).toBeInTheDocument();
+    expect(screen.queryByText('Verified Answer Receipt')).not.toBeInTheDocument();
+    expect(screen.getByText(/guardrail failed/i)).toBeInTheDocument();
+  });
+
+  it('keeps "Verified Answer Receipt" when the guardrail passed', async () => {
+    const view = await makeView();
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    expect(await screen.findByText('Verified Answer Receipt')).toBeInTheDocument();
+  });
+
+  it('shows the K5 conflicts a reader would otherwise never learn about', async () => {
+    const payload = {
+      ...makePayload(),
+      conflicts: [
+        {
+          a: { document_name: 'Annual Report 2025', page_number: 1, sentence: 'Revenue in 2025 was €412 million.' },
+          b: { document_name: 'Q4 2025 Press Release', page_number: 1, sentence: 'Revenue in 2025 was €398 million.' },
+          score: 0.9,
+        },
+      ],
+    };
+    const view = await makeView({ payload });
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    expect(await screen.findByText(/sources disagree/i)).toBeInTheDocument();
+    expect(screen.getByText(/Revenue in 2025 was €412 million\./)).toBeInTheDocument();
+    expect(screen.getByText(/Revenue in 2025 was €398 million\./)).toBeInTheDocument();
+    expect(screen.getByText(/€14M/)).toBeInTheDocument();
+  });
+
+  it('renders no conflicts section when the answer has none', async () => {
+    const view = await makeView();
+    mockGet.mockResolvedValue(view);
+
+    renderPage();
+
+    await screen.findByText(view.payload.question);
+    expect(screen.queryByText(/sources disagree/i)).not.toBeInTheDocument();
+  });
 });

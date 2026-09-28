@@ -979,6 +979,22 @@ export interface ReceiptPayload {
   asked_at: string | null;
   issued_at: string;
   issuer: string;
+  /** K5: open Radar contradictions involving this answer's cited chunks —
+   *  a public reader must learn the sources disagree, not just the seal
+   *  holder who saw the chat's D-rows (R2-16). */
+  conflicts?: ReceiptConflict[];
+}
+
+export interface ReceiptConflictSide {
+  document_name: string;
+  page_number: number | null;
+  sentence: string;
+}
+
+export interface ReceiptConflict {
+  a: ReceiptConflictSide;
+  b: ReceiptConflictSide;
+  score: number;
 }
 
 export interface ReceiptView {
@@ -1044,6 +1060,11 @@ export interface ChunkLocation {
   content: string;
   context_before: string | null;
   context_after: string | null;
+  /** K2: in `mode: 'text'`, the character offsets of the requested `text`
+   *  within `content` (whitespace-insensitive match) — `null` when no `text`
+   *  query was sent, or when it couldn't be found (BUG-17: text-mode used to
+   *  always mark the whole chunk; now it marks only this span, if given). */
+  highlight?: { start: number; end: number } | null;
 }
 
 // ─── Demo mode (L9/L10) ──────────────────────────────────────────────────────

@@ -14,15 +14,8 @@ function stripCitationMarkers(text: string): string {
 
 const MIME_LIKE = /^[\w.+-]+\/[\w.+-]+$/;
 
-// BUG-53: a document result's snippet is sometimes just its raw MIME type
-// ("application/vnd.openxmlformats-officedocument…") rather than an excerpt.
-// Show a short, human file-type label instead — same mapping DocumentsBrowsePage
-// uses for the same purpose.
-function friendlySnippet(result: SearchResult): string {
-  const snippet = stripCitationMarkers(result.snippet);
-  if (result.resource_type !== 'document' || !MIME_LIKE.test(snippet)) return snippet;
-  const mime = snippet;
-  const extension = result.title.split('.').pop()?.toUpperCase();
+function friendlyFileType(mime: string, title: string): string {
+  const extension = title.split('.').pop()?.toUpperCase();
   if (extension && ['PDF', 'DOCX', 'TXT', 'MD', 'CSV', 'JSON', 'XLSX'].includes(extension)) {
     return `${extension} document`;
   }
@@ -33,6 +26,26 @@ function friendlySnippet(result: SearchResult): string {
   if (mime.includes('json')) return 'JSON document';
   if (mime.includes('text')) return 'Text document';
   return 'Document';
+}
+
+// BUG-53: a document result's snippet is "filename · mime · status"
+// (backend/app/api/search.py) — not just a bare MIME type — so the old
+// whole-string MIME check never matched it and the raw
+// "application/vnd.openxmlformats-officedocument…" leaked straight into the
+// UI. Split on the same " · " separator, drop the filename (redundant with
+// the result's own title, shown separately) and swap the MIME segment for
+// a short, human label — same mapping DocumentsBrowsePage uses.
+function friendlySnippet(result: SearchResult): string {
+  const snippet = stripCitationMarkers(result.snippet);
+  if (result.resource_type !== 'document') return snippet;
+
+  const parts = snippet.split('·').map((p) => p.trim()).filter(Boolean);
+  const mimeIndex = parts.findIndex((p) => MIME_LIKE.test(p));
+  if (mimeIndex === -1) return snippet;
+
+  const label = friendlyFileType(parts[mimeIndex], result.title);
+  const rest = parts.filter((p, i) => i !== mimeIndex && p !== result.title);
+  return [label, ...rest].join(' · ');
 }
 
 function highlight(text: string, query: string) {

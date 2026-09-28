@@ -284,7 +284,7 @@ export default function ChatDetailPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <SealReceiptButton queryId={query.id} />
+              <SealReceiptButton queryId={query.id} workspaceId={query.workspace_id} />
               {/* BUG-22: same Copy/Export/feedback/Regenerate action bar as
                   the live chat. "Regenerate" here re-runs the query and
                   shows what changed (this page's own "Re-run comparison"

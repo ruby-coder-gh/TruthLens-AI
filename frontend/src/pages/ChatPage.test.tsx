@@ -48,7 +48,10 @@ vi.mock('../api/client', () => ({
   // Empty suggestions → SuggestedQuestions falls back to EXAMPLE_QUESTIONS.
   demoApi: { suggestions: vi.fn().mockResolvedValue({ questions: [] }) },
   receiptApi: { create: vi.fn(), listForQuery: vi.fn().mockResolvedValue([]), revoke: vi.fn() },
-  workspaceApi: { get: vi.fn().mockResolvedValue({ id: 'ws-1', name: 'Test Workspace', description: '', owner_id: 'u1', member_count: 1, document_count: 3, created_at: '', updated_at: '' }) },
+  workspaceApi: {
+    get: vi.fn().mockResolvedValue({ id: 'ws-1', name: 'Test Workspace', description: '', owner_id: 'u1', member_count: 1, document_count: 3, created_at: '', updated_at: '' }),
+    listMembers: vi.fn().mockResolvedValue({ data: [] }),
+  },
   radarApi: { get: vi.fn().mockResolvedValue({ latest_scan: null, contradictions: [], counts: { open: 0, dismissed: 0, resolved: 0 } }) },
 }));
 
@@ -74,6 +77,7 @@ interface MockQueryWebSocketInstance {
   conversationId?: string;
   topK?: number;
   forceRefresh?: boolean;
+  replacesQueryId?: string;
   connect: typeof mockConnect;
   disconnect: typeof mockDisconnect;
   cancel: typeof mockCancel;
@@ -87,6 +91,7 @@ vi.mock('../api/websocket', () => {
     conversationId?: string;
     topK?: number;
     forceRefresh?: boolean;
+    replacesQueryId?: string;
     connect = mockConnect;
     disconnect = mockDisconnect;
     cancel = mockCancel;
@@ -98,6 +103,7 @@ vi.mock('../api/websocket', () => {
       conversationId?: string,
       topK?: number,
       forceRefresh?: boolean,
+      replacesQueryId?: string,
     ) {
       this.workspaceId = workspaceId;
       this.query = query;
@@ -105,6 +111,7 @@ vi.mock('../api/websocket', () => {
       this.conversationId = conversationId;
       this.topK = topK;
       this.forceRefresh = forceRefresh;
+      this.replacesQueryId = replacesQueryId;
       instances.push(this);
     }
   }
@@ -161,6 +168,16 @@ describe('ChatPage', () => {
     renderChatPage();
 
     expect(screen.getByText('What would you like to verify?')).toBeInTheDocument();
+  });
+
+  it('scrolls only inside <main> — no second overflow container (R2-8)', () => {
+    const { container } = renderChatPage();
+
+    // `<main>` (Layout.tsx) is the sole scroll container; this page must not
+    // add its own `overflow-y-auto` region, which used to draw a second,
+    // nested scrollbar.
+    expect(container.querySelector('#chat-scroll')).not.toHaveClass('overflow-y-auto');
+    expect(document.querySelectorAll('.overflow-y-auto')).toHaveLength(0);
   });
 
   it('constructs a QueryWebSocket with the workspace id + text and connects on Enter', async () => {
@@ -231,6 +248,11 @@ describe('ChatPage', () => {
       callbacks.onComplete?.({ query_id: 'q-fresh', latency_ms: 500, model_used: 'qwen3:4b', token_count: 9, from_cache: false });
     });
 
+    // Copy reads the completed answer (BUG-9) — checked before Regenerate,
+    // which replaces this bubble with a fresh pending one in place (R2-21).
+    await user.click(screen.getByLabelText('Copy response'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Revenue was €412M [1].');
+
     // Regenerate shows up on a fresh (non-cached) complete answer, not just a
     // cached one (BUG-31).
     const regenerate = screen.getByLabelText('Regenerate with fresh retrieval');
@@ -238,9 +260,52 @@ describe('ChatPage', () => {
     await user.click(regenerate);
     expect(instances).toHaveLength(2);
     expect(instances[1].forceRefresh).toBe(true);
+  });
 
-    await user.click(screen.getByLabelText('Copy response'));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Revenue was €412M [1].');
+  it('regenerates the turn in place and sends K4 replaces_query_id instead of duplicating it (R2-21)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'What was installed capacity?');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onToken?.('1.8 GW installed.');
+      instances[0].callbacks.onComplete?.({ query_id: 'q-old', latency_ms: 500, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    expect(screen.getAllByText('What was installed capacity?')).toHaveLength(1);
+
+    await user.click(screen.getByLabelText('Regenerate with fresh retrieval'));
+
+    // The second run tells the backend which saved query it replaces (K4).
+    expect(instances).toHaveLength(2);
+    expect(instances[1].replacesQueryId).toBe('q-old');
+
+    act(() => {
+      instances[1].callbacks.onToken?.('1.9 GW installed.');
+      instances[1].callbacks.onComplete?.({ query_id: 'q-new', latency_ms: 400, model_used: 'qwen3:4b', token_count: 4, from_cache: false });
+    });
+
+    // Still one question turn and one answer — not a second copy appended.
+    expect(screen.getAllByText('What was installed capacity?')).toHaveLength(1);
+    expect(screen.getByText('1.9 GW installed.')).toBeInTheDocument();
+    expect(screen.queryByText('1.8 GW installed.')).not.toBeInTheDocument();
+  });
+
+  it('shows Seal receipt for the workspace owner on a completed answer (R2-6)', async () => {
+    const user = userEvent.setup();
+    renderChatPage('demo_analyst');
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    act(() => {
+      instances[0].callbacks.onToken?.('Revenue grew.');
+      instances[0].callbacks.onComplete?.({ query_id: 'q-owner', latency_ms: 500, model_used: 'qwen3:4b', token_count: 3, from_cache: false });
+    });
+
+    expect(await screen.findByRole('button', { name: /seal receipt/i })).toBeInTheDocument();
   });
 
   it('shows the sidebar-consistent two-word initials on the question avatar (BUG-32)', async () => {
@@ -554,6 +619,33 @@ describe('ChatPage', () => {
       callbacks.onProgress?.('ranking', 0.4, progressDetail({ found: 16 }));
     });
     expect(screen.getByText('16 found', { exact: false })).toBeInTheDocument();
+  });
+
+  it('falls back to the sources list + word count for a cached replay that never sent progress frames (BUG-50)', async () => {
+    const user = userEvent.setup();
+    renderChatPage();
+
+    await user.type(screen.getByLabelText(ASK_LABEL), 'Summarise revenue');
+    await user.keyboard('{Enter}');
+
+    const { callbacks } = instances[0];
+    // A cached replay's WS protocol only re-sends sources/token/guardrail —
+    // onProgress never fires, so foundCount/keptCount/wordsCount stay null.
+    act(() => {
+      callbacks.onSource?.({ chunk_id: 'c1', document_id: 'd1', excerpt: '', relevance_score: 0.9, document_name: 'Annual Report' });
+      callbacks.onSource?.({ chunk_id: 'c2', document_id: 'd2', excerpt: '', relevance_score: 0.8, document_name: 'Press Release' });
+      callbacks.onToken?.('Revenue was strong across two documents.');
+      callbacks.onGuardrail?.(guardrailPayload([makeClaim({ text: 'Revenue was strong', end: 19 })]));
+      callbacks.onComplete?.({ query_id: 'q-cached', latency_ms: 32, model_used: 'qwen3:4b', token_count: 8, from_cache: true });
+    });
+
+    await user.click(screen.getByRole('button', { name: /how this answer was verified/i }));
+
+    // Search/rank read the sources count and write reads the answer's own
+    // word count, instead of every step staying blank.
+    expect(screen.getByText(/2 found/)).toBeInTheDocument();
+    expect(screen.getByText(/Kept the top 2 of 2/)).toBeInTheDocument();
+    expect(screen.getByText(/6 words/)).toBeInTheDocument();
   });
 
   it('shows claim tally chips and a Claim Ledger row per claim once the guardrail frame lands', async () => {

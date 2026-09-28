@@ -162,6 +162,8 @@ export class QueryWebSocket {
   private isConnected = false;
   private topK?: number;
   private forceRefresh: boolean;
+  /** K4: the query this run should replace once it saves (Regenerate — R2-21). */
+  private replacesQueryId?: string;
 
   // ─── Resume state ──────────────────────────────────────────────────────────
   /** Server-minted id of the stream in flight, learned from the `ack` frame. */
@@ -188,6 +190,7 @@ export class QueryWebSocket {
     conversationId?: string,
     topK?: number,
     forceRefresh = false,
+    replacesQueryId?: string,
   ) {
     this.workspaceId = workspaceId;
     this.query = query;
@@ -195,6 +198,7 @@ export class QueryWebSocket {
     this.conversationId = conversationId;
     this.topK = topK;
     this.forceRefresh = forceRefresh;
+    this.replacesQueryId = replacesQueryId;
   }
 
   connect(): void {
@@ -311,6 +315,7 @@ export class QueryWebSocket {
         ...(this.conversationId ? { conversation_id: this.conversationId } : {}),
         ...(this.topK ? { top_k: this.topK } : {}),
         ...(this.forceRefresh ? { force_refresh: true } : {}),
+        ...(this.replacesQueryId ? { replaces_query_id: this.replacesQueryId } : {}),
       },
     });
   }

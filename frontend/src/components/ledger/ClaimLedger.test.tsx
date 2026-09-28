@@ -111,8 +111,11 @@ describe('ClaimLedger', () => {
       a: { ...contradiction.a, sentence: 'Emissions fell 34% versus 2020.' },
       b: { ...contradiction.b, chunk_id: 'chunk-c', document_id: 'doc-3', document_name: 'Sustainability Report', sentence: 'Emissions fell 41% versus 2020.' },
     };
+    // Two claims, each about the fact its own contradiction disputes (R2-3:
+    // a single claim no longer pairs with every contradiction on its chunk).
+    const claims = [claim({}), claim({ text: 'Emissions fell 34% versus 2020.', evidence: 'Emissions fell 34% versus 2020.' })];
     renderWithProviders(
-      <ClaimLedger claims={[claim({})]} sources={sources} allDocNames={allDocNames} contradictions={[contradiction, contradiction2]} />,
+      <ClaimLedger claims={claims} sources={sources} allDocNames={allDocNames} contradictions={[contradiction, contradiction2]} />,
     );
     expect(screen.getByText('D1')).toBeInTheDocument();
     expect(screen.getByText('D2')).toBeInTheDocument();
@@ -122,6 +125,11 @@ describe('ClaimLedger', () => {
     renderWithProviders(<ClaimLedger claims={[claim({ verdict: 'partial', entailment: 0.02 })]} sources={sources} allDocNames={allDocNames} />);
     expect(screen.getByText('Partial')).toBeInTheDocument();
     expect(screen.queryByText('0.02')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the matched source\'s page number when the claim has none yet (K1/BUG-8 live answers)', () => {
+    renderWithProviders(<ClaimLedger claims={[claim({ page_number: null })]} sources={sources} allDocNames={allDocNames} />);
+    expect(screen.getByText(/\[1\] Annual Report 2025, page 3/)).toBeInTheDocument();
   });
 
   it('fills the score bar with the verdict colour via bg-current, not a runtime-built class (BUG-28)', () => {

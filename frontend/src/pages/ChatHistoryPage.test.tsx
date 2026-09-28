@@ -42,6 +42,13 @@ beforeEach(() => {
 });
 
 describe('ChatHistoryPage', () => {
+  it('lists only the caller\'s own chats (K6/R2-1)', async () => {
+    renderWithProviders(<ChatHistoryPage />);
+
+    await screen.findByText(normalChat.query_text);
+    expect(mockListAll).toHaveBeenCalledWith(expect.objectContaining({ mine: true }));
+  });
+
   it('shows an "Abstained" badge instead of the raw "abstain" model name (BUG-41)', async () => {
     renderWithProviders(<ChatHistoryPage />);
 

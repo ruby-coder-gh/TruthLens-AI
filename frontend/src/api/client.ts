@@ -454,7 +454,9 @@ export const queryApi = {
   compare: (workspaceId: string, queryId: string): Promise<QueryComparison> =>
     request(`/workspaces/${workspaceId}/queries/${queryId}/compare`, { method: 'POST' }),
 
-  listAll: (params?: { pinned?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
+  // K6: `mine` restricts the list to the caller's own queries — /chats (R2-1:
+  // a viewer must not see, let alone delete, other members' chat history).
+  listAll: (params?: { pinned?: boolean; mine?: boolean; page?: number; page_size?: number }): Promise<PaginatedResponse<QuerySummary>> =>
     request(`/queries${buildQuery(params as Record<string, unknown> | undefined)}`),
 
   // Bespoke fetch — response is raw markdown (Content-Disposition attachment),
