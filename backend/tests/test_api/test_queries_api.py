@@ -283,6 +283,26 @@ async def test_export_query_markdown(
 
 
 @pytest.mark.asyncio
+async def test_export_query_markdown_normalizes_source_markers(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    test_db: AsyncSession,
+    seeded_query: tuple[str, str],
+):
+    """BUG-9 (backend): the exported `.md` must not leak raw `[source:N]` markers."""
+    ws_id, q_id = seeded_query
+    query = await test_db.get(Query, q_id)
+    query.response_text = "RAG combines retrieval and generation [source:1]."
+    await test_db.commit()
+
+    resp = await client.get(f"/api/queries/{q_id}/export", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "[source:1]" not in body
+    assert "[1]" in body
+
+
+@pytest.mark.asyncio
 async def test_export_query_not_found(
     client: AsyncClient,
     auth_headers: dict[str, str],

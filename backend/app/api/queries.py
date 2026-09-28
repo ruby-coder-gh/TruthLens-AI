@@ -21,7 +21,7 @@ from app.models.query_pin import QueryPin
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.query_cache import normalize_query
-from app.report_export import render_evidence_markdown
+from app.report_export import normalize_citations, render_evidence_markdown
 from app.schemas.common import ListResponse, PaginatedResponse
 from app.schemas.pin import QueryPinResponse
 from app.schemas.query import QueryDetailResponse, QuerySummary, SourceResponse
@@ -262,7 +262,7 @@ async def get_query_anywhere(
 
 def _render_query_markdown(query: Query, sources: list[dict[str, Any]]) -> str:
     """Render a query's question/answer/trust score/sources as a Markdown document."""
-    answer = query.response_text or "_No answer generated._"
+    answer = normalize_citations(query.response_text) if query.response_text else "_No answer generated._"
 
     if query.trust_score is None:
         trust = "_Not scored._"
