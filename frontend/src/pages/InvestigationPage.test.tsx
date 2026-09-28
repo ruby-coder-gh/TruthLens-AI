@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import InvestigationPage from './InvestigationPage';
-import type { InvestigationResponse, InvestigationProgressResponse, InvestigationStartResponse } from '../api/types';
+import type { InvestigationResponse, InvestigationProgressResponse, InvestigationStartResponse, Source } from '../api/types';
 
 const { mockReview, mockExportAuditBundle } = vi.hoisted(() => ({
   mockReview: vi.fn(),
@@ -154,8 +154,9 @@ describe('InvestigationPage — background job + polling (BUG-10)', () => {
           question: 'When is Aurora expected to commission?',
           partial_answer: '**Aurora Commissioning Date**\n\nExpected Q3 2027 [source:1].',
           citations: [{ text: '[source:1]', chunk_id: 'bm-p1', start_index: 0, end_index: 10 }],
+          // The real API shape: raw retrieval contexts carry `content`, not `excerpt` (QA4).
           retrieved_chunks: [
-            { chunk_id: 'bm-p1', document_id: 'bm', document_name: 'Board Memorandum: Aurora', excerpt: 'Aurora is now expected to commission in the first quarter of 2028.', relevance_score: 0.9 },
+            { chunk_id: 'bm-p1', document_id: 'bm', document_name: 'Board Memorandum: Aurora', content: 'Aurora is now expected to commission in the first quarter of 2028.', score: 0.9 } as unknown as Source,
           ],
           trust_score: 0.85,
           guardrail_passed: true,

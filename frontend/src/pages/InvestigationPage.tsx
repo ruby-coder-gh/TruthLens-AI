@@ -420,7 +420,11 @@ const RAW_CITATION_MARKER_RE = /^\[source:\d+\]$/i;
 function citationExcerpt(citation: { text: string; chunk_id: string }, subQuestion: InvestigationSubQuestion): string {
   if (citation.text && !RAW_CITATION_MARKER_RE.test(citation.text.trim())) return citation.text;
   const chunk = subQuestion.retrieved_chunks?.find((c) => c.chunk_id === citation.chunk_id);
-  return chunk?.excerpt || citation.text || 'Cited evidence span';
+  // The investigation API stores raw retrieval contexts (`content`), not the
+  // chat `Source` shape (`excerpt`) — accept either.
+  const content = (chunk as { content?: string } | undefined)?.content;
+  const text = chunk?.excerpt || (content ? content.slice(0, 300) : '');
+  return text || citation.text || 'Cited evidence span';
 }
 
 function EvidenceRegister({ citations }: { citations: Array<{ citation: { text: string; chunk_id: string }; subQuestion: InvestigationSubQuestion; subQuestionIndex: number; citationIndex: number }> }) {
