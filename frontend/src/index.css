@@ -592,3 +592,42 @@ select:focus-visible {
   background: color-mix(in srgb, var(--color-primary) 20%, transparent);
   color: var(--color-text);
 }
+
+/* ─── Print (Truth Receipt "Download PDF") ───
+   Owned by L4 (ReceiptPage). `window.print()` must render on paper the same
+   way regardless of the viewer's theme — dark mode's light-on-dark tokens
+   would otherwise print near-invisible light text on a white page. Pinning
+   the surface/text vars back to their light values for the whole document is
+   simpler and safer than chasing every `text-*`/`bg-*` utility with a
+   `print:` override one call site at a time. Decorative fixed overlays never
+   belong on a printed page, so they're switched off here too. */
+@media print {
+  :root,
+  :root[data-theme='dark'] {
+    color-scheme: light;
+    --color-bg: #FFFFFF;
+    --color-bg-soft: #FFFFFF;
+    --color-card: #FFFFFF;
+    --color-card-2: #F1F0EE;
+    --color-card-hover: #FFFFFF;
+    --color-solid: #FFFFFF;
+    --color-border: rgba(0, 0, 0, 0.16);
+    --color-border-light: rgba(0, 0, 0, 0.08);
+    --color-glass: #FFFFFF;
+    --color-glass-border: rgba(0, 0, 0, 0.12);
+    --color-text: #14171A;
+    --color-text-muted: #4A5057;
+    --color-text-dim: #656C73;
+  }
+
+  .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .noise-overlay::after,
+  #cursorGlow,
+  .bg-grid {
+    display: none !important;
+  }
+}
