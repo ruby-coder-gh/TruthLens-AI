@@ -54,3 +54,32 @@ describe('UserDashboard — trust display (BUG-50 / C8)', () => {
     expect(screen.queryByText('0.47')).not.toBeInTheDocument();
   });
 });
+
+// R2-13: `model_used` is the literal string "abstain" for an abstained
+// query — printed raw ("2m ago · abstain") it reads as if "abstain" were a
+// model name. `/chats` was fixed for this (BUG-41), the dashboard wasn't.
+describe('UserDashboard — Recent Chats abstain label (R2-13)', () => {
+  it('shows an "Abstained" badge instead of the literal model_used string', async () => {
+    mockListAll.mockResolvedValue({
+      data: [{ ...chat, id: 'q-abstain', trust_score: undefined, model_used: 'abstain', edge_case: 'off_corpus' }],
+      meta: { page: 1, page_size: 5, total: 1 },
+    });
+
+    renderWithProviders(<UserDashboard />, { authValue: { user, isAuthenticated: true } });
+
+    expect(await screen.findByText('Abstained')).toBeInTheDocument();
+    expect(screen.queryByText('abstain')).not.toBeInTheDocument();
+  });
+
+  it('shows the real model name for a non-abstained chat', async () => {
+    mockListAll.mockResolvedValue({
+      data: [{ ...chat, id: 'q-normal', model_used: 'qwen3:4b-instruct' }],
+      meta: { page: 1, page_size: 5, total: 1 },
+    });
+
+    renderWithProviders(<UserDashboard />, { authValue: { user, isAuthenticated: true } });
+
+    expect(await screen.findByText('qwen3:4b-instruct')).toBeInTheDocument();
+    expect(screen.queryByText('Abstained')).not.toBeInTheDocument();
+  });
+});

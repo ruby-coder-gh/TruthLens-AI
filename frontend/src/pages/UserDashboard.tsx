@@ -194,27 +194,37 @@ export default function UserDashboard() {
               />
             ) : (
               <div className="space-y-2">
-                {chats.map((chat) => (
-                  <Link key={chat.id} to={`/chat/${chat.id}`}>
-                    <Card hover className="p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-text">{chat.query_text}</p>
-                          <div className="mt-1.5 flex items-center gap-3 text-xs text-text-dim">
-                            <span className="flex items-center gap-1">
-                              <Clock size={11} />
-                              {formatTimestamp(chat.created_at)}
-                            </span>
-                            {chat.model_used && <span>{chat.model_used}</span>}
+                {chats.map((chat) => {
+                  // R2-13: `model_used` is the literal string "abstain" for
+                  // an abstained query — printed raw it reads as if
+                  // "abstain" were a model name. Same fix as `/chats` (BUG-41).
+                  const isAbstain = Boolean(chat.edge_case) || chat.model_used === 'abstain';
+                  return (
+                    <Link key={chat.id} to={`/chat/${chat.id}`}>
+                      <Card hover className="p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm text-text">{chat.query_text}</p>
+                            <div className="mt-1.5 flex items-center gap-3 text-xs text-text-dim">
+                              <span className="flex items-center gap-1">
+                                <Clock size={11} />
+                                {formatTimestamp(chat.created_at)}
+                              </span>
+                              {isAbstain ? (
+                                <Badge color="orange">Abstained</Badge>
+                              ) : (
+                                chat.model_used && <span>{chat.model_used}</span>
+                              )}
+                            </div>
                           </div>
+                          {chat.trust_score !== undefined && (
+                            <Badge color={getTrustBadgeColor(chat.trust_score)}>{Math.round(chat.trust_score * 100)}/100</Badge>
+                          )}
                         </div>
-                        {chat.trust_score !== undefined && (
-                          <Badge color={getTrustBadgeColor(chat.trust_score)}>{Math.round(chat.trust_score * 100)}/100</Badge>
-                        )}
-                      </div>
-                    </Card>
-                  </Link>
-                ))}
+                      </Card>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </motion.div>
