@@ -3,11 +3,15 @@
 from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
+import json
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import create_access_token
+from app.models.audit_log import AuditLog
 from app.models.user import User
 
 
@@ -410,6 +414,57 @@ async def test_update_member_role(
     )
     assert resp.status_code == 200
     assert resp.json()["role"] == "editor"
+
+
+@pytest.mark.asyncio
+async def test_update_member_role_writes_an_audit_row(
+    client: AsyncClient,
+    test_db: AsyncSession,
+    auth_headers: dict[str, str],
+):
+    """R3-7: changing a member's role must be auditable, same as add/remove."""
+    create = await client.post(
+        "/api/workspaces",
+        json={"name": "Role Audit WS"},
+        headers=auth_headers,
+    )
+    ws_id = create.json()["id"]
+
+    member_user = User(
+        email="roleaudituser@example.com",
+        username="roleaudituser",
+        password_hash="hash",
+        role="user",
+        is_active=True,
+    )
+    test_db.add(member_user)
+    await test_db.commit()
+    await test_db.refresh(member_user)
+
+    await client.post(
+        f"/api/workspaces/{ws_id}/members",
+        json={"user_id": member_user.id, "role": "viewer"},
+        headers=auth_headers,
+    )
+
+    resp = await client.put(
+        f"/api/workspaces/{ws_id}/members/{member_user.id}",
+        json={"role": "editor"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    member_id = resp.json()["id"]
+
+    result = await test_db.execute(
+        select(AuditLog).where(AuditLog.action == "workspace.member_role_update")
+    )
+    row = result.scalar_one()
+    assert row.resource_type == "workspace_member"
+    assert row.resource_id == member_id
+    details = json.loads(row.details)
+    assert details["user_id"] == member_user.id
+    assert details["old_role"] == "viewer"
+    assert details["new_role"] == "editor"
 
 
 @pytest.mark.asyncio

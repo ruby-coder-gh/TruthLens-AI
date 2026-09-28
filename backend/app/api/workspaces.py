@@ -312,9 +312,18 @@ async def update_member_role(
     if member.role == "owner":
         raise ForbiddenException("Cannot change owner's role")
 
+    old_role = member.role
     member.role = body.role
     await db.flush()
     await db.refresh(member)
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action="workspace.member_role_update",
+        resource_type="workspace_member",
+        resource_id=member.id,
+        details=json.dumps({"user_id": user_id, "old_role": old_role, "new_role": body.role}),
+    ))
 
     # Get user info
     user_result = await db.execute(select(User).where(User.id == user_id))
