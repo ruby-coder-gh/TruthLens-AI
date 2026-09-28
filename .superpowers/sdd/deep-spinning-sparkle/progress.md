@@ -28,7 +28,13 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | LIVE BUGS | open | S1: qwen3 thinks until OLLAMA_MAX_TOKENS=2048 → answer EMPTY after strip, 84–106s (fix: `/no_think`); S1: empty answer shown VERIFIED 86% (fix: empty answer = error + Retry); S2: rerank 6s on CPU (bge-reranker-v2-m3) → swap bge-reranker-base for 16GB; S2: radar FPs from PDF run-on text (fix agent running); S2: evidence panel overlaps chat at 800px |
 | 16GB RAM | rule | user: Mac has 16GB → max 2 model-loading processes, no parallel pytest, Ollama 1 model/1 parallel/4K ctx |
 | Chat redesign | prototypes | user dislikes chat UI → 3 HTML prototypes (A desk, B focused reading, C claim ledger) in artifacts/ui-prototypes/chat-redesign/, brief DESIGN-chat-redesign.md |
-| Merge + gates | in progress | waiting L1, radar-fix |
+| L1 Truth Lens BE | merged | 318 passed; sentence-window premises + number rule |
+| Radar precision | merged | 4/4 planted, 0 FP on live seed |
+| CEO fixes | done | b7f378a EMPTY_ANSWER + progress counts; e628be4 citation split; 080b5dc qwen3:4b-instruct default (user approved 2.5GB pull; 8.7s answers); 4dc5c12 NLI premise doc-title prefix (e .000→.998); 4921abc compound hyphen |
+| Design pick | C Claim Ledger | D1 (chat ledger, frontend-engineer) + D2 (tokens/fonts/shell, ux-designer, no Bash → CEO runs gate + commits) dispatched from 6cd4890; D2 worktree was reset by CEO from main |
+| Security audit | done | 0C/0H/1M/3L: M demo-login admin from LAN (0.0.0.0); L viewer publishes receipts; L receipts survive doc delete; L locate full-PDF scan. SEC-FIX agent dispatched from 4921abc (+ guardrail unchecked_claims count). Out of scope noted: delete_query lets viewers delete |
+| D2 shell/tokens | merged | 5492a91 (CEO ran gate: tsc/lint clean, 193 tests, build ok; deleted CursorGlow). Live check OK. QA notes: /health/ready burst ~21 calls; Demo tour pill overlaps sidebar account row; workspace stats "AI Queries —", "Storage —" |
+| Merge + gates | in progress | waiting D1, SEC-FIX; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
 | Security + review | pending | |
 | Playwright full sweep | pending | user explicit ask |
 | PR (merge commit) | pending | |

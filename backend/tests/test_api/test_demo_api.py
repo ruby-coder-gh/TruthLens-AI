@@ -171,7 +171,7 @@ async def test_demo_login_200_for_ipv6_loopback_client(
 async def test_health_ready_reports_ollama_reachable(client: AsyncClient):
     fake_response = MagicMock()
     fake_response.status_code = 200
-    fake_response.json.return_value = {"models": [{"name": "qwen3:4b"}]}
+    fake_response.json.return_value = {"models": [{"name": settings.OLLAMA_PRIMARY_MODEL}]}
 
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=fake_response)
