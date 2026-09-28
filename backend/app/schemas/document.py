@@ -47,6 +47,10 @@ class DocumentResponse(_SearchabilityMixin):
     uploaded_by: str | None = None
     tags: list[str] = []
     quarantined_chunk_count: int = 0
+    # BUG-18: the collection picker needs to know which documents are already
+    # assigned. `None` covers both an unassigned document and a row written
+    # before collections existed.
+    collection_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

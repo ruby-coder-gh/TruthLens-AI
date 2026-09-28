@@ -228,6 +228,7 @@ async def upload_document(
         uploaded_by=doc.uploaded_by,
         tags=doc.tags or [],
         quarantined_chunk_count=doc.quarantined_chunk_count,
+        collection_id=doc.collection_id,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -277,6 +278,7 @@ async def list_documents(
                 uploaded_by=d.uploaded_by,
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
+                collection_id=d.collection_id,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )
@@ -489,6 +491,7 @@ async def list_all_documents(
                 uploaded_by=d.uploaded_by,
                 tags=d.tags or [],
                 quarantined_chunk_count=d.quarantined_chunk_count,
+                collection_id=d.collection_id,
                 created_at=d.created_at,
                 updated_at=d.updated_at,
             )

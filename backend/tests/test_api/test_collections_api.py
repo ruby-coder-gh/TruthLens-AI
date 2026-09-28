@@ -8,11 +8,15 @@ Pure DB — no models/network.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import create_access_token, hash_password
+from app.models.document import Document
 from app.models.user import User
 
 
@@ -64,6 +68,21 @@ async def _create_collection(
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
+
+
+async def _make_document(test_db: AsyncSession, workspace_id: str, *, filename: str = "doc.txt") -> Document:
+    doc = Document(
+        workspace_id=workspace_id,
+        filename=f"{filename}-stored",
+        original_filename=filename,
+        mime_type="text/plain",
+        file_size=10,
+        status="ready",
+    )
+    test_db.add(doc)
+    await test_db.commit()
+    await test_db.refresh(doc)
+    return doc
 
 
 # ── create ───────────────────────────────────────────────────────
@@ -432,5 +451,177 @@ async def test_list_access_forbidden_for_non_creator(
     )
     resp = await client.get(
         f"/api/workspaces/{ws}/collections/{cid}/access", headers=member_headers
+    )
+    assert resp.status_code == 403
+
+
+# ── documents: add / remove (BUG-18) ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_add_documents_assigns_them_and_bumps_document_count(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    """PUT .../documents assigns the given docs and returns the updated count."""
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc_a = await _make_document(test_db, ws, filename="a.txt")
+    doc_b = await _make_document(test_db, ws, filename="b.txt")
+
+    resp = await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [doc_a.id, doc_b.id]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["document_count"] == 2
+
+    await test_db.refresh(doc_a)
+    await test_db.refresh(doc_b)
+    assert doc_a.collection_id == cid
+    assert doc_b.collection_id == cid
+
+
+@pytest.mark.asyncio
+async def test_add_documents_not_found(client: AsyncClient, auth_headers: dict[str, str]):
+    """Assigning an unknown document id returns 404."""
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    resp = await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": ["missing-doc"]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_documents_rejects_a_document_from_another_workspace(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    """A document id from a different workspace is treated as not found."""
+    ws = await _make_workspace(client, auth_headers)
+    other_ws = await _make_workspace(client, auth_headers, name="Other WS")
+    cid = await _create_collection(client, ws, auth_headers)
+    foreign_doc = await _make_document(test_db, other_ws)
+
+    resp = await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [foreign_doc.id]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_documents_collection_not_found(client: AsyncClient, auth_headers: dict[str, str]):
+    ws = await _make_workspace(client, auth_headers)
+    resp = await client.put(
+        f"/api/workspaces/{ws}/collections/missing-id/documents",
+        json={"document_ids": ["whatever"]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_add_documents_forbidden_for_non_owner_non_creator(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc = await _make_document(test_db, ws)
+    _, member_headers = await _make_member(
+        client, test_db, ws, auth_headers, email="m6@example.com", username="m6user"
+    )
+    resp = await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [doc.id]},
+        headers=member_headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_add_documents_is_audited(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    from app.models.audit_log import AuditLog
+
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc = await _make_document(test_db, ws)
+
+    await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [doc.id]},
+        headers=auth_headers,
+    )
+
+    audit = (
+        await test_db.execute(
+            select(AuditLog).where(
+                AuditLog.action == "collection.documents_add", AuditLog.resource_id == cid
+            )
+        )
+    ).scalar_one()
+    assert doc.id in json.loads(audit.details or "{}")["document_ids"]
+
+
+@pytest.mark.asyncio
+async def test_remove_document_unassigns_it(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc = await _make_document(test_db, ws)
+    await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [doc.id]},
+        headers=auth_headers,
+    )
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws}/collections/{cid}/documents/{doc.id}", headers=auth_headers
+    )
+    assert resp.status_code == 204
+
+    await test_db.refresh(doc)
+    assert doc.collection_id is None
+
+
+@pytest.mark.asyncio
+async def test_remove_document_not_a_member_of_this_collection_is_404(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    """Removing a document that isn't currently in this collection is a 404,
+    not a silent success — it never belonged here."""
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc = await _make_document(test_db, ws)
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws}/collections/{cid}/documents/{doc.id}", headers=auth_headers
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_remove_document_forbidden_for_non_owner_non_creator(
+    client: AsyncClient, test_db: AsyncSession, auth_headers: dict[str, str]
+):
+    ws = await _make_workspace(client, auth_headers)
+    cid = await _create_collection(client, ws, auth_headers)
+    doc = await _make_document(test_db, ws)
+    await client.put(
+        f"/api/workspaces/{ws}/collections/{cid}/documents",
+        json={"document_ids": [doc.id]},
+        headers=auth_headers,
+    )
+    _, member_headers = await _make_member(
+        client, test_db, ws, auth_headers, email="m7@example.com", username="m7user"
+    )
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws}/collections/{cid}/documents/{doc.id}", headers=member_headers
     )
     assert resp.status_code == 403
