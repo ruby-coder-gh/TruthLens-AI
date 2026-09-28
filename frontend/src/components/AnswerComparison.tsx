@@ -5,8 +5,15 @@ import { Badge, Card } from './ui';
 import type { QueryComparison, Source } from '../api/types';
 import { getTrustBadgeColor } from '../utils/relevance';
 
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces —
+// the diff view has no citation-chip renderer, so show the bracketed number
+// the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
+
 function DiffText({ original, rerun, side }: { original: string; rerun: string; side: 'original' | 'rerun' }) {
-  const changes = diffWordsWithSpace(original, rerun);
+  const changes = diffWordsWithSpace(stripCitationMarkers(original), stripCitationMarkers(rerun));
   return <>
     {changes.map((part, index) => {
       if (part.added && side === 'original') return null;

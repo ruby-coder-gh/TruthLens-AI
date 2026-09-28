@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -27,6 +28,13 @@ import type { GoldenCategory, QuarantinedChunk, ReviewQueueItem } from '../api/t
 import { useAuth } from '../context/auth-context';
 import { useToast } from '../components/toast-context';
 import { getTrustBadgeColor } from '../utils/relevance';
+
+// BUG-9: raw `[source:N]` markers must never leak into plain-text surfaces
+// (this page has no citation-chip renderer) — show the same bracketed
+// number the ledger's superscript chips use instead.
+function stripCitationMarkers(text: string): string {
+  return text.replace(/\[source:(\d+)\]/gi, '[$1]');
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -171,7 +179,9 @@ function PromoteGoldenModal({
   // than bake it in. Start the field empty and make the reviewer write one.
   const isAbstention = Boolean(item.edge_case);
   const [category, setCategory] = useState<GoldenCategory>('answerable');
-  const [referenceAnswer, setReferenceAnswer] = useState(isAbstention ? '' : item.response_text ?? '');
+  const [referenceAnswer, setReferenceAnswer] = useState(
+    isAbstention ? '' : stripCitationMarkers(item.response_text ?? ''),
+  );
   const [difficulty, setDifficulty] = useState('1');
   const [notes, setNotes] = useState('');
   const [touched, setTouched] = useState(false);
@@ -275,6 +285,7 @@ function PromoteGoldenModal({
 export default function ReviewQueuePage() {
   const { id: workspaceId } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState('queue');
@@ -315,8 +326,9 @@ export default function ReviewQueuePage() {
     };
   }, [workspaceId]);
 
-  // Quarantine is its own request so a 403 (viewer role) or a disabled scanner
-  // never blanks the main review queue.
+  // Quarantine is its own request so a disabled scanner (or any other
+  // failure) never blanks the main review queue. Viewers can read this list
+  // (C4) — only the release/dismiss mutations below are editor-only.
   useEffect(() => {
     if (!workspaceId) return undefined;
     let cancelled = false;
@@ -354,11 +366,15 @@ export default function ReviewQueuePage() {
           review_note: notes[item.id]?.trim() || undefined,
         });
         setItems((current) => current.filter((entry) => entry.id !== item.id));
+        // BUG-51: the sidebar's "N to review" badge (Layout.tsx) is a
+        // separate react-query cache entry — it kept showing the stale
+        // count after Mark reviewed/Dismiss without this.
+        queryClient.invalidateQueries({ queryKey: ['review-queue', workspaceId, 'count'] });
       } finally {
         setActing(null);
       }
     },
-    [workspaceId, notes],
+    [workspaceId, notes, queryClient],
   );
 
   const toggleEnabled = useCallback(async () => {
@@ -547,7 +563,7 @@ export default function ReviewQueuePage() {
                         </span>
                       </div>
                       <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-text-muted">
-                        {item.response_text || 'No answer text was persisted.'}
+                        {item.response_text ? stripCitationMarkers(item.response_text) : 'No answer text was persisted.'}
                       </p>
                       <TrustBreakdown item={item} />
                     </div>

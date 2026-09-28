@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
@@ -12,6 +12,30 @@ const { mockWorkspaceGet, mockListAll, mockReviewCount } = vi.hoisted(() => ({
   mockListAll: vi.fn(),
   mockReviewCount: vi.fn(),
 }));
+
+// This jsdom run has no usable `window.localStorage` — Node's experimental
+// global shadows jsdom's implementation and is inert without
+// `--localstorage-file`. Layout tolerates that (every access is try/caught),
+// but persistence is what BUG-49's test asserts, so install a minimal
+// in-memory Storage for it. Mirrors ThemeContext.test.tsx's helper.
+function installMemoryStorage() {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    key: (i: number) => Array.from(store.keys())[i] ?? null,
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    writable: true,
+    value: storage,
+  });
+}
 
 vi.mock('../api/client', () => ({
   workspaceApi: { get: mockWorkspaceGet },
@@ -157,5 +181,41 @@ describe('Layout', () => {
     const toggle = screen.getByRole('button', { name: 'Open navigation menu' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveFocus();
+  });
+
+  it('traps Tab focus inside the mobile drawer while it is open (BUG-61)', async () => {
+    const user = userEvent.setup();
+    renderLayout('/dashboard');
+
+    await user.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    const nav = screen.getByRole('navigation', { name: 'Primary' });
+
+    await waitFor(() => expect(within(nav).getByRole('link', { name: 'New chat' })).toHaveFocus());
+
+    // Shift+Tab from the first focusable element wraps to the last one
+    // inside the drawer (the sign-out button), never escaping to the header
+    // behind the scrim.
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(within(nav).getByRole('button', { name: 'Sign out' })).toHaveFocus();
+  });
+
+  it('fetches only the signed-in user\'s recent chats (BUG-59 / C3)', async () => {
+    renderLayout('/workspaces/ws1');
+
+    await screen.findByRole('link', { name: recentChat.query_text });
+    expect(mockListAll).toHaveBeenCalledWith(expect.objectContaining({ mine: true }));
+  });
+
+  it('persists the sidebar collapsed state across a reload (BUG-49)', async () => {
+    installMemoryStorage();
+    const user = userEvent.setup();
+    renderLayout('/dashboard');
+
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(window.localStorage.getItem('truthlens:sidebar-collapsed')).toBe('true');
+
+    // A fresh mount (simulating reload) reads the stored preference back.
+    renderLayout('/dashboard');
+    expect(screen.getAllByRole('button', { name: 'Expand sidebar' })[0]).toBeInTheDocument();
   });
 });

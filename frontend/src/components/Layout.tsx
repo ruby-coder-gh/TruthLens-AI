@@ -32,6 +32,7 @@ import { useAuth } from '../context/auth-context';
 import { useTheme } from '../context/theme-context';
 import Logo from './Logo';
 import GlobalSearch from './GlobalSearch';
+import { FOCUSABLE_SELECTOR } from './ui';
 import { queryApi, reviewQueueApi, workspaceApi } from '../api/client';
 import { SourceViewerProvider } from '../context/SourceViewerContext';
 import { DemoTour } from './DemoTour';
@@ -210,14 +211,36 @@ function SideNavList({
  * a sidebar (New chat, nav, Recent, account) and the routed page. The sidebar
  * is a drawer below lg, an icon rail from lg to xl, and full width from xl.
  */
+// BUG-49: the sidebar's collapsed/expanded state didn't survive a reload.
+// Mirrors the theme-context localStorage pattern (try/catch — never let a
+// storage read/write take the shell down).
+const SIDEBAR_COLLAPSED_KEY = 'truthlens:sidebar-collapsed';
+
+function getStoredCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export default function Layout() {
   const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(getStoredCollapsed);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   const workspaceId = pathname.match(/^\/workspaces\/([^/]+)/)?.[1];
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      // Storage unavailable — the choice still applies for this session.
+    }
+  }, [collapsed]);
 
   // Same key + fetcher as WorkspaceDetailPage, so both share one cache entry.
   const { data: workspace, isError: workspaceFailed } = useQuery({
@@ -234,9 +257,18 @@ export default function Layout() {
 
   // Keyed on the route, so a chat asked on one page is listed after the next
   // navigation; the previous list stays on screen while the new one loads.
+  //
+  // BUG-59 / C3: "Recent" implies *your* chats, but for an admin `/api/queries`
+  // returns every workspace member's queries. `mine=true` (C3) scopes it to
+  // the signed-in user. `client.ts`'s `QueryListParams` doesn't declare `mine`
+  // yet (client.ts is scaffold-owned outside its auth-refresh logic) — the
+  // cast is the documented workaround, not a slip.
   const { data: recentChats } = useQuery({
-    queryKey: ['queries', 'recent', pathname],
-    queryFn: () => queryApi.listAll({ page_size: 6 }).then((response) => response.data),
+    queryKey: ['queries', 'recent', 'mine', pathname],
+    queryFn: () =>
+      queryApi
+        .listAll({ page_size: 6, mine: true } as Parameters<typeof queryApi.listAll>[0] & { mine: boolean })
+        .then((response) => response.data),
     enabled: isAuthenticated,
     placeholderData: keepPreviousData,
   });
@@ -251,6 +283,44 @@ export default function Layout() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
+
+  // BUG-61: the mobile drawer didn't trap focus, so Tab walked straight into
+  // the header behind the scrim. Same pattern as Modal's trap in ui.tsx —
+  // move focus in on open, wrap Tab/Shift+Tab within the drawer's own
+  // focusable elements while it's open.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const drawer = drawerRef.current;
+    const raf = requestAnimationFrame(() => {
+      const focusable = drawer?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      (focusable && focusable.length > 0 ? focusable[0] : drawer)?.focus();
+    });
+    const handleTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !drawer) return;
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey) {
+        if (active === first || !drawer.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last || !drawer.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleTab);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleTab);
+    };
   }, [drawerOpen]);
 
   if (!isAuthenticated) return <Outlet />;
@@ -382,8 +452,10 @@ export default function Layout() {
 
         {/* ─── Sidebar ─────────────────────────────────────────────────── */}
         <nav
+          ref={drawerRef}
           id="app-sidebar"
           aria-label="Primary"
+          tabIndex={-1}
           className={clsx(
             // Below lg: a drawer under the top bar (hidden from AT while closed).
             'fixed bottom-0 left-0 top-14 z-50 flex w-[min(300px,86vw)] flex-col gap-0.5 overflow-y-auto border-r border-border bg-solid p-3 shadow-e3 transition-transform duration-200 ease-out',

@@ -3,26 +3,38 @@
 // the viewer is signed in. Two independent pieces:
 //   1. A warm-up toast while the models are still loading.
 //   2. A collapsible 5-step presenter checklist, persisted in localStorage.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, ChevronDown, ChevronUp, X, ArrowRight } from 'lucide-react';
 import { Badge, type BadgeColor } from './ui';
 import { useReady, type UseReadyResult } from '../hooks/useReady';
 import { useAuth } from '../context/auth-context';
-import type { ModelWarmState } from '../api/types';
+import type { ModelWarmState, User } from '../api/types';
 
 const STORAGE_KEY = 'truthlens-demo-tour-v1';
 const STEP_COUNT = 5;
 
+// BUG-33: the tour is presenter chrome for the seeded demo personas — a
+// regular signed-in user on a deployment that merely *has* demo mode
+// enabled (e.g. a QA account) isn't running the demo and shouldn't see it.
+// Matches how `app/demo/seed.py` provisions the accounts: @truthlens.dev
+// email, demo_-prefixed username.
+function isDemoAccount(user: User | null): boolean {
+  if (!user) return false;
+  return user.email?.endsWith('@truthlens.dev') || user.username?.startsWith('demo_');
+}
+
 interface TourState {
   checked: boolean[];
-  hidden: boolean;
+  // BUG-33: no separate "hidden forever" state — Hide/collapse always leaves
+  // the pill itself on screen, so the tour is always re-openable rather than
+  // a dead end once dismissed.
   collapsed: boolean;
 }
 
 function defaultState(): TourState {
-  return { checked: new Array<boolean>(STEP_COUNT).fill(false), hidden: false, collapsed: true };
+  return { checked: new Array<boolean>(STEP_COUNT).fill(false), collapsed: true };
 }
 
 function loadState(): TourState {
@@ -34,7 +46,7 @@ function loadState(): TourState {
       Array.isArray(parsed.checked) && parsed.checked.length === STEP_COUNT
         ? parsed.checked.map(Boolean)
         : defaultState().checked;
-    return { checked, hidden: Boolean(parsed.hidden), collapsed: parsed.collapsed !== false };
+    return { checked, collapsed: parsed.collapsed !== false };
   } catch {
     // Private browsing / quota errors / corrupt JSON — fall back quietly.
     return defaultState();
@@ -103,23 +115,38 @@ interface Step {
   to: string;
 }
 
-/** Collapsible presenter checklist — bottom-left, opens upward so an
- * expanded panel never grows down over the chat composer on mobile. */
+/** Collapsible presenter checklist — top-right, below the header, so an
+ * expanded panel never sits over the sidebar's account row (BUG-21) or the
+ * chat composer at the bottom of the screen on mobile. */
 function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) {
   const [state, setState] = useState<TourState>(() => loadState());
+  const toggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     saveState(state);
   }, [state]);
 
-  if (state.hidden) return null;
+  // BUG-33: Esc closes the expanded panel, same as any other popover, and
+  // returns focus to the toggle that opened it.
+  useEffect(() => {
+    if (state.collapsed) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setState((prev) => ({ ...prev, collapsed: true }));
+      toggleRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [state.collapsed]);
 
   const chatPath = demoWorkspaceId ? `/workspaces/${demoWorkspaceId}/chat` : '/workspaces';
   const radarPath = demoWorkspaceId ? `/workspaces/${demoWorkspaceId}?tab=radar` : '/workspaces';
 
+  // BUG-20: step 2 named a "Truth Lens toggle" that the Claim Ledger
+  // redesign replaced — claims and their verdicts now render inline.
   const steps: Step[] = [
     { id: 'ask', label: 'Ask a suggested question', to: chatPath },
-    { id: 'lens', label: 'Turn on Truth Lens and hover a claim', to: chatPath },
+    { id: 'lens', label: "Review the Claim Ledger's claims and verdicts", to: chatPath },
     { id: 'view', label: '"View in document" to see the highlighted passage', to: chatPath },
     { id: 'seal', label: 'Seal a Truth Receipt and open it logged-out', to: chatPath },
     { id: 'radar', label: 'Open Contradiction Radar', to: radarPath },
@@ -135,29 +162,47 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
     });
   };
 
+  const collapse = () => setState((prev) => ({ ...prev, collapsed: true }));
   const toggleCollapsed = () => setState((prev) => ({ ...prev, collapsed: !prev.collapsed }));
-  const hideTour = () => setState((prev) => ({ ...prev, hidden: true }));
 
   return (
-    <div className="fixed bottom-4 left-4 z-40 max-w-[calc(100vw-2rem)] sm:max-w-xs">
+    <div className="fixed right-4 top-[4.5rem] z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end sm:max-w-xs">
+      <button
+        ref={toggleRef}
+        type="button"
+        onClick={toggleCollapsed}
+        aria-expanded={!state.collapsed}
+        aria-controls="demo-tour-panel"
+        className="flex items-center gap-2 rounded-full border border-border bg-glass px-3.5 py-2 text-xs font-semibold text-text shadow-e1 backdrop-blur-xl transition-colors hover:bg-card-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+      >
+        Demo tour {doneCount}/{STEP_COUNT}
+        {state.collapsed ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronUp size={14} aria-hidden="true" />}
+      </button>
+
+      {/* Opens downward below the pill — this widget now anchors to the top
+          of the viewport (BUG-21), so an upward-opening panel would run off
+          the top of the screen. */}
       <AnimatePresence>
         {!state.collapsed && (
           <motion.div
             id="demo-tour-panel"
-            initial={{ opacity: 0.99, y: 8 }}
+            initial={{ opacity: 0.99, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
+            exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-2 w-full rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl sm:w-80"
+            className="mt-2 w-full rounded-card border border-border bg-glass p-4 shadow-e2 backdrop-blur-xl sm:w-80"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-text">Presenter tour</p>
+              {/* BUG-33: collapses rather than hiding forever — the pill
+                  below always stays on screen, so the tour is always
+                  re-openable, never a dead end. */}
               <button
                 type="button"
-                onClick={hideTour}
+                onClick={collapse}
                 className="flex h-7 w-7 items-center justify-center rounded-control text-text-dim transition-colors hover:bg-card-2 hover:text-text"
-                aria-label="Hide tour"
-                title="Hide tour"
+                aria-label="Collapse tour"
+                title="Collapse tour"
               >
                 <X size={14} />
               </button>
@@ -178,8 +223,11 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
                   >
                     {index + 1}. {step.label}
                   </label>
+                  {/* BUG-33: "Go" also collapses the panel — it used to stay
+                      open, floating over the page it just navigated to. */}
                   <Link
                     to={step.to}
+                    onClick={collapse}
                     className="flex shrink-0 items-center gap-0.5 text-[11px] font-semibold text-primary-soft transition-colors hover:text-primary"
                   >
                     Go
@@ -191,31 +239,23 @@ function TourChecklist({ demoWorkspaceId }: { demoWorkspaceId: string | null }) 
           </motion.div>
         )}
       </AnimatePresence>
-
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        aria-expanded={!state.collapsed}
-        aria-controls="demo-tour-panel"
-        className="flex items-center gap-2 rounded-full border border-border bg-glass px-3.5 py-2 text-xs font-semibold text-text shadow-e1 backdrop-blur-xl transition-colors hover:bg-card-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-      >
-        Demo tour {doneCount}/{STEP_COUNT}
-        {state.collapsed ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-      </button>
     </div>
   );
 }
 
 export function DemoTour() {
   const ready = useReady();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   if (ready.isLoading || !ready.demoMode || !isAuthenticated) return null;
 
   return (
     <>
       <WarmupToast ready={ready} />
-      <TourChecklist demoWorkspaceId={ready.demoWorkspaceId} />
+      {/* BUG-33: the presenter checklist is for the seeded demo personas
+          only — a QA/test account signed into a demo-mode deployment isn't
+          running the demo. The warm-up status above stays for everyone. */}
+      {isDemoAccount(user) && <TourChecklist demoWorkspaceId={ready.demoWorkspaceId} />}
     </>
   );
 }

@@ -228,7 +228,12 @@ export default function DocumentsBrowsePage() {
                 type="button"
                 variants={staggerItem}
                 onClick={() => navigate(`/workspaces/${document.workspace_id}`)}
-                className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-xl"
+                // BUG-25: a grid item's min-width defaults to its content's
+                // intrinsic size unless given min-w-0 — without it, a long
+                // filename forced the whole card (and the grid) wider than
+                // the viewport at 375px, and the inner `truncate` never got
+                // a chance to engage.
+                className="min-w-0 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
               >
                 <Card hover className="h-full p-4">
                   <div className="flex items-start gap-3">

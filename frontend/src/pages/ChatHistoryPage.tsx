@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { MessageSquare, Search, Clock, Trash2, ChevronRight, Pin, GitCompareArrows } from 'lucide-react';
-import { Button, Card, Badge, Input, LoadingSpinner, EmptyState } from '../components/ui';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, MessageSquare, Search, Clock, Trash2, ChevronRight, Pin, GitCompareArrows } from 'lucide-react';
+import { Button, Card, Badge, Input, LoadingSpinner, EmptyState, Modal } from '../components/ui';
 import { staggerContainer, staggerItem, pageTransition } from '../components/motion';
 import { useToast } from '../components/toast-context';
 import { PageHeader, PageShell } from '../components/PageWrappers';
@@ -27,14 +28,22 @@ function ChatRow({ chat, onDelete, onTogglePin, pinError }: {
   onTogglePin: (chat: QuerySummary) => void;
   pinError?: string;
 }) {
-  return <motion.div variants={staggerItem}><Card hover className="p-4"><div className="flex items-start justify-between gap-3"><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}`} className="min-w-0 flex-1 group"><p className="text-sm text-text truncate group-hover:text-primary-soft transition-colors">{chat.query_text}</p><div className="flex items-center gap-3 mt-2"><span className="flex items-center gap-1 text-xs text-text-dim"><Clock size={11} />{formatDate(chat.created_at)}</span>{chat.model_used && <Badge color="gray">{chat.model_used}</Badge>}{chat.trust_score !== undefined && <Badge color={getTrustBadgeColor(chat.trust_score)}>Score: {chat.trust_score.toFixed(2)}</Badge>}</div></Link><div className="flex items-center gap-1 shrink-0"><button type="button" onClick={() => onTogglePin(chat)} className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${chat.is_pinned ? 'bg-primary/15 text-primary-soft' : 'text-text-dim hover:text-primary-soft hover:bg-primary/10'}`} aria-label={chat.is_pinned ? 'Unpin chat' : 'Pin chat'} title={chat.is_pinned ? 'Unpin' : 'Pin'}><Pin size={14} fill={chat.is_pinned ? 'currentColor' : 'none'} /></button><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}?compare=true`} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-accent hover:bg-accent/10 transition-all" aria-label="Re-run comparison" title="Re-run comparison"><GitCompareArrows size={14} /></Link><button type="button" onClick={() => onDelete(chat)} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-red hover:bg-red/10 transition-all" aria-label="Delete chat"><Trash2 size={14} /></button><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}`} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-card-2 transition-all" aria-label="Open chat"><ChevronRight size={14} /></Link></div></div>{pinError && <p className="mt-2 text-xs text-red">{pinError}</p>}</Card></motion.div>;
+  // BUG-41: an abstained query's `model_used` is the literal string "abstain"
+  // — showing it in the same gray badge as a real model name ("gpt-4o-mini")
+  // reads as if "abstain" were a model. Label it for what it is instead.
+  const isAbstain = Boolean(chat.edge_case) || chat.model_used === 'abstain';
+  return <motion.div variants={staggerItem}><Card hover className="p-4"><div className="flex items-start justify-between gap-3"><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}`} className="min-w-0 flex-1 group"><p className="text-sm text-text truncate group-hover:text-primary-soft transition-colors">{chat.query_text}</p><div className="flex items-center gap-3 mt-2"><span className="flex items-center gap-1 text-xs text-text-dim"><Clock size={11} />{formatDate(chat.created_at)}</span>{isAbstain ? <Badge color="orange">Abstained</Badge> : chat.model_used && <Badge color="gray">{chat.model_used}</Badge>}{chat.trust_score !== undefined && <Badge color={getTrustBadgeColor(chat.trust_score)}>Score: {Math.round(chat.trust_score * 100)}/100</Badge>}{/* BUG-50 / C8: trust is 0-100 everywhere, matching the Claim Ledger */}</div></Link><div className="flex items-center gap-1 shrink-0"><button type="button" onClick={() => onTogglePin(chat)} className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${chat.is_pinned ? 'bg-primary/15 text-primary-soft' : 'text-text-dim hover:text-primary-soft hover:bg-primary/10'}`} aria-label={chat.is_pinned ? 'Unpin chat' : 'Pin chat'} title={chat.is_pinned ? 'Unpin' : 'Pin'}><Pin size={14} fill={chat.is_pinned ? 'currentColor' : 'none'} /></button><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}?compare=true`} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-accent hover:bg-accent/10 transition-all" aria-label="Re-run comparison" title="Re-run comparison"><GitCompareArrows size={14} /></Link><button type="button" onClick={() => onDelete(chat)} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-red hover:bg-red/10 transition-all" aria-label="Delete chat"><Trash2 size={14} /></button><Link to={`/workspaces/${chat.workspace_id}/queries/${chat.id}`} className="flex h-8 w-8 items-center justify-center rounded-lg text-text-dim hover:text-text hover:bg-card-2 transition-all" aria-label="Open chat"><ChevronRight size={14} /></Link></div></div>{pinError && <p className="mt-2 text-xs text-red">{pinError}</p>}</Card></motion.div>;
 }
 export default function ChatHistoryPage() {
   const { addToast } = useToast();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [chats, setChats] = useState<QuerySummary[]>([]);
   const [pinErrors, setPinErrors] = useState<Record<string, string>>({});
+  // BUG-12: delete used to fire immediately with no confirmation.
+  const [deleteTarget, setDeleteTarget] = useState<QuerySummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     queryApi.listAll()
@@ -53,13 +62,23 @@ export default function ChatHistoryPage() {
   );
   const pinnedChats = filtered.filter((chat) => chat.is_pinned);
 
-  async function handleDelete(chat: QuerySummary) {
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const chat = deleteTarget;
+    setDeleting(true);
     try {
       await queryApi.delete(chat.workspace_id, chat.id);
       setChats((prev) => prev.filter((c) => c.id !== chat.id));
       addToast('Chat deleted', 'info');
+      setDeleteTarget(null);
+      // BUG-12: the sidebar's "Recent" list (Layout.tsx) is a separate
+      // react-query cache entry — it kept showing the deleted chat until a
+      // full reload without this.
+      queryClient.invalidateQueries({ queryKey: ['queries', 'recent'] });
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Failed to delete chat', 'error');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -129,13 +148,39 @@ export default function ChatHistoryPage() {
           />
         ) : (
           <div className="space-y-5">
-            {pinnedChats.length > 0 && <section className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-3"><div className="mb-2 flex items-center gap-2 px-1 text-sm font-medium text-primary-soft"><Pin size={14} fill="currentColor" /> Pinned</div><div className="space-y-2">{pinnedChats.map((chat) => <ChatRow key={`pinned-${chat.id}`} chat={chat} onDelete={(item) => void handleDelete(item)} onTogglePin={(item) => void handleTogglePin(item)} pinError={pinErrors[chat.id]} />)}</div></section>}
-            <section><div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-text-dim">Chronological history</div><div className="space-y-2">{filtered.map((chat) => <ChatRow key={chat.id} chat={chat} onDelete={(item) => void handleDelete(item)} onTogglePin={(item) => void handleTogglePin(item)} pinError={pinErrors[chat.id]} />)}</div></section>
+            {pinnedChats.length > 0 && <section className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-3"><div className="mb-2 flex items-center gap-2 px-1 text-sm font-medium text-primary-soft"><Pin size={14} fill="currentColor" /> Pinned</div><div className="space-y-2">{pinnedChats.map((chat) => <ChatRow key={`pinned-${chat.id}`} chat={chat} onDelete={(item) => setDeleteTarget(item)} onTogglePin={(item) => void handleTogglePin(item)} pinError={pinErrors[chat.id]} />)}</div></section>}
+            <section><div className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-text-dim">Chronological history</div><div className="space-y-2">{filtered.map((chat) => <ChatRow key={chat.id} chat={chat} onDelete={(item) => setDeleteTarget(item)} onTogglePin={(item) => void handleTogglePin(item)} pinError={pinErrors[chat.id]} />)}</div></section>
           </div>
         )}
       </motion.div>
       </PageShell>
       </motion.div>
+
+      <AnimatePresence>
+        {deleteTarget && (
+          <Modal open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="Delete chat">
+            <div className="flex items-start gap-3 rounded-xl border border-red/20 bg-red/8 p-4">
+              <AlertTriangle size={20} className="shrink-0 mt-0.5 text-red" />
+              <div className="text-sm text-text">
+                <p className="font-medium text-red">Are you sure?</p>
+                <p className="mt-1 text-text-muted">
+                  This will permanently delete &ldquo;{deleteTarget.query_text}&rdquo; and its answer. This
+                  action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="danger" loading={deleting} onClick={() => void confirmDelete()}>
+                <Trash2 size={16} />
+                Delete
+              </Button>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
