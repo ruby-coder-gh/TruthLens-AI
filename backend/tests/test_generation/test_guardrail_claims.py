@@ -484,6 +484,23 @@ class TestFragmentMerging:
         assert "First quarter of 2028" in result.claims[0]["text"]
         assert result.claims[0]["verdict"] == "supported"
 
+    async def test_disputed_intro_with_short_date_bullets_passes(self):
+        """The exact QA4 repro (CEO answer): an intro ending in ':' plus two short
+        date bullets. The bullets (<= 15 chars) used to be dropped before the
+        merge, leaving the intro to be scored alone and fail the guardrail."""
+        answer = (
+            "Dana Whitfield's start date as Chief Executive Officer is disputed:\n"
+            "- March 2021 [source:1]\n"
+            "- January 2022 [source:2]"
+        )
+        contexts = [
+            _ctx(0, "Dana Whitfield became Chief Executive Officer in March 2021."),
+            _ctx(1, "Dana Whitfield became Chief Executive Officer in January 2022."),
+        ]
+        result, _ = await _run(answer, contexts, [])
+        assert result.passed is True
+        assert result.unsupported_claims == []
+
     async def test_leading_fragment_with_nothing_to_merge_into_is_dropped(self):
         result, calls = await _run("First quarter of 2028", [_ctx(0, "Aurora commissions in 2028.")], [])
         assert result.claims == [] and calls == []

@@ -39,7 +39,9 @@ _MARKER_RE = re.compile(r"\s*\[source:\s*(\d+)\]")
 # premise -- NLI has nothing single-source to entail it against, so it was
 # scored UNSUPPORTED/CONTRADICTED and failed otherwise-honest conflict
 # answers. Excluded from claim scoring like the refusal sentence below.
-_META_DISAGREEMENT_RE = re.compile(r"\b(?:disagree\w*|discrepanc\w*)\b", re.IGNORECASE)
+_META_DISAGREEMENT_RE = re.compile(
+    r"\b(?:disagree\w*|discrepanc\w*|disput\w*|conflicting|inconsisten\w*)\b", re.IGNORECASE
+)
 # R2-4, general case: a claim that names >=2 distinct values as alternatives
 # ("different values: 41% and 34%", "either March 2021 or January 2022",
 # "while the press release reports €398 million", "X in one and Y in the
@@ -154,8 +156,11 @@ def _extract_claims(answer: str) -> list[str]:
     return filtered
 
 
-def _extract_claim_spans(answer: str) -> list[tuple[str, int, int]]:
+def _extract_claim_spans(answer: str, keep_short: bool = False) -> list[tuple[str, int, int]]:
     """Split an answer into claims with `[start, end)` offsets into `answer`.
+
+    `keep_short` keeps spans of <= 15 chars (bare list items like "March 2021")
+    so `_merge_fragment_spans` can fold them into the sentence they belong to.
 
     Unlike `_extract_claims`, line breaks (bullets, headings) always end a
     claim, trailing `[source:N]` markers stay inside the span, and the returned
@@ -174,7 +179,7 @@ def _extract_claim_spans(answer: str) -> list[tuple[str, int, int]]:
         span_start = start + _LIST_PREFIX_RE.match(segment).end()
         span_end = start + len(segment.rstrip())
         text = _MARKER_RE.sub("", answer[span_start:span_end]).replace("**", "").strip()
-        if len(text) > 15:
+        if len(text) > 15 or (keep_short and text):
             spans.append((text, span_start, span_end))
         start = nxt
     return spans
@@ -430,8 +435,9 @@ async def check(answer: str, contexts: list[dict[str, Any]]) -> GuardrailResult:
     # The generator's own "can't answer" sentence, and any "sources disagree"
     # meta-statement, are not claims about the documents.
     spans = [
-        s for s in _merge_fragment_spans(_extract_claim_spans(answer))
-        if not s[0].lower().startswith(REFUSAL_PREFIX.lower())
+        s for s in _merge_fragment_spans(_extract_claim_spans(answer, keep_short=True))
+        if len(s[0]) > 15
+        and not s[0].lower().startswith(REFUSAL_PREFIX.lower())
         and not _META_DISAGREEMENT_RE.search(s[0])
     ]
     if not spans:
