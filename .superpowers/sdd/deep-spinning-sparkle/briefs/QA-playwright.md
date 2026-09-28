@@ -54,6 +54,25 @@ Admin: `/api-catalog`, `/admin`, `/admin/documents`, `/admin/documents/upload`, 
   review queue (+ quarantine tab), investigations, comparisons, admin prompts/analytics/usage (no `abstain` model row)/audit export/
   documents bulk ops/upload/golden set, settings, password change, logout.
 
+## UPDATE — chat was redesigned as "C · Claim Ledger" (source of truth: `artifacts/ui-prototypes/chat-redesign/c-claim-ledger.html`)
+Replace the old Truth Lens overlay / evidence sidebar checks with: audit trail ("How this answer was verified") live steps + counts →
+collapses to "N steps, X s"; answer streams as prose then settles into the ledger; "Claim ledger | Read as prose" toggle persists;
+ledger rows (stamp, score, claim, evidence quote, source link → viewer), row expand ("why partial"), conflict rows + "Differs from Cn"
+cross-links, exhibits list, trust totals, actions (Seal receipt, Copy, Export, 👍/👎, Regenerate), EMPTY_ANSWER/error → Retry;
+`/chat/:queryId` and `/workspaces/:id/queries/:queryId` show the same from stored data. New shell: ONE top bar (workspace breadcrumb,
+search ⌘K, theme), sidebar (New chat resets conversation, Recent updates live), rail/drawer at narrower widths. Also compare visual
+fidelity against the prototype and list the biggest gaps.
+
+Already seen by CEO in a live check — confirm + file with file:line:
+1. While streaming, every `[n]` citation sits on its own line (answer prose split into blocks around citation chips).
+2. Ledger evidence links show full document names ("Northwind Renewables — 2025 Sustainability Report") — `shortDocTitle` not applied.
+3. Two conflict rows both labelled "D" (should be D1, D2).
+4. PARTIAL rows show score "0.00" — confusing next to the stamp.
+5. "Demo tour" pill covers the sidebar account row / sign-out on desktop.
+6. `/api/health/ready` fired ~21× in one burst (check whether it's normal polling or a remount loop).
+7. Workspace stats show "AI Queries —" and "Storage Used —".
+8. Answers are verbose (106 words, 21.8 s end-to-end for the emissions question) — note latency per suggested question.
+
 ## Tooling
 Playwright MCP (`mcp__plugin_playwright_playwright__*`) or the `playwright-cli` skill. Screenshots only in your scratch dir. Use graft
 (`graft ask "<symptom>" --source`) to point each bug at file:line. Don't fix code — report only.

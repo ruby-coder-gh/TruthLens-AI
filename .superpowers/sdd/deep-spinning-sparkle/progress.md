@@ -34,7 +34,10 @@ Plan: `plan.md` (same folder) / `~/.claude/plans/deep-spinning-sparkle.md`.
 | Design pick | C Claim Ledger | D1 (chat ledger, frontend-engineer) + D2 (tokens/fonts/shell, ux-designer, no Bash → CEO runs gate + commits) dispatched from 6cd4890; D2 worktree was reset by CEO from main |
 | Security audit | done | 0C/0H/1M/3L: M demo-login admin from LAN (0.0.0.0); L viewer publishes receipts; L receipts survive doc delete; L locate full-PDF scan. SEC-FIX agent dispatched from 4921abc (+ guardrail unchecked_claims count). Out of scope noted: delete_query lets viewers delete |
 | D2 shell/tokens | merged | 5492a91 (CEO ran gate: tsc/lint clean, 193 tests, build ok; deleted CursorGlow). Live check OK. QA notes: /health/ready burst ~21 calls; Demo tour pill overlaps sidebar account row; workspace stats "AI Queries —", "Storage —" |
-| Merge + gates | in progress | waiting D1, SEC-FIX; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
+| SEC-FIX | merged | demo-login loopback-only + run.sh --demo binds 127.0.0.1; receipts editor-only + editors revoke; doc delete revokes citing receipts; locate bounded; guardrail unchecked_claims. + d80233b test model name. Live demo still on old process (0.0.0.0) — restart before QA |
+| D1 Claim Ledger | merged | 7f8440e; FE gate 228 → aaba770 deleted dead AnswerBody/EvidenceSidebar/ReportBuilderWizard/ComparisonMatrix (225 tests, green). Live check OK; 8 known issues added to QA brief |
+| Full backend suite | running | demo stopped for RAM |
+| Merge + gates | in progress | next: full suite → restart demo → Playwright QA → fix → re-sweep → PR+merge; then full suite (stop live demo first for RAM), security + review, Playwright sweep, then PR → merge to main (user: "after all perfectly tested, raise PR and merge") |
 | Security + review | pending | |
 | Playwright full sweep | pending | user explicit ask |
 | PR (merge commit) | pending | |

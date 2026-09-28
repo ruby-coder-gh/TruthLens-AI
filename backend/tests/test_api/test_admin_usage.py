@@ -296,7 +296,11 @@ async def test_usage_pricing_endpoint(client: AsyncClient, admin_headers: dict[s
 
 
 @pytest.mark.asyncio
-async def test_usage_pricing_defaults_to_empty(client: AsyncClient, admin_headers: dict[str, str]):
+async def test_usage_pricing_defaults_to_empty(
+    client: AsyncClient, admin_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+):
+    # Pin the default: a local backend/.env (run.sh copies .env.example) may set pricing.
+    monkeypatch.setattr(settings, "MODEL_PRICING_JSON", "{}")
     resp = await client.get("/api/admin/usage/pricing", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["pricing"] == {}
