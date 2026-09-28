@@ -105,3 +105,57 @@ def test_locate_in_pdf_content_not_present_falls_back_without_crashing(tmp_path)
     assert result["page_number"] == 2  # falls back to the hinted page
     assert result["rects"] == []
     assert result["page_count"] == 2
+
+
+def _write_n_page_pdf(path: Path, n: int, needle_page_index: int, needle_text: str) -> None:
+    import fitz
+
+    doc = fitz.open()
+    for i in range(n):
+        page = doc.new_page()
+        if i == needle_page_index:
+            page.insert_text((72, 100), needle_text, fontsize=11)
+    doc.save(path)
+    doc.close()
+
+
+def test_locate_in_pdf_large_doc_does_not_full_scan_past_hint_window(tmp_path):
+    """A >60-page PDF must not fall back to searching every page: only the
+    hinted page +/- 2 is tried, then the empty-rects fallback (no highlight,
+    but the hinted page still opens) — never an O(page_count) scan per call."""
+    pdf_path = tmp_path / "large.pdf"
+    needle = "This unique sentence only exists on the final page."
+    # 61 pages, needle on the last page — hint says page 1, well outside +/-2.
+    _write_n_page_pdf(pdf_path, 61, needle_page_index=60, needle_text=needle)
+
+    result = locate_in_pdf(pdf_path, page_number_hint=1, content=needle)
+
+    assert result["page_count"] == 61
+    assert result["page_number"] == 1  # falls back to the hinted page, not the real one
+    assert result["rects"] == []
+
+
+def test_locate_in_pdf_at_the_60_page_bound_still_full_scans(tmp_path):
+    """At exactly the 60-page bound, the whole-document fallback still runs."""
+    pdf_path = tmp_path / "sixty.pdf"
+    needle = "This unique sentence only exists on the final page."
+    _write_n_page_pdf(pdf_path, 60, needle_page_index=59, needle_text=needle)
+
+    result = locate_in_pdf(pdf_path, page_number_hint=1, content=needle)
+
+    assert result["page_count"] == 60
+    assert result["page_number"] == 60
+    assert len(result["rects"]) > 0
+
+
+def test_locate_in_pdf_hint_window_of_two_still_finds_nearby_pages(tmp_path):
+    """Content 2 pages after the hint (outside the old +1 rule) is still found
+    without a full scan."""
+    pdf_path = tmp_path / "large2.pdf"
+    needle = "This unique sentence only exists nearby."
+    _write_n_page_pdf(pdf_path, 61, needle_page_index=3, needle_text=needle)  # page 4, hint says page 2
+
+    result = locate_in_pdf(pdf_path, page_number_hint=2, content=needle)
+
+    assert result["page_number"] == 4
+    assert len(result["rects"]) > 0
