@@ -1150,6 +1150,8 @@ function MembersTab({
   // ancestor's overflow/stacking context.
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // R4-2: removing a member is destructive — the first click arms it, the second removes.
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
   // R2-9: the menu panel itself — used to scope the outside-click check
   // below. Only one member's menu is ever mounted at a time (`actionMenuOpen`
@@ -1159,6 +1161,7 @@ function MembersTab({
   function closeActionMenu() {
     setActionMenuOpen(null);
     setMenuPosition(null);
+    setConfirmRemoveId(null);
   }
 
   function openActionMenu(memberId: string, trigger: HTMLButtonElement) {
@@ -1444,14 +1447,18 @@ function MembersTab({
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    if (confirmRemoveId !== member.user_id) {
+                                      setConfirmRemoveId(member.user_id);
+                                      return;
+                                    }
                                     removeMemberMutation.mutate(member.user_id);
                                     closeActionMenu();
                                   }}
                                   disabled={removeMemberMutation.isPending}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors"
+                                  className={`flex w-full items-center gap-2 px-3 py-2 text-xs text-red hover:bg-red/10 hover:text-red transition-colors ${confirmRemoveId === member.user_id ? "font-semibold bg-red/10" : ""}`}
                                 >
                                   <X size={13} />
-                                  Remove member
+                                  {confirmRemoveId === member.user_id ? "Confirm remove" : "Remove member"}
                                 </button>
                               </div>
                             </motion.div>

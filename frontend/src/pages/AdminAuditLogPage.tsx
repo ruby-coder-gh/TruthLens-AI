@@ -35,6 +35,7 @@ const ACTION_FILTERS = [
   { value: 'workspace.delete', label: 'Workspace delete' },
   { value: 'workspace.add_member', label: 'Workspace add member' },
   { value: 'workspace.remove_member', label: 'Workspace remove member' },
+  { value: 'workspace.member_role_update', label: 'Workspace member role change' },
   { value: 'document.upload', label: 'Document upload' },
   { value: 'document.delete', label: 'Document delete' },
   { value: 'document.reindex', label: 'Document reindex' },

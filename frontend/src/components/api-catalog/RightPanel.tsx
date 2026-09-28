@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import WebSocketViz from './WebSocketViz';
-import { CATALOG_STATS } from './data';
 import { useReady } from '../../hooks/useReady';
 
 function AuthPanel() {
@@ -77,9 +76,9 @@ function AuthPanel() {
 }
 
 function QuickPlayground() {
-  const [code] = useState(`curl -X POST https://api.truthlens.ai/api/auth/login \\
+  const [code] = useState(`curl -X POST ${window.location.origin}/api/auth/login \\
   -H "Content-Type: application/json" \\
-  -d '{"username": "user", "password": "pass"}'`);
+  -d '{"email": "you@example.com", "password": "…"}'`);
 
   return (
     <div className="rounded-xl glass border border-glass-border p-4">
@@ -142,13 +141,6 @@ function LiveStatus() {
           <span className={clsx('flex items-center gap-1.5', checking ? 'text-text-dim' : reachable ? 'text-green' : 'text-red')}>
             <span className={clsx('w-1.5 h-1.5 rounded-full', checking ? 'bg-text-dim' : reachable ? 'bg-green animate-pulse-dot' : 'bg-red')} />
             {checking ? 'Checking…' : reachable ? 'Operational' : 'Unreachable'}
-          </span>
-        </div>
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-text-muted">Background Jobs</span>
-          <span className="flex items-center gap-1.5 text-accent-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-2 animate-pulse-dot" />
-            {CATALOG_STATS.backgroundJobs} Active
           </span>
         </div>
         {/* BUG-44: dropped a fabricated "Uptime %" — this app has no SLA

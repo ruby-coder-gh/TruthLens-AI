@@ -306,7 +306,10 @@ describe('WorkspaceDetailPage — Members tab actions menu (BUG-15/R2-9)', () =>
     expect(roleSelect).toBeVisible();
     expect(removeButton).toBeVisible();
     expect(copyButton).toBeVisible();
+    // R4-2: the first click only arms the destructive action.
     await testUser.click(removeButton);
+    expect(workspaceApi.removeMember).not.toHaveBeenCalled();
+    await testUser.click(screen.getByRole('button', { name: /confirm remove/i }));
     await waitFor(() => expect(workspaceApi.removeMember).toHaveBeenCalledWith('ws-1', 'u2'));
   });
 });
