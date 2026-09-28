@@ -140,6 +140,49 @@ describe('InvestigationPage — background job + polling (BUG-10)', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('/investigations/case-1/progress');
   });
 
+  // BUG-10: the finished case file's Research ledger printed `partial_answer`
+  // as a raw string (literal `**bold**`/`[source:N]`), and the Evidence
+  // register showed the literal `[source:N]` marker as if it were the quoted
+  // span — `citer.py`'s primary match path sets a citation's `text` to the
+  // matched marker itself, not the source content.
+  it('renders the Research ledger as real markdown and the Evidence register as the actual quoted excerpt', async () => {
+    const caseWithSubQuestions: InvestigationResponse = {
+      ...caseFile,
+      sub_questions: [
+        {
+          id: 'sq-1',
+          question: 'When is Aurora expected to commission?',
+          partial_answer: '**Aurora Commissioning Date**\n\nExpected Q3 2027 [source:1].',
+          citations: [{ text: '[source:1]', chunk_id: 'bm-p1', start_index: 0, end_index: 10 }],
+          retrieved_chunks: [
+            { chunk_id: 'bm-p1', document_id: 'bm', document_name: 'Board Memorandum: Aurora', excerpt: 'Aurora is now expected to commission in the first quarter of 2028.', relevance_score: 0.9 },
+          ],
+          trust_score: 0.85,
+          guardrail_passed: true,
+        },
+      ],
+    };
+    const doneProgress: InvestigationProgressResponse = {
+      id: 'case-1', query: caseFile.query, status: 'done', step: 'done',
+      done_steps: 3, total_steps: 3, sub_questions: [], elapsed_ms: 4200, report: caseWithSubQuestions,
+    };
+    const fetchMock = vi.fn().mockImplementationOnce(() => jsonResponse(doneProgress));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage('/workspaces/ws-1/investigate/case-1');
+
+    const heading = await screen.findByText('Aurora Commissioning Date');
+    expect(heading.tagName).toBe('STRONG');
+    // The raw `[source:N]` marker is normalised to the ledger's own `[N]` style.
+    expect(screen.getByText(/Expected Q3 2027 \[1\]\./)).toBeInTheDocument();
+    expect(screen.queryByText(/\[source:1\]/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\*\*Aurora Commissioning Date\*\*/)).not.toBeInTheDocument();
+
+    // Evidence register shows the actual excerpt, not the raw marker.
+    expect(screen.getByText(/Aurora is now expected to commission in the first quarter of 2028\./)).toBeInTheDocument();
+    expect(screen.queryByText('[source:1]')).not.toBeInTheDocument();
+  });
+
   it('shows a failure card with a retry action when the run fails', async () => {
     const startResponse: InvestigationStartResponse = { id: 'case-1', workspace_id: 'ws-1', status: 'running' };
     const failedProgress: InvestigationProgressResponse = {
