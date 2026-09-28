@@ -83,6 +83,8 @@ export interface Document {
    * "ready" with nothing indexed. Absent on rows predating the fix.
    */
   is_searchable?: boolean;
+  /** BUG-18. The collection this document is assigned to, if any. */
+  collection_id?: string | null;
 }
 
 export interface DocumentStatus {

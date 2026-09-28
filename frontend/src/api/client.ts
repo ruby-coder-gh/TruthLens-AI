@@ -719,6 +719,19 @@ export const collectionApi = {
 
   listAccess: (workspaceId: string, collectionId: string): Promise<ListResponse<unknown>> =>
     request(`/workspaces/${workspaceId}/collections/${collectionId}/access`),
+
+  // BUG-18: assign documents to a collection. A document belongs to at most
+  // one collection, so this moves it out of any other it was already in.
+  addDocuments: (workspaceId: string, collectionId: string, documentIds: string[]): Promise<unknown> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/documents`, {
+      method: 'PUT',
+      body: JSON.stringify({ document_ids: documentIds }),
+    }),
+
+  removeDocument: (workspaceId: string, collectionId: string, documentId: string): Promise<void> =>
+    request(`/workspaces/${workspaceId}/collections/${collectionId}/documents/${documentId}`, {
+      method: 'DELETE',
+    }),
 };
 
 // ─── Investigation API ──────────────────────────────────────────────────────
