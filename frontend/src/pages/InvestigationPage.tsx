@@ -29,10 +29,8 @@ import { investigationApi } from '../api/client';
 import { downloadBlob } from '../utils/download';
 import type {
   InvestigationProgressResponse,
-  InvestigationRequest,
   InvestigationResponse,
   InvestigationReviewStatus,
-  InvestigationStartResponse,
   InvestigationSubQuestion,
 } from '../api/types';
 import { getTrustBadgeColor, getTrustConfidenceLabel } from '../utils/relevance';
@@ -43,33 +41,6 @@ const EXAMPLE_QUESTIONS = [
   'Create an executive brief with evidence, gaps, and recommended next actions.',
 ];
 const DEFAULT_TOP_K = 10;
-// BUG-10: `investigationApi.run()`/`.get()` in api/client.ts (owned by the
-// scaffold, not editable here) still type against the old synchronous
-// InvestigationResponse shape. The backend now starts a background job (202
-// + progress polling), so the start/poll calls below go straight through a
-// small local fetch helper against the new contract instead.
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
-
-async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
-    credentials: 'include',
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: { message?: string }; detail?: string } | null;
-    throw new Error(body?.error?.message || body?.detail || `Request failed (${res.status})`);
-  }
-  return res.json() as Promise<T>;
-}
-
-function startInvestigation(workspaceId: string, data: InvestigationRequest): Promise<InvestigationStartResponse> {
-  return apiRequest(`/workspaces/${workspaceId}/investigate`, { method: 'POST', body: JSON.stringify(data) });
-}
-
-function fetchInvestigationProgress(workspaceId: string, investigationId: string): Promise<InvestigationProgressResponse> {
-  return apiRequest(`/workspaces/${workspaceId}/investigations/${investigationId}/progress`);
-}
 
 function progressQueryKey(workspaceId: string | undefined, caseId: string | undefined) {
   return ['investigation-progress', workspaceId, caseId] as const;
@@ -171,7 +142,7 @@ export default function InvestigationPage() {
   // blocking REST call — start it, then follow the case id into the URL so
   // a refresh or revisit resumes polling instead of losing the run.
   const startMutation = useMutation({
-    mutationFn: () => startInvestigation(workspaceId!, { query: query.trim(), top_k: topK }),
+    mutationFn: () => investigationApi.run(workspaceId!, { query: query.trim(), top_k: topK }),
     onSuccess: (started) => {
       setRunError(null);
       navigate(`/workspaces/${workspaceId}/investigate/${started.id}`, { replace: true });
@@ -181,7 +152,7 @@ export default function InvestigationPage() {
 
   const progressQuery = useQuery({
     queryKey: progressQueryKey(workspaceId, caseId),
-    queryFn: () => fetchInvestigationProgress(workspaceId!, caseId!),
+    queryFn: () => investigationApi.progress(workspaceId!, caseId!),
     enabled: !!workspaceId && !!caseId,
     // Poll only while the run is actually in flight — stops itself the
     // instant this returns `false` on a later render (same pattern as the

@@ -11,12 +11,13 @@ const { mockReview, mockExportAuditBundle } = vi.hoisted(() => ({
   mockExportAuditBundle: vi.fn(),
 }));
 
-vi.mock('../api/client', () => ({
-  investigationApi: {
-    review: mockReview,
-    exportAuditBundle: mockExportAuditBundle,
-  },
-}));
+vi.mock('../api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/client')>();
+  return {
+    ...actual,
+    investigationApi: { ...actual.investigationApi, review: mockReview, exportAuditBundle: mockExportAuditBundle },
+  };
+});
 
 vi.mock('../context/SourceViewerContext', () => ({
   useSourceViewer: () => ({ open: vi.fn(), close: vi.fn(), target: null }),
@@ -91,6 +92,32 @@ describe('InvestigationPage — background job + polling (BUG-10)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toContain('/workspaces/ws-1/investigate');
     expect(String(fetchMock.mock.calls[1][0])).toContain('/investigations/case-1/progress');
+  });
+
+  // A run can outlive the 30-minute access token. The poll must refresh the
+  // session and retry (shared client) instead of 401-ing until a page reload.
+  it('refreshes an expired session mid-poll and still shows the report', async () => {
+    const startResponse: InvestigationStartResponse = { id: 'case-1', workspace_id: 'ws-1', status: 'running' };
+    const doneProgress: InvestigationProgressResponse = {
+      id: 'case-1', query: caseFile.query, status: 'done', step: 'done',
+      done_steps: 3, total_steps: 3, sub_questions: [], elapsed_ms: 4200, report: caseFile,
+    };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse(startResponse, 202))
+      .mockImplementationOnce(() => jsonResponse({ detail: 'Token expired' }, 401))
+      .mockImplementationOnce(() => jsonResponse({}))
+      .mockImplementationOnce(() => jsonResponse(doneProgress));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByPlaceholderText(/ask a complex research question/i), 'What are the key risks?');
+    await user.click(screen.getByRole('button', { name: /create case file/i }));
+
+    expect(await screen.findByText('Revenue')).toBeInTheDocument();
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/auth/refresh');
+    expect(String(fetchMock.mock.calls[3][0])).toContain('/investigations/case-1/progress');
   });
 
   it('shows the real step list and current sub-question while running, then the report once done', async () => {

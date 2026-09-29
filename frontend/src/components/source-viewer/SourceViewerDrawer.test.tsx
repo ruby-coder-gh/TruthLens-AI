@@ -35,57 +35,35 @@ const baseTarget: SourceTarget = {
 };
 
 describe('SourceViewerDrawer', () => {
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
     mockLocate.mockReset();
     mockFileUrl.mockClear();
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
   // BUG-17 / C1 regression: when a target carries `highlightText` (the
-  // claim's cited sentence), the drawer must ask the locate endpoint for
-  // rects on just that text — not fall back to `documentApi.locate`, which
-  // has no way to pass it and would highlight the whole chunk instead.
-  it('requests the locate endpoint with ?text= when the target has highlightText', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify(textLocation('Aurora is now expected to commission in the first quarter of 2028.')),
-        { status: 200 },
-      ),
-    );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  // claim's cited sentence), the drawer must pass it to the locate call so
+  // the backend returns rects for just that sentence, not the whole chunk.
+  it('passes highlightText to documentApi.locate when the target has one', async () => {
+    const sentence = 'Aurora is now expected to commission in the first quarter of 2028.';
+    mockLocate.mockResolvedValue(textLocation(sentence));
 
-    const target: SourceTarget = {
-      ...baseTarget,
-      highlightText: 'Aurora is now expected to commission in the first quarter of 2028.',
-    };
-
-    render(<SourceViewerDrawer target={target} onClose={vi.fn()} />);
+    render(<SourceViewerDrawer target={{ ...baseTarget, highlightText: sentence }} onClose={vi.fn()} />);
 
     expect(await screen.findByText(/aurora is now expected to commission/i)).toBeInTheDocument();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toContain('/workspaces/ws-1/documents/doc-1/chunks/chunk-1/locate?text=');
-    expect(url).toContain(encodeURIComponent('Aurora is now expected to commission in the first quarter of 2028.'));
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
-
-    // The generic client method — which cannot carry `text` — must not be used.
-    expect(mockLocate).not.toHaveBeenCalled();
+    expect(mockLocate).toHaveBeenCalledWith('ws-1', 'doc-1', 'chunk-1', sentence);
   });
 
-  it('falls back to documentApi.locate (whole chunk) when there is no highlightText', async () => {
+  it('asks for the whole chunk when there is no highlightText', async () => {
     mockLocate.mockResolvedValue(textLocation('The full chunk text, from the top.'));
 
     render(<SourceViewerDrawer target={baseTarget} onClose={vi.fn()} />);
 
     expect(await screen.findByText(/the full chunk text, from the top\./i)).toBeInTheDocument();
-    expect(mockLocate).toHaveBeenCalledWith('ws-1', 'doc-1', 'chunk-1');
+    expect(mockLocate).toHaveBeenCalledWith('ws-1', 'doc-1', 'chunk-1', undefined);
   });
 
   // BUG-17: text-mode used to <mark> the entire chunk regardless of what was
@@ -94,10 +72,7 @@ describe('SourceViewerDrawer', () => {
     const content = 'Intro sentence. Aurora is now expected to commission in the first quarter of 2028. Trailing sentence.';
     const start = content.indexOf('Aurora');
     const end = start + 'Aurora is now expected to commission in the first quarter of 2028.'.length;
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ...textLocation(content), highlight: { start, end } }), { status: 200 }),
-    );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    mockLocate.mockResolvedValue({ ...textLocation(content), highlight: { start, end } });
 
     const target: SourceTarget = { ...baseTarget, highlightText: 'Aurora is now expected to commission in the first quarter of 2028.' };
     const { container } = render(<SourceViewerDrawer target={target} onClose={vi.fn()} />);

@@ -16,6 +16,8 @@ import type {
   AuditLogEntry,
   InvestigationRequest,
   InvestigationResponse,
+  InvestigationStartResponse,
+  InvestigationProgressResponse,
   InvestigationSummary,
   InvestigationReviewUpdate,
   PaginatedResponse,
@@ -424,8 +426,9 @@ export const documentApi = {
   fileUrl: (workspaceId: string, documentId: string): string =>
     `${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/file`,
 
-  locate: (workspaceId: string, documentId: string, chunkId: string): Promise<ChunkLocation> =>
-    request(`/workspaces/${workspaceId}/documents/${documentId}/chunks/${chunkId}/locate`),
+  // `text` narrows the highlight to one cited sentence instead of the whole chunk (BUG-17).
+  locate: (workspaceId: string, documentId: string, chunkId: string, text?: string): Promise<ChunkLocation> =>
+    request(`/workspaces/${workspaceId}/documents/${documentId}/chunks/${chunkId}/locate${buildQuery({ text })}`),
 };
 
 // ─── Query API ──────────────────────────────────────────────────────────────
@@ -757,8 +760,12 @@ export const collectionApi = {
 
 // ─── Investigation API ──────────────────────────────────────────────────────
 export const investigationApi = {
-  run: (workspaceId: string, data: InvestigationRequest): Promise<InvestigationResponse> =>
+  // Starts a background run (202); follow it with `progress` (BUG-10).
+  run: (workspaceId: string, data: InvestigationRequest): Promise<InvestigationStartResponse> =>
     request(`/workspaces/${workspaceId}/investigate`, { method: 'POST', body: JSON.stringify(data) }),
+
+  progress: (workspaceId: string, investigationId: string): Promise<InvestigationProgressResponse> =>
+    request(`/workspaces/${workspaceId}/investigations/${investigationId}/progress`),
 
   list: (workspaceId: string, params?: { page?: number; page_size?: number }): Promise<PaginatedResponse<InvestigationSummary>> =>
     request(`/workspaces/${workspaceId}/investigations${buildQuery(params as Record<string, unknown> | undefined)}`),
